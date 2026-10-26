@@ -23,12 +23,15 @@ export function InviteAccept() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Pre-fill email from invite data
+  // Pre-fill email from invite data and adjust mode if user already exists
   useEffect(() => {
     if (inviteInfo?.email && !email) {
       setEmail(inviteInfo.email);
     }
-  }, [inviteInfo?.email, email]);
+    if (inviteInfo?.userExists) {
+      setMode('signin');
+    }
+  }, [inviteInfo?.email, inviteInfo?.userExists, email]);
 
   const handleCopyToken = () => {
     if (token) {
@@ -200,6 +203,12 @@ export function InviteAccept() {
 
   // User already authenticated
   if (me) {
+    const isEmailMismatch = Boolean(
+      me.user?.email &&
+        inviteInfo.email &&
+        me.user.email.trim().toLowerCase() !== inviteInfo.email.trim().toLowerCase(),
+    );
+
     return (
       <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
         <div className="w-full max-w-md border border-[var(--line)] chamfer-lg bg-[var(--surface)] p-8 space-y-6">
@@ -231,6 +240,18 @@ export function InviteAccept() {
             </div>
           </div>
 
+          {isEmailMismatch && (
+            <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)] space-y-1">
+              <div className="font-semibold text-[var(--danger)]">Account Mismatch</div>
+              <p className="text-[var(--muted)]">
+                You are signed in as <strong className="text-[var(--text)]">{me.user?.email}</strong>, but this invitation was sent to <strong className="text-[var(--text)]">{inviteInfo.email}</strong>.
+              </p>
+              <p className="text-[var(--muted)]">
+                Please sign out below to accept this invitation using the invited account.
+              </p>
+            </div>
+          )}
+
           {actionError && (
             <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)]">
               {actionError}
@@ -238,14 +259,16 @@ export function InviteAccept() {
           )}
 
           <div className="space-y-3 pt-2">
-            <Button
-              variant="primary"
-              onClick={handleAcceptLoggedIn}
-              disabled={loading}
-              className="w-full py-2.5 px-4 text-sm font-medium min-h-[44px]"
-            >
-              {loading ? 'Joining workspace…' : `Accept & Join ${inviteInfo.workspaceName}`}
-            </Button>
+            {!isEmailMismatch ? (
+              <Button
+                variant="primary"
+                onClick={handleAcceptLoggedIn}
+                disabled={loading}
+                className="w-full py-2.5 px-4 text-sm font-medium min-h-[44px]"
+              >
+                {loading ? 'Joining workspace…' : `Accept & Join ${inviteInfo.workspaceName}`}
+              </Button>
+            ) : null}
 
             <button
               type="button"
@@ -315,35 +338,44 @@ export function InviteAccept() {
           </div>
         </div>
 
-        {/* Tab Toggle: Create Account vs Sign In */}
-        <SegmentedControl
-          value={mode}
-          onValueChange={(v) => {
-            setMode(v as 'signup' | 'signin');
-            setActionError(null);
-          }}
-          options={[
-            {
-              value: 'signup',
-              label: (
-                <span className="inline-flex items-center gap-1.5">
-                  <UserPlus className="w-3.5 h-3.5" />
-                  Create Account
-                </span>
-              ),
-            },
-            {
-              value: 'signin',
-              label: (
-                <span className="inline-flex items-center gap-1.5">
-                  <LogIn className="w-3.5 h-3.5" />
-                  Sign In
-                </span>
-              ),
-            },
-          ]}
-          fullWidth
-        />
+        {/* If user already exists, show direct login instructions; otherwise show tab toggle */}
+        {inviteInfo.userExists ? (
+          <div className="p-3 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--accent)] space-y-1">
+            <div className="font-semibold text-xs text-[var(--text)]">Account Detected</div>
+            <p className="text-xs text-[var(--muted)]">
+              An account with <strong className="text-[var(--text)]">{inviteInfo.email}</strong> already exists. Please log in with your password to join <strong className="text-[var(--text)]">{inviteInfo.workspaceName}</strong>.
+            </p>
+          </div>
+        ) : (
+          <SegmentedControl
+            value={mode}
+            onValueChange={(v) => {
+              setMode(v as 'signup' | 'signin');
+              setActionError(null);
+            }}
+            options={[
+              {
+                value: 'signup',
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5" />
+                    Create Account
+                  </span>
+                ),
+              },
+              {
+                value: 'signin',
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    <LogIn className="w-3.5 h-3.5" />
+                    Sign In
+                  </span>
+                ),
+              },
+            ]}
+            fullWidth
+          />
+        )}
 
         {actionError && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)]">
@@ -351,7 +383,7 @@ export function InviteAccept() {
           </div>
         )}
 
-        {mode === 'signup' ? (
+        {mode === 'signup' && !inviteInfo.userExists ? (
           <form onSubmit={handleSignUpAndJoin} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-[var(--text)] mb-1">Full Name</label>
@@ -438,7 +470,7 @@ export function InviteAccept() {
         <div className="pt-2 text-center border-t border-[var(--hair)]">
           <Link
             to="/login"
-            search={{ inviteToken: token, email: inviteInfo.email, mode: 'signup' }}
+            search={{ inviteToken: token, email: inviteInfo.email, mode: inviteInfo.userExists ? 'signin' : 'signup' }}
             className="inline-flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px]"
           >
             Prefer standard login page? Open here <ArrowRight className="w-3 h-3" />

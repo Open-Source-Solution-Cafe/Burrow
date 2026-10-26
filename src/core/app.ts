@@ -1304,6 +1304,7 @@ export function createCoreApp(infra: Infrastructure) {
       role: info.role,
       workspaceName: info.workspaceName,
       expiresAt: info.expiresAt,
+      userExists: info.userExists,
     });
   });
 

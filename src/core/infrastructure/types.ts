@@ -267,6 +267,10 @@ export interface IMemberRepository {
   deleteSessions(userId: string): Promise<void>;
   listOwners(workspaceId: string): Promise<Member[]>;
   clearCache?(userId?: string): void;
+  /**
+   * Checks whether a user account exists for the given email address (case-insensitive).
+   */
+  userExists(email: string): Promise<boolean>;
 }
 
 export interface IInviteRepository {

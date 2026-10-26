@@ -176,4 +176,14 @@ export class PostgresMemberRepository implements IMemberRepository {
       .from(members)
       .where(and(eq(members.workspaceId, workspaceId), eq(members.role, 'owner')));
   }
+
+  async userExists(email: string): Promise<boolean> {
+    const normalized = email.trim().toLowerCase();
+    const [row] = await this.db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(sql`lower(${user.email})`, normalized))
+      .limit(1);
+    return Boolean(row);
+  }
 }

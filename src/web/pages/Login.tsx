@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check } from 'lucide-react';
+import { toast } from 'sonner';
 import { useMe } from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -18,7 +19,9 @@ export function Login() {
   const queryEmail = searchParams?.get('email') || '';
   const queryMode = searchParams?.get('mode');
 
-  const [isSignUp, setIsSignUp] = useState(() => queryMode === 'signup' || !!queryInviteToken);
+  const [isSignUp, setIsSignUp] = useState(() =>
+    queryMode ? queryMode === 'signup' : !queryInviteToken,
+  );
   const [email, setEmail] = useState(() => queryEmail);
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -66,11 +69,19 @@ export function Login() {
       // If user signed in (not signed up) and there was an invite token, accept it
       const effectiveInviteToken = queryInviteToken || inviteToken.trim();
       if (!isSignUp && effectiveInviteToken) {
-        await fetch('/api/invites/accept', {
+        const acceptRes = await fetch('/api/invites/accept', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: effectiveInviteToken }),
-        }).catch(() => {});
+        });
+        if (!acceptRes.ok) {
+          const data = (await acceptRes.json().catch(() => ({}))) as {
+            error?: { message?: string };
+          };
+          toast.error(data.error?.message || 'Signed in, but failed to accept invite');
+        } else {
+          toast.success('Accepted invitation and joined workspace');
+        }
       }
 
       // Successfully signed in / up; clear query cache and navigate to root

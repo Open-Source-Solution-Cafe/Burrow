@@ -180,6 +180,16 @@ export function createMemberRepository(db: DB): IMemberRepository {
         .where(and(eq(t.members.workspaceId, workspaceId), eq(t.members.role, 'owner')));
       return rows.map(mapMember);
     },
+
+    async userExists(email: string): Promise<boolean> {
+      const normalized = email.trim().toLowerCase();
+      const [row] = await db
+        .select({ id: t.user.id })
+        .from(t.user)
+        .where(eq(sql`lower(${t.user.email})`, normalized))
+        .limit(1);
+      return Boolean(row);
+    },
   };
 }
 

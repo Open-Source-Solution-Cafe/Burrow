@@ -46,7 +46,7 @@ export function createInviteRepository(db: DB): IInviteRepository {
         .update(t.invites)
         .set({ acceptedAt: now })
         .where(and(eq(t.invites.id, id), isNull(t.invites.acceptedAt)));
-      return (res.meta?.changes ?? 0) > 0;
+      return ((res as any)?.meta?.changes ?? (res as any)?.changes ?? 0) > 0;
     },
 
     async delete(id: string, workspaceId: string): Promise<void> {

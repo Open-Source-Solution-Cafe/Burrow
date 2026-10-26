@@ -46,6 +46,7 @@ export default defineConfig({
             'tests/adapters/notepad.contract.test.ts',
             'tests/adapters/storage.contract.test.ts',
             'tests/adapters/d1-limits.contract.test.ts',
+            'tests/adapters/invite.contract.test.ts',
           ],
           setupFiles: ['./tests/api/setup.ts'],
         },

@@ -56,7 +56,7 @@ export class InviteService {
     return this.repos.invites.listPending(workspaceId);
   }
 
-  async getInviteInfo(token: string): Promise<Invite & { workspaceName: string }> {
+  async getInviteInfo(token: string): Promise<Invite & { workspaceName: string; userExists: boolean }> {
     const tokenHash = await hashToken(token);
     const invite = await this.repos.invites.findByTokenHash(tokenHash);
     if (!invite) throw notFound('invalid_invite', 'Invalid or expired invite');
@@ -73,7 +73,10 @@ export class InviteService {
     const workspace = await this.repos.workspaces.findById(invite.workspaceId);
     const workspaceName = workspace?.name ?? 'Workspace';
 
-    return { ...invite, workspaceName };
+    // Check if the invited email belongs to an existing user account
+    const userExists = await this.repos.members.userExists(invite.email);
+
+    return { ...invite, workspaceName, userExists };
   }
 
   async deleteInvite(workspaceId: string, inviteId: string): Promise<void> {

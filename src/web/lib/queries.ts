@@ -232,6 +232,7 @@ export function useInviteInfo(token: string | undefined) {
         role?: 'editor' | 'viewer';
         workspaceName?: string;
         expiresAt?: number;
+        userExists?: boolean;
         error?: { message?: string };
       };
       if (!res.ok) {
@@ -244,6 +245,7 @@ export function useInviteInfo(token: string | undefined) {
         role: 'editor' | 'viewer';
         workspaceName: string;
         expiresAt: number;
+        userExists: boolean;
       };
     },
     enabled: !!token,
