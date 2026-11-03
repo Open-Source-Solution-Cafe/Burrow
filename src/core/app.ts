@@ -3,7 +3,7 @@ import { MAX_UPLOAD_BYTES } from '../shared/uploadPolicy';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Infrastructure } from './infrastructure/types';
-import { securityHeaders, bodyLimit } from './middleware/security';
+import { securityHeaders, bodyLimit, csrfProtection } from './middleware/security';
 import {
   createIdentityMiddleware,
   createExplicitWorkspaceMiddleware,
@@ -101,6 +101,7 @@ export function createCoreApp(infra: Infrastructure) {
     memberService: members,
     invites,
     email: emailProvider,
+    appUrl: infra.appUrl,
   });
   const projectResourceRoutes = createProjectResourceRoutes({
     repositories,
@@ -125,11 +126,11 @@ export function createCoreApp(infra: Infrastructure) {
   });
 
   const signUpSchema = z.object({
-    email: z.string().email(),
-    password: z.string().min(8),
-    name: z.string().min(1),
-    bootstrapToken: z.string().optional(),
-    inviteToken: z.string().optional(),
+    email: z.string().email().max(254),
+    password: z.string().min(8).max(128),
+    name: z.string().min(1).max(100),
+    bootstrapToken: z.string().max(256).optional(),
+    inviteToken: z.string().max(256).optional(),
   });
   const inviteTokenSchema = z.object({ token: z.string().min(1) });
 
@@ -145,6 +146,7 @@ export function createCoreApp(infra: Infrastructure) {
         }
         return bodyLimit()(c, next);
       })
+      .use('/api/*', csrfProtection)
       .use('/api/*', createIdentityMiddleware(auth))
       .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
 
@@ -288,6 +290,9 @@ export function createCoreApp(infra: Infrastructure) {
 
         const authRes = await auth.handler(forwardReq);
         if (!authRes.ok) {
+          if (isFirstWorkspace) {
+            await repositories.workspaces.releaseBootstrap?.(body.email.trim().toLowerCase());
+          }
           return authRes;
         }
 
@@ -372,9 +377,7 @@ export function createCoreApp(infra: Infrastructure) {
           req.method !== 'HEAD' &&
           contentType.includes('application/json')
         ) {
-          const cloned = req.clone();
-          const text = await cloned.text();
-          if (!text || text.trim() === '') {
+          if (req.headers.get('content-length') === '0') {
             const headers = new Headers(req.headers);
             const fixedReq = new Request(req.url, {
               method: req.method,
@@ -384,7 +387,20 @@ export function createCoreApp(infra: Infrastructure) {
             } as RequestInit);
             res = await auth.handler(fixedReq);
           } else {
-            res = await auth.handler(req);
+            const cloned = req.clone();
+            const text = await cloned.text();
+            if (!text || text.trim() === '') {
+              const headers = new Headers(req.headers);
+              const fixedReq = new Request(req.url, {
+                method: req.method,
+                headers,
+                body: JSON.stringify({}),
+                duplex: 'half',
+              } as RequestInit);
+              res = await auth.handler(fixedReq);
+            } else {
+              res = await auth.handler(req);
+            }
           }
         } else {
           res = await auth.handler(req);

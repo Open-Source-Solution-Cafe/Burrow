@@ -91,7 +91,7 @@ export function DocumentOutline({
 
     const elements: HTMLElement[] = [];
     for (const heading of headings) {
-      const el = root.querySelector<HTMLElement>(`[data-id="${heading.id}"]`);
+      const el = root.querySelector<HTMLElement>('[data-id="' + CSS.escape(heading.id) + '"]');
       if (el) elements.push(el);
     }
     if (elements.length === 0) return;
@@ -119,7 +119,7 @@ export function DocumentOutline({
 
   const scrollTo = (heading: HeadingEntry) => {
     const root = containerRef.current;
-    const el = root?.querySelector<HTMLElement>(`[data-id="${heading.id}"]`);
+    const el = root?.querySelector<HTMLElement>('[data-id="' + CSS.escape(heading.id) + '"]');
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setActiveId(heading.id);

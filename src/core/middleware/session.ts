@@ -61,7 +61,8 @@ export const createExplicitWorkspaceMiddleware = (members: IMemberRepository) =>
 export function requireRole(minRole: Role) {
   return createMiddleware(async (c, next) => {
     const role = c.get('role') as Role | undefined;
-    if (!role || ROLE_RANK[role] < ROLE_RANK[minRole]) {
+    const userRank = role ? ROLE_RANK[role] : undefined;
+    if (userRank === undefined || userRank < ROLE_RANK[minRole]) {
       return c.json({ error: { code: 'forbidden', message: 'Insufficient permissions' } }, 403);
     }
     await next();

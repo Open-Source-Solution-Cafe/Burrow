@@ -30,6 +30,7 @@ export function createWorkspaceRoutes(args: {
   memberService: MemberService;
   invites: InviteService;
   email: IEmailProvider;
+  appUrl?: string;
 }) {
   const { workspaces, members, memberService, invites } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
@@ -46,13 +47,18 @@ export function createWorkspaceRoutes(args: {
     const identity = c.get('identity');
     if (!identity) return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
     const { name, requestId } = c.req.valid('json');
+    const userPrefix = `${identity.userId.slice(0, 8)}-`;
+    const workspaceId =
+      requestId.startsWith(userPrefix) || requestId.startsWith('workspace-')
+        ? requestId
+        : `${userPrefix}${requestId}`;
     // The stable client key becomes the workspace ID so a retried POST replays the same plan.
     const plan = createWorkspacePlan({
       userId: identity.userId,
       name,
-      workspaceId: requestId,
-      projectId: `${requestId}-project`,
-      notepadId: `${requestId}-welcome`,
+      workspaceId,
+      projectId: `${workspaceId}-project`,
+      notepadId: `${workspaceId}-welcome`,
       now: Date.now(),
     });
     const workspace = await workspaces.create(plan);
@@ -116,7 +122,8 @@ export function createWorkspaceRoutes(args: {
     const userId = c.get('userId');
     const { email, role } = c.req.valid('json');
     const result = await invites.createInvite(workspaceId, userId, email, role);
-    const inviteUrl = `${new URL(c.req.url).origin}/invite/${result.token}`;
+    const baseOrigin = args.appUrl ? new URL(args.appUrl).origin : new URL(c.req.url).origin;
+    const inviteUrl = `${baseOrigin}/invite/${result.token}`;
     const sendPromise = (async () => {
       const [workspace, inviter] = await Promise.all([
         workspaces.findById(workspaceId),

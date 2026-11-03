@@ -67,6 +67,7 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     auth,
     email,
     bootstrapToken: env.BOOTSTRAP_TOKEN,
+    appUrl: env.BETTER_AUTH_URL,
   };
 }
 

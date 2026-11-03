@@ -20,6 +20,19 @@ export function createAuthProvider(
   adapter: Parameters<typeof drizzleAdapter>[1],
   env: AuthEnv,
 ): AuthProvider {
+  const isProd =
+    (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') ||
+    (!env.BETTER_AUTH_URL?.includes('localhost') && !env.BETTER_AUTH_URL?.includes('127.0.0.1'));
+  if (
+    isProd &&
+    (!env.BETTER_AUTH_SECRET ||
+      env.BETTER_AUTH_SECRET.length < 32 ||
+      env.BETTER_AUTH_SECRET === 'dev-secret-change-me-32-bytes-minimum!!' ||
+      env.BETTER_AUTH_SECRET === 'local-dev-secret-change-me')
+  ) {
+    throw new Error('BETTER_AUTH_SECRET must be at least 32 characters in production');
+  }
+
   const trustedOrigins = new Set<string>();
   if (env.BETTER_AUTH_URL) {
     try {
@@ -41,6 +54,15 @@ export function createAuthProvider(
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL || 'http://localhost:3005',
     trustedOrigins: [...trustedOrigins],
+    rateLimit: {
+      enabled: true,
+      window: 60,
+      max: 100,
+      customRules: {
+        '/sign-up/*': { window: 60, max: 100 },
+        '/sign-in/*': { window: 60, max: 100 },
+      },
+    },
     emailAndPassword: { enabled: true },
     socialProviders: {
       github: oauth(config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET),

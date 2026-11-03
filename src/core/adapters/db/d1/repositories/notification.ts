@@ -30,7 +30,14 @@ export function createNotificationRepository(db: DB): INotificationRepository {
         })
         .from(t.notifications)
         .innerJoin(t.user, eq(t.user.id, t.notifications.actorId))
-        .leftJoin(t.notepads, eq(t.notepads.id, t.notifications.notepadId))
+        .leftJoin(
+          t.notepads,
+          and(
+            eq(t.notepads.id, t.notifications.notepadId),
+            eq(t.notepads.workspaceId, workspaceId),
+            isNull(t.notepads.deletedAt),
+          ),
+        )
         .where(
           and(
             eq(t.notifications.userId, userId),
@@ -48,8 +55,21 @@ export function createNotificationRepository(db: DB): INotificationRepository {
           const cardRows = await db
             .select({ cardId: t.cards.id, title: t.notepads.title })
             .from(t.cards)
-            .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-            .where(inArray(t.cards.id, chunk));
+            .innerJoin(
+              t.notepads,
+              and(
+                eq(t.notepads.id, t.cards.notepadId),
+                eq(t.notepads.workspaceId, workspaceId),
+                isNull(t.notepads.deletedAt),
+              ),
+            )
+            .where(
+              and(
+                eq(t.notepads.workspaceId, workspaceId),
+                isNull(t.notepads.deletedAt),
+                inArray(t.cards.id, chunk),
+              ),
+            );
           for (const cr of cardRows) {
             cardTitles.set(cr.cardId, cr.title);
           }

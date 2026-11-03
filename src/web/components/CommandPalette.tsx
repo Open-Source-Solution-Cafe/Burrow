@@ -19,6 +19,17 @@ import { SegmentedControl } from './ui/SegmentedControl';
 const ITEM_CLASSES =
   'flex flex-col gap-0.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]';
 
+function renderHighlightedSnippet(snippet: string) {
+  const parts = snippet.split(/(<mark>[\s\S]*?<\/mark>)/g);
+  return parts.map((part, index) => {
+    const match = /^<mark>([\s\S]*?)<\/mark>$/i.exec(part);
+    if (match) {
+      return <mark key={index}>{match[1]}</mark>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -184,10 +195,9 @@ export function CommandPalette() {
                         </span>
                       </div>
                       {item.snippet && (
-                        <div
-                          className="text-[11px] text-[var(--muted)] pl-6 line-clamp-1"
-                          dangerouslySetInnerHTML={{ __html: item.snippet }}
-                        />
+                        <div className="text-[11px] text-[var(--muted)] pl-6 line-clamp-1">
+                          {renderHighlightedSnippet(item.snippet)}
+                        </div>
                       )}
                     </Command.Item>
                   ))}

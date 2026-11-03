@@ -98,6 +98,7 @@ export async function createPostgresInfrastructure(config: ServerConfig): Promis
     auth,
     email,
     bootstrapToken: config.BOOTSTRAP_TOKEN,
+    appUrl: config.BETTER_AUTH_URL,
   };
 }
 

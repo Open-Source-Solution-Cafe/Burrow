@@ -46,15 +46,16 @@ export function createProjectFileRoutes(args: {
   const sendFile = async (key: string, contentType: string) => {
     const object = await storage.get(key);
     if (!object) throw httpError(404, 'not_found', 'File not found');
+    const resolvedType = object.contentType || contentType || 'application/octet-stream';
     const headers = new Headers({
-      'Content-Type': object.contentType || contentType || 'application/octet-stream',
+      'Content-Type': resolvedType,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "sandbox; default-src 'none'",
     });
-    if ((object.contentType || contentType) === 'image/svg+xml') {
-      headers.set('Content-Security-Policy', 'sandbox');
+    if (!/^(image\/(?!svg\+xml)|audio\/|video\/)/.test(resolvedType)) {
+      headers.set('Content-Disposition', 'attachment');
     }
-    if (!/^(image|audio|video)\//.test(contentType)) headers.set('Content-Disposition', 'attachment');
     return new Response(object.body as any, { headers });
   };
 

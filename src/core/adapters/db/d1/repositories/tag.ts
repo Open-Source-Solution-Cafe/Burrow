@@ -1,6 +1,7 @@
 import type { DB } from '../client';
 import * as t from '../schema';
 import { and, asc, eq, exists, inArray, sql } from 'drizzle-orm';
+import { chunkInList } from '../../../../services/utils/chunk';
 import type {
   ITagRepository,
   Tag,
@@ -78,16 +79,20 @@ export function createTagRepository(db: DB): ITagRepository {
 
     async validateByProject(scope: ProjectScope, tagIds: string[]): Promise<{ id: string }[]> {
       if (tagIds.length === 0) return [];
-      const rows = await db
-        .select({ id: t.tags.id })
-        .from(t.tags)
-        .innerJoin(t.projects, eq(t.projects.id, t.tags.projectId))
-        .where(and(
-          eq(t.tags.projectId, scope.projectId),
-          eq(t.projects.workspaceId, scope.workspaceId),
-          inArray(t.tags.id, tagIds),
-        ));
-      return rows;
+      const results: { id: string }[] = [];
+      for (const chunk of chunkInList(tagIds, 1)) {
+        const rows = await db
+          .select({ id: t.tags.id })
+          .from(t.tags)
+          .innerJoin(t.projects, eq(t.projects.id, t.tags.projectId))
+          .where(and(
+            eq(t.tags.projectId, scope.projectId),
+            eq(t.projects.workspaceId, scope.workspaceId),
+            inArray(t.tags.id, chunk),
+          ));
+        results.push(...rows);
+      }
+      return results;
     },
 
     async findByPattern(

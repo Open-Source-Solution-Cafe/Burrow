@@ -849,5 +849,91 @@ describe('Security Contract Suite', () => {
       expect(config1.BOOTSTRAP_TOKEN).not.toBe(config2.BOOTSTRAP_TOKEN);
       expect(config1.BOOTSTRAP_TOKEN).not.toBe(config3.BOOTSTRAP_TOKEN);
     });
+
+    it('throws in production when BETTER_AUTH_URL is missing, invalid, or points to localhost', () => {
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+        }),
+      ).toThrow(/BETTER_AUTH_URL/);
+
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+          BETTER_AUTH_URL: 'not-a-valid-url',
+        }),
+      ).toThrow(/BETTER_AUTH_URL/);
+    });
+  });
+
+  describe('CSRF, Security Headers & Input Limits', () => {
+    it('blocks mutating cross-site requests via Sec-Fetch-Site (CSRF protection)', async () => {
+      const res = await app.request(
+        'http://localhost/api/workspaces',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Cookie: ws1OwnerCookie,
+            'Sec-Fetch-Site': 'cross-site',
+          },
+          body: JSON.stringify({ name: 'CSRF Workspace', requestId: 'req-csrf-12345678' }),
+        },
+        env,
+      );
+      expect(res.status).toBe(403);
+      const data = (await res.json()) as { error?: { message?: string } };
+      expect(data.error?.message).toMatch(/cross-site/i);
+    });
+
+    it('blocks mutating requests when Origin host mismatches request host (CSRF protection)', async () => {
+      const res = await app.request(
+        'http://localhost/api/workspaces',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Cookie: ws1OwnerCookie,
+            Origin: 'https://malicious-site.example.com',
+          },
+          body: JSON.stringify({ name: 'Origin Workspace', requestId: 'req-origin-12345678' }),
+        },
+        env,
+      );
+      expect(res.status).toBe(403);
+      const data = (await res.json()) as { error?: { message?: string } };
+      expect(data.error?.message).toMatch(/cross-site/i);
+    });
+
+    it('enforces Strict-Transport-Security and other security headers on responses', async () => {
+      const res = await app.request('http://localhost/api/health', {}, env);
+      expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=31536000; includeSubDomains');
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    });
+
+    it('rejects sign-up with password longer than 128 characters (prevent DoS)', async () => {
+      const longPassword = 'A'.repeat(129);
+      const res = await app.request(
+        'http://localhost/api/auth/sign-up/email',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: 'huge-password@example.com',
+            password: longPassword,
+            name: 'Huge Password',
+            bootstrapToken,
+          }),
+        },
+        env,
+      );
+      expect(res.status).toBe(400);
+    });
   });
 });

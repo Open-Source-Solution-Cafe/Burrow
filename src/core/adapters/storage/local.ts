@@ -9,9 +9,9 @@ function inferContentType(key: string): string | undefined {
   const ext = key.slice(dotIndex + 1).toLowerCase();
   const mimeMap: Record<string, string> = {
     txt: 'text/plain',
-    html: 'text/html',
-    css: 'text/css',
-    js: 'application/javascript',
+    html: 'text/plain',
+    css: 'text/plain',
+    js: 'text/plain',
     json: 'application/json',
     png: 'image/png',
     jpg: 'image/jpeg',

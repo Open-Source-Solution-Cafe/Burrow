@@ -24,25 +24,43 @@ const SIZES: Record<NonNullable<AvatarProps['size']>, string> = {
 };
 
 export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
-  ({ className, name, src, size = 'sm', title, ...props }, ref) => (
-    <div
-      ref={ref}
-      title={title ?? name}
-      aria-label={name}
-      className={cn(
-        'clip-hex inline-flex shrink-0 items-center justify-center bg-[var(--hi)] font-bold text-[var(--hi-ink)]',
-        SIZES[size],
-        className,
-      )}
-      {...props}
-    >
-      {src ? (
-        <img src={src} alt={name} className="h-full w-full object-cover" loading="lazy" />
-      ) : (
-        <span aria-hidden="true">{initials(name)}</span>
-      )}
-    </div>
-  ),
+  ({ className, name, src, size = 'sm', title, ...props }, ref) => {
+    const [hasError, setHasError] = React.useState(false);
+
+    React.useEffect(() => {
+      setHasError(false);
+    }, [src]);
+
+    const isUnsafe = Boolean(src && src.trim().toLowerCase().startsWith('javascript:'));
+    const showImage = Boolean(src && !isUnsafe && !hasError);
+
+    return (
+      <div
+        ref={ref}
+        title={title ?? name}
+        aria-label={name}
+        className={cn(
+          'clip-hex inline-flex shrink-0 items-center justify-center bg-[var(--hi)] font-bold text-[var(--hi-ink)]',
+          SIZES[size],
+          className,
+        )}
+        {...props}
+      >
+        {showImage ? (
+          <img
+            src={src!}
+            alt={name}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setHasError(true)}
+          />
+        ) : (
+          <span aria-hidden="true">{initials(name)}</span>
+        )}
+      </div>
+    );
+  },
 );
 Avatar.displayName = 'Avatar';
 

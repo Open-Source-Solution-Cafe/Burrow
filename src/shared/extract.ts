@@ -71,8 +71,10 @@ function addLink(state: WalkState, targetType: LinkTargetType, targetId: string)
   state.links.set(`${targetType}:${targetId}`, { targetType, targetId });
 }
 
-function walkInline(content: unknown, state: WalkState) {
-  if (!Array.isArray(content)) return;
+const MAX_DEPTH = 32;
+
+function walkInline(content: unknown, state: WalkState, depth = 0) {
+  if (depth > MAX_DEPTH || !Array.isArray(content)) return;
   for (const item of content) {
     if (typeof item === 'string') {
       state.text.push(item);
@@ -105,14 +107,15 @@ function walkInline(content: unknown, state: WalkState) {
       continue;
     }
     // Inline containers (e.g. link-styled runs) nest content arrays.
-    if (Array.isArray(item.content)) walkInline(item.content, state);
+    if (Array.isArray(item.content)) walkInline(item.content, state, depth + 1);
   }
 }
 
-function walkBlocks(blocks: unknown[], state: WalkState) {
+function walkBlocks(blocks: unknown[], state: WalkState, depth = 0) {
+  if (depth > MAX_DEPTH || !Array.isArray(blocks)) return;
   for (const raw of blocks) {
     if (!isRecord(raw)) continue;
-    walkInline(raw.content, state);
+    walkInline(raw.content, state, depth + 1);
     if (raw.type === NOTEPAD_LINK_BLOCK) {
       const id = readLinkId(raw.props, 'notepadId');
       if (id) addLink(state, 'notepad', id);
@@ -123,7 +126,7 @@ function walkBlocks(blocks: unknown[], state: WalkState) {
       const id = readLinkId(raw.props, 'boardId');
       if (id) addLink(state, 'board', id);
     }
-    if (Array.isArray(raw.children)) walkBlocks(raw.children, state);
+    if (Array.isArray(raw.children)) walkBlocks(raw.children, state, depth + 1);
     state.text.push('\n');
   }
 }

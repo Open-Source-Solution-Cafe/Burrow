@@ -1,3 +1,5 @@
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import fs from 'node:fs';

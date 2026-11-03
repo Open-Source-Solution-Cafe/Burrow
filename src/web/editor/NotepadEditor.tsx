@@ -130,6 +130,80 @@ function isBlankDocument(doc: any[]): boolean {
   return !hasContent && !hasChildren;
 }
 
+function isSafeBlockUrl(url: string): boolean {
+  const trimmed = url.trim();
+  if (!trimmed) return true;
+  let lower = '';
+  for (let i = 0; i < trimmed.length; i++) {
+    const code = trimmed.charCodeAt(i);
+    if (code > 32) {
+      lower += trimmed[i]!.toLowerCase();
+    }
+  }
+  if (
+    lower.startsWith('javascript:') ||
+    lower.startsWith('vbscript:') ||
+    lower.startsWith('data:text/html') ||
+    lower.startsWith('data:text/javascript') ||
+    lower.startsWith('data:application/xhtml')
+  ) {
+    return false;
+  }
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//')) {
+    return true;
+  }
+  if (trimmed.startsWith('#')) {
+    return true;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const protocol = parsed.protocol.toLowerCase();
+    return (
+      protocol === 'http:' ||
+      protocol === 'https:' ||
+      protocol === 'mailto:' ||
+      (protocol === 'data:' && /^data:(image|audio|video)\//i.test(trimmed))
+    );
+  } catch {
+    return !trimmed.includes(':') && !trimmed.startsWith('//');
+  }
+}
+
+function sanitizeInlineContent(content: unknown[]): unknown[] {
+  return content.map((raw) => {
+    if (!raw || typeof raw !== 'object') return raw;
+    const item = { ...(raw as Record<string, unknown>) };
+    if (item.type === 'link' && typeof item.href === 'string' && !isSafeBlockUrl(item.href)) {
+      item.href = '#';
+    }
+    if (Array.isArray(item.content)) {
+      item.content = sanitizeInlineContent(item.content);
+    }
+    return item;
+  });
+}
+
+function sanitizeBlockContent(blocks: unknown[]): unknown[] {
+  return blocks.map((raw) => {
+    if (!raw || typeof raw !== 'object') return raw;
+    const block = { ...(raw as Record<string, unknown>) };
+    if (block.props && typeof block.props === 'object') {
+      const props = { ...(block.props as Record<string, unknown>) };
+      if (typeof props.url === 'string' && !isSafeBlockUrl(props.url)) {
+        props.url = '';
+      }
+      block.props = props;
+    }
+    if (Array.isArray(block.content)) {
+      block.content = sanitizeInlineContent(block.content);
+    }
+    if (Array.isArray(block.children)) {
+      block.children = sanitizeBlockContent(block.children);
+    }
+    return block;
+  });
+}
+
 function NotepadEditorInner({
   initialData,
   pendingData,
@@ -219,7 +293,7 @@ function NotepadEditorInner({
     try {
       const parsed = JSON.parse(initialData.content);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return sanitizeBlockContent(parsed) as any;
       }
     } catch (err) {
       console.warn('Failed to parse initial notepad content', err);

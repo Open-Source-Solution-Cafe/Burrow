@@ -47,6 +47,7 @@ export interface Infrastructure {
   auth: AuthProvider;
   email: IEmailProvider;
   bootstrapToken: string;
+  appUrl?: string;
 }
 
 /** Explicit project boundary for repository traversal and resource relationships. */
@@ -72,6 +73,7 @@ export interface IWorkspaceRepository {
   /** Rename only when the actor is still an owner in this workspace. */
   rename(workspaceId: string, actorUserId: string, name: string): Promise<boolean>;
   count(): Promise<number>;
+  releaseBootstrap?(email: string): Promise<boolean>;
 }
 
 export interface WorkspaceMembership {

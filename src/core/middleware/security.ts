@@ -16,6 +16,7 @@ export const securityHeaders = createMiddleware(async (c, next) => {
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('X-Frame-Options', 'DENY');
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 });
 
 /**
@@ -25,17 +26,56 @@ export const securityHeaders = createMiddleware(async (c, next) => {
 export function bodyLimit(maxBytes = DEFAULT_MAX_BODY_BYTES) {
   return createMiddleware(async (c, next) => {
     const contentLength = c.req.header('content-length');
-    if (contentLength && parseInt(contentLength, 10) > maxBytes) {
-      return c.json(
-        {
-          error: {
-            code: 'payload_too_large',
-            message: `Request body exceeds limit of ${maxBytes} bytes`,
+    if (contentLength) {
+      const len = Number.parseInt(contentLength, 10);
+      if (!Number.isNaN(len) && len > maxBytes) {
+        return c.json(
+          {
+            error: {
+              code: 'payload_too_large',
+              message: `Request body exceeds limit of ${maxBytes} bytes`,
+            },
           },
-        },
-        413,
-      );
+          413,
+        );
+      }
     }
     await next();
   });
 }
+
+/**
+ * CSRF protection middleware against cross-site request forgery.
+ * Blocks cross-site requests using Sec-Fetch-Site and Origin verification.
+ */
+export const csrfProtection = createMiddleware(async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH' && method !== 'DELETE') {
+    return next();
+  }
+
+  const path = c.req.path;
+  if (path.startsWith('/api/auth/') || path === '/api/auth') {
+    return next();
+  }
+
+  const secFetchSite = c.req.header('sec-fetch-site');
+  if (secFetchSite === 'cross-site') {
+    return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);
+  }
+
+  const origin = c.req.header('origin');
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host;
+      const requestHost = new URL(c.req.url).host;
+      if (originHost !== requestHost) {
+        return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);
+      }
+    } catch {
+      return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);
+    }
+  }
+
+  await next();
+});

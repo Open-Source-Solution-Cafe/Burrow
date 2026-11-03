@@ -370,11 +370,15 @@ export function createCardRepository(db: DB): ICardRepository {
 
     async validateAssignees(workspaceId: string, userIds: string[]): Promise<{ userId: string }[]> {
       if (userIds.length === 0) return [];
-      const rows = await db
-        .select({ userId: t.members.userId })
-        .from(t.members)
-        .where(and(eq(t.members.workspaceId, workspaceId), inArray(t.members.userId, userIds)));
-      return rows;
+      const results: { userId: string }[] = [];
+      for (const chunk of chunkInList(userIds, 1)) {
+        const rows = await db
+          .select({ userId: t.members.userId })
+          .from(t.members)
+          .where(and(eq(t.members.workspaceId, workspaceId), inArray(t.members.userId, chunk)));
+        results.push(...rows);
+      }
+      return results;
     },
 
     // Tags

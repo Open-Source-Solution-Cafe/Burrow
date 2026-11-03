@@ -285,20 +285,22 @@ export function createNotepadRepository(db: DB): INotepadRepository {
 
       const descendants = await getDescendantIds(db, id);
       const allIds = [id, ...descendants];
-      const foreignChildren = await db
-        .select({ id: t.notepads.id })
-        .from(t.notepads)
-        .where(
-          and(
-            inArray(t.notepads.parentId, allIds),
-            or(
-              ne(t.notepads.projectId, notepad.projectId),
-              ne(t.notepads.workspaceId, notepad.workspaceId),
+      for (const chunk of chunkInList(allIds, 2)) {
+        const foreignChildren = await db
+          .select({ id: t.notepads.id })
+          .from(t.notepads)
+          .where(
+            and(
+              inArray(t.notepads.parentId, chunk),
+              or(
+                ne(t.notepads.projectId, notepad.projectId),
+                ne(t.notepads.workspaceId, notepad.workspaceId),
+              ),
             ),
-          ),
-        );
-      if (foreignChildren.length > 0) {
-        throw new Error('tree_scope_conflict');
+          );
+        if (foreignChildren.length > 0) {
+          throw new Error('tree_scope_conflict');
+        }
       }
 
       const allRows: { id: string; coverKey: string | null }[] = [];
@@ -582,8 +584,15 @@ export function createNotepadRepository(db: DB): INotepadRepository {
       const [note] = await db.select({ id: t.notepads.id }).from(t.notepads).where(and(eq(t.notepads.id, notepadId), eq(t.notepads.workspaceId, scope.workspaceId), eq(t.notepads.projectId, scope.projectId), isNull(t.notepads.deletedAt), writable(scope)));
       if (!note) return false;
       if (uniqueTagIds.length > 0) {
-        const valid = await db.select({ id: t.tags.id }).from(t.tags).where(and(eq(t.tags.projectId, scope.projectId), inArray(t.tags.id, uniqueTagIds)));
-        if (valid.length !== uniqueTagIds.length) return false;
+        let validCount = 0;
+        for (const chunk of chunkInList(uniqueTagIds, 1)) {
+          const valid = await db
+            .select({ id: t.tags.id })
+            .from(t.tags)
+            .where(and(eq(t.tags.projectId, scope.projectId), inArray(t.tags.id, chunk)));
+          validCount += valid.length;
+        }
+        if (validCount !== uniqueTagIds.length) return false;
       }
       const statements: BatchItem<'sqlite'>[] = [
         db.update(t.notepads).set({ updatedAt: t.notepads.updatedAt }).where(and(eq(t.notepads.id, notepadId), eq(t.notepads.workspaceId, scope.workspaceId), eq(t.notepads.projectId, scope.projectId), isNull(t.notepads.deletedAt), writable(scope))).returning({ id: t.notepads.id }),

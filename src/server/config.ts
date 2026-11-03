@@ -50,6 +50,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         'BOOTSTRAP_TOKEN must be set to a secure string of at least 16 characters in production',
       );
     }
+    if (!env.BETTER_AUTH_URL) {
+      throw new Error('BETTER_AUTH_URL must be set in production');
+    }
+    let parsedAuthUrl: URL;
+    try {
+      parsedAuthUrl = new URL(env.BETTER_AUTH_URL);
+    } catch {
+      throw new Error('BETTER_AUTH_URL must be a valid URL in production');
+    }
+    if (parsedAuthUrl.hostname === 'localhost' || parsedAuthUrl.hostname === '127.0.0.1') {
+      throw new Error('BETTER_AUTH_URL cannot point to localhost or 127.0.0.1 in production');
+    }
   }
 
   let bootstrapToken = env.BOOTSTRAP_TOKEN?.trim();

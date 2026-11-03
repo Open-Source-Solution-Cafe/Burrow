@@ -91,6 +91,17 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
       return rows.length > 0;
     },
 
+    async releaseBootstrap(email) {
+      const normalized = email.trim().toLowerCase();
+      if (!normalized) return false;
+      const rows = await db.all<{ id: number }>(sql`UPDATE bootstrap_state
+        SET status = 'empty', claim_email = NULL
+        WHERE id = 1 AND NOT EXISTS (SELECT 1 FROM workspaces)
+          AND status = 'claimed' AND claim_email = ${normalized}
+        RETURNING id`);
+      return rows.length > 0;
+    },
+
     async completeBootstrap(email, plan) {
       const normalized = email.trim().toLowerCase();
       const userId = plan.owner.userId;

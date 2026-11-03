@@ -11,7 +11,22 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: '127.0.0.1',
     port: 3005,
+    fs: {
+      deny: [
+        '.env',
+        '.env.*',
+        '.dev.vars',
+        '.dev.vars.*',
+        '*.local*',
+        '.secrets*',
+        'data/**',
+        'src/server/**',
+        'src/worker/**',
+        'scripts/**',
+      ],
+    },
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8787',
