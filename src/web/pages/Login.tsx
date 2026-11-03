@@ -41,11 +41,24 @@ export function Login() {
   const queryEmail = searchParams?.get('email') || '';
   const queryMode = searchParams?.get('mode');
 
+  const isDemoHost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'burrow.osscafe.com' ||
+      window.location.hostname === 'osscafe.com' ||
+      window.location.search.includes('demo=true'));
+
   const [isSignUp, setIsSignUp] = useState(() =>
-    queryMode ? queryMode === 'signup' : !queryInviteToken,
+    queryMode ? queryMode === 'signup' : Boolean(queryInviteToken),
   );
-  const [email, setEmail] = useState(() => queryEmail);
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(() => {
+    if (queryEmail) return queryEmail;
+    if (isDemoHost && !queryInviteToken) return 'demo@osscafe.com';
+    return '';
+  });
+  const [password, setPassword] = useState(() => {
+    if (isDemoHost && !queryInviteToken) return 'demopassword123';
+    return '';
+  });
   const [name, setName] = useState('');
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
@@ -207,6 +220,39 @@ export function Login() {
                 : 'Sign in to your workspace'}
           </p>
         </div>
+
+        {isDemoHost && !withoutWorkspace && (
+          <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--accent)] space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-[var(--text)] flex items-center gap-1.5">
+                <span>✨</span> Demo Credentials
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('demo@osscafe.com');
+                  setPassword('demopassword123');
+                  setIsSignUp(false);
+                  setError(null);
+                }}
+                className="text-[11px] font-medium text-[var(--accent)] hover:underline cursor-pointer"
+              >
+                Auto-fill
+              </button>
+            </div>
+            <div className="space-y-0.5 text-[var(--muted)] font-mono text-[11px]">
+              <div>
+                <span className="text-[var(--text)] font-sans">Email:</span> demo@osscafe.com
+              </div>
+              <div>
+                <span className="text-[var(--text)] font-sans">Password:</span> demopassword123
+              </div>
+            </div>
+            <p className="text-[10px] text-[var(--muted)]">
+              The demo database automatically wipes and resets every 2 hours.
+            </p>
+          </div>
+        )}
 
         {(error || accountError) && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)]">

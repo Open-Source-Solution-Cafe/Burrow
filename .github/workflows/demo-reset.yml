@@ -12,7 +12,7 @@ permissions:
 jobs:
   reset-demo:
     # Only run on the upstream demo repository if Cloudflare token is provided
-    if: github.repository == 'opensourcesolutioncafe/Burrow'
+    if: github.repository == 'opensourcesolutioncafe/Burrow' || github.repository == 'Open-Source-Solution-Cafe/Burrow'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

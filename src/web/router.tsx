@@ -20,6 +20,7 @@ import { ProjectMediaLibrary } from './components/media/ProjectMediaLibrary';
 import { MembersSettings } from './pages/MembersSettings';
 import { MyTasksView } from './pages/MyTasksView';
 import { SettingsView } from './pages/SettingsView';
+import { StatusDiamond } from './components/ui/StatusDiamond';
 import {
   accountProjectsQueryOptions,
   useAccount,
@@ -330,10 +331,43 @@ const inviteRoute = createRoute({
   component: InviteAccept,
 });
 
+function AuthenticatedShell() {
+  const navigate = useNavigate();
+  const { data: account, isLoading, isError } = useAccount();
+
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (!account) {
+      void navigate({ to: '/login' });
+    }
+  }, [account, isLoading, isError, navigate]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
+        <div className="flex flex-col items-center gap-2">
+          <StatusDiamond color="var(--accent)" size={11} className="animate-pulse" />
+          <span className="text-xs">Loading Burrow…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!account || isError) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
+        <span className="text-xs">Redirecting to sign in…</span>
+      </div>
+    );
+  }
+
+  return <AppShell />;
+}
+
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'shell',
-  component: AppShell,
+  component: AuthenticatedShell,
 });
 
 const homeRoute = createRoute({

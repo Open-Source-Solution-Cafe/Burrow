@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  argValue,
   bin,
   getWranglerConfigArgs,
   parseFirstJson,
@@ -16,6 +17,8 @@ import {
   step,
 } from './lib.mjs';
 
+const domain = argValue('--domain') || argValue('--domains');
+
 async function main() {
   printTargetBanner('Production Deploy', true);
 
@@ -23,7 +26,7 @@ async function main() {
   const configArgs = getWranglerConfigArgs({ required: true, purpose: 'deploying' });
 
   step('Check (typecheck, lint, tests)');
-  run(path.join(root, 'scripts', 'check.mjs'));
+  run(path.join(root, 'scripts', 'check.mjs'), ['--sqlite']);
 
   step('Build');
   run(bin('vite'), ['build']);
@@ -56,8 +59,12 @@ async function main() {
   });
 
   step('Deploy');
-  const deploy = run(bin('wrangler'), [...configArgs, 'deploy'], { capture: true });
-  const url = deploy.stdout.match(/https:\/\/[^\s]*workers\.dev[^\s]*/)?.[0];
+  const deployArgs = [...configArgs, 'deploy'];
+  if (domain) deployArgs.push('--domains', domain);
+  const deploy = run(bin('wrangler'), deployArgs, { capture: true });
+  const url = domain
+    ? `https://${domain}`
+    : deploy.stdout.match(/https:\/\/[^\s]*workers\.dev[^\s]*/)?.[0];
   if (url) console.log(`  deployed: ${url}`);
 
   step('Smoke test');
@@ -65,7 +72,7 @@ async function main() {
     const ok = await smoke(url);
     if (!ok) process.exit(1);
   } else {
-    console.warn('  no workers.dev URL found in output — skipping smoke test');
+    console.warn('  no deployed URL found in output — skipping smoke test');
   }
   console.log('\ndeploy complete');
 }
