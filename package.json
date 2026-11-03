@@ -20,6 +20,7 @@
     "setup": "node scripts/setup.mjs",
     "deploy": "node scripts/deploy.mjs",
     "reset": "node scripts/reset.mjs",
+    "demo:reset": "node scripts/demo-reset.mjs",
     "teardown": "node scripts/teardown.mjs",
     "seed": "node scripts/seed.mjs",
     "check": "node scripts/check.mjs",

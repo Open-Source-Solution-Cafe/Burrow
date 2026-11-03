@@ -32,6 +32,7 @@ const force = hasFlag('--force');
 
 const cleanSql = [
   'DELETE FROM notepads_fts;',
+  'DELETE FROM project_files;',
   'DELETE FROM card_subtasks;',
   'DELETE FROM card_comments;',
   'DELETE FROM card_assignees;',
@@ -52,6 +53,7 @@ const cleanSql = [
   'DELETE FROM account;',
   'DELETE FROM verification;',
   'DELETE FROM user;',
+  "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
 ].join(' ');
 
 async function main() {

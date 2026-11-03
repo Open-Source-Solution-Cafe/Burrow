@@ -18,16 +18,31 @@ Built with **Hono** as the core web framework. Currently optimized to run server
 
 ---
 
+## Live Demo
+
+A public interactive demo instance is hosted at **[burrow.osscafe.com](https://burrow.osscafe.com)**:
+
+- **Demo URL:** [https://burrow.osscafe.com](https://burrow.osscafe.com)
+- **Demo Account:** `demo@osscafe.com`
+- **Demo Password:** `demopassword123`
+- **Automated Reset:** The demo instance automatically wipes and re-seeds back to a clean interactive state **every 2 hours**.
+
+---
+
 ## Features
 
-- **Project Separation**: Workspaces contain separate projects with instant switching, scoped notepads, boards, tags, and full-text search.
+- **Multi-Workspace Isolation**: Accounts can create, own, and join multiple workspaces (`/w/:workspaceId/...`). Switch workspaces instantly from the top header switcher, rename workspaces, and invite members via email or shareable links.
+- **Role-Based Access Control**: Workspaces define distinct member permissions (`owner`, `editor`, and `viewer`). Mutating actions are restricted to editors and owners, with atomic safeguards preventing the sole owner from leaving without succession.
+- **Scoped Projects Hierarchy**: Workspaces contain separate projects (`/w/:workspaceId/p/:projectId`), with dedicated notepads, kanban boards, tags, project files, and full-text search strictly isolated to each project boundary.
+- **Dedicated Project Media Library**: Upload and manage project-scoped images (PNG, JPEG, WebP, GIF, SVG) with direct editor insertion, preview, and byte-deduplicating reuse, alongside safe YouTube embeds with interactive width sliders.
 - **Nested Notepads**: Block-based rich text editor powered by BlockNote, with emoji icons, covers, drag-and-drop tree reordering, and single-flight autosave with optimistic concurrency.
+- **Subtree Trashing & Grouped Restore**: Atomic notepad soft-delete and permanent delete across whole subtrees. Restoration uses deletion-operation IDs to ensure child notes deleted independently are never accidentally resurrected.
 - **Soft Edit Locks**: 60-second rolling locks with heartbeats on focus to prevent concurrent edit collisions, displaying read-only banners when occupied.
 - **Kanban Boards**: Drag-and-drop columns and cards, priority tags, assignees, natural language due dates (`chrono-node`), and card bodies that are notepads.
 - **Unified `/` Slash Menu**: Keyboard-driven slash menu available across notepads, card notes, and the Kanban smart quick-add input.
 - **Mentions (`@`) & Tags (`#`)**: Inline mention chips for workspace members, notepads, cards, and natural dates, with automatic in-app notifications and backlinks indexing.
 - **Smart Quick-Add**: Add cards with structured chips (`/notepad`, `/due`, `/priority`, `@assignee`, `#tag`) created atomically in single batch transactions.
-- **Organization & Search**: FTS5 full-text search with highlight snippets, Command Palette (`Cmd/Ctrl+K`), Tag filtering, and a Trash view with subtree restore and permanent delete.
+- **Workspace-Wide Aggregation**: FTS5 full-text search with highlight snippets, Command Palette (`Cmd/Ctrl+K`), My Tasks, and Notifications aggregate across all projects within the active workspace while clearly denoting their project context.
 - **Adapter-Driven Architecture**: Decoupled core business logic from platform runtimes. Pluggable adapters handle storage (R2/S3/local disk), search (SQLite FTS5/PostgreSQL tsvector), locks, and transactional email.
 
 ---
@@ -39,6 +54,16 @@ Burrow follows an adapter-driven (hexagonal) architecture where core business lo
 - **Cloudflare (Current Primary Target):** Production builds run natively on Cloudflare Workers, D1 (distributed SQLite), R2 (object storage), and Worker static assets for SPA delivery.
 - **Node.js & PostgreSQL (Groundwork Laid):** Concrete adapter implementations for PostgreSQL (`src/core/adapters/db/postgres/`) and filesystem/S3 storage already exist. The app factory (`createCoreApp`) compiles identically for Node (`src/server/index.ts`), paving the way for containerized Docker deployments.
 - **Pluggable Transactional Email:** Email sending is completely abstract (`IEmailProvider` in `src/core/adapters/email.ts`). It is wired for **Resend** by default (with a zero-config local console fallback), but swapping to Postmark, Amazon SES, SendGrid, or custom SMTP only requires writing a single adapter file—zero core app or route changes needed.
+
+### Workspace & Project Scoping Model
+
+Burrow organizes all application data into a strict hierarchy:
+`Account -> Workspace Membership -> Project -> Resources (Notepads, Boards, Cards, Files, Tags)`
+
+1. **Account Identity vs. Workspace Membership:** User accounts exist independently from individual workspaces. A user can own or join multiple workspaces with different roles (`owner`, `editor`, `viewer`). Zero-membership accounts can still join via invite or provision a new starter workspace.
+2. **Project Scoping:** Projects inherit their workspace's membership list. Within each project, notepads, kanban boards, tags, project media files, backlinks, and content references remain strictly isolated.
+3. **Cross-Project Views:** High-level overview tools (the global Command Palette `Cmd/Ctrl+K`, My Tasks, and Notifications) aggregate across all projects within the active workspace, with each result clearly badged with its target project name.
+4. **Project Media Library:** File uploads are tied to their parent project and persisted via Cloudflare R2 or local disk storage. The project library enables notepads and cards to reuse existing project assets without duplicating storage bytes.
 
 ---
 
@@ -282,6 +307,7 @@ TARGET: 💻 LOCAL (Miniflare SQLite)
 | `pnpm run dev:worker` | Starts Cloudflare Worker (`:8787`) alongside Vite (`:3005`) via `wrangler dev --persist-to ./data` | _(Local only)_                                                      |
 | `pnpm start`          | Runs compiled production Node server (`dist/server.mjs`) on `:3005`                                | —                                                                   |
 | `pnpm run reset`      | Resets `./data/burrow.db`, clears `./data/uploads`, applies migrations, rebuilds                   | Prompts `"RESET-PRODUCTION"`, then wipes remote D1                  |
+| `pnpm run demo:reset` | Resets & seeds local SQLite with demo user, boards, cards & notepads                               | Prompts `"RESET-DEMO"`, then wipes and seeds remote D1              |
 | `pnpm run teardown`   | Removes `./data` and `./dist` only                                                                 | Prompts `"TEARDOWN"`, then deletes Worker, D1, and R2               |
 | `pnpm run setup`      | Installs deps, migrates the configured local SQLite database, prints dev URLs & token              | Provisions remote D1/R2, deploys Worker, uploads secrets            |
 | `pnpm run deploy`     | —                                                                                                  | Checks, builds, records D1 Time Travel snapshot, migrates & deploys |
@@ -315,11 +341,13 @@ isolation work are tracked in [the durable checklist](docs/MULTI_WORKSPACE_PROGR
 
 ## Security Model
 
-- Session middleware automatically extracts user identity, workspace ID, and role (`owner`, `editor`, `viewer`).
-- All queries strictly enforce `workspace_id` isolation.
-- Mutating endpoints require `editor` or `owner` roles; viewers receive 403 on all mutating operations.
+- Multi-tenant workspace and project scoping enforced at all repository and routing boundaries.
+- Session middleware automatically extracts user identity, resolves active workspace membership, and verifies roles (`owner`, `editor`, `viewer`).
+- All data mutations strictly require `editor` or `owner` roles; viewers receive 403 on all mutating operations.
+- Owner departures require atomic succession (an owner cannot leave without promoting another owner).
+- Cross-project isolation: content references, embeds, backlinks, tags, and media are strictly locked to their parent project.
 - Invite tokens are stored only as SHA-256 hashes and expire after 7 days.
-- Content size is strictly validated and capped (1.5 MB limit per notepad), and D1 bound parameters are chunked under the 100-parameter threshold.
+- Content size is strictly validated and capped (1.5 MB limit per notepad, 5 MB per image), and D1 bound parameters are chunked under the 100-parameter threshold.
 
 ---
 

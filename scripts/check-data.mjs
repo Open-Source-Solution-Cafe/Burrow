@@ -38,7 +38,11 @@ let queryIndex = 0;
 for (const rs of resultSets) {
   queryIndex++;
   const rows = rs?.results ?? rs?.rows ?? [];
-  for (const row of rows) offenders.push(row);
+  for (const row of rows) {
+    if (row && typeof row === 'object' && ('invariant' in row || 'subject' in row)) {
+      offenders.push(row);
+    }
+  }
 }
 
 if (offenders.length > 0) {
