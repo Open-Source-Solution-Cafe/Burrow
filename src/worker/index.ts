@@ -1,6 +1,6 @@
 import { createCoreApp } from '../core/app';
 import { createD1Infrastructure } from '../core/adapters/db/d1';
-import { createDb } from './db/client';
+import { createDb } from '../core/adapters/db/d1/client';
 import type { Env } from './env';
 import type { Hono } from 'hono';
 import type { ExecutionContext } from 'hono';
@@ -40,4 +40,4 @@ export default {
 } satisfies ExportedHandler<Env['Bindings']>;
 
 // Re-export AppType for Hono RPC clients (web frontend)
-export type { AppType } from './types-app';
+export type { AppType } from '../core/app';

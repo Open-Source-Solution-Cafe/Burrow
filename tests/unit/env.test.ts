@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 import { loadEnv, parseEnvContent, readEnvFiles } from '../../src/server/env';
 
 describe('Canonical Env Loader (src/server/env.ts)', () => {
@@ -93,7 +94,7 @@ describe('Canonical Env Loader (src/server/env.ts)', () => {
   describe('loadEnv', () => {
     it('populates target env without overwriting existing vars by default', () => {
       const mockFiles: Record<string, string> = {
-        '/app/.env': 'EXISTING=new-val\nNEW_KEY=hello',
+        [path.resolve('/app', '.env')]: 'EXISTING=new-val\nNEW_KEY=hello',
       };
 
       const target: Record<string, string | undefined> = {
@@ -113,7 +114,7 @@ describe('Canonical Env Loader (src/server/env.ts)', () => {
 
     it('respects override: true flag', () => {
       const mockFiles: Record<string, string> = {
-        '/app/.env': 'EXISTING=new-val',
+        [path.resolve('/app', '.env')]: 'EXISTING=new-val',
       };
 
       const target: Record<string, string | undefined> = {
@@ -132,4 +133,3 @@ describe('Canonical Env Loader (src/server/env.ts)', () => {
     });
   });
 });
-

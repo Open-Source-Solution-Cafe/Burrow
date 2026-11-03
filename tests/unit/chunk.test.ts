@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { chunkByParamBudget, chunkInList } from '../../src/worker/lib/chunk';
+import { chunkByParamBudget, chunkInList } from '../../src/core/services/utils/chunk';
 
 describe('chunkByParamBudget', () => {
   it('returns a single chunk when under the budget', () => {

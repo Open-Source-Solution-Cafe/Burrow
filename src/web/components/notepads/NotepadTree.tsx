@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/core';
 import { useMoveNotepad, useNotepads } from '../../lib/queries';
 import type { NotepadNode } from '../../lib/queries';
+import { notepadTarget, projectTarget, projectApiPath } from '../../lib/workspaceRoutes';
 
 import {
   buildTreeStructure,
@@ -51,6 +52,7 @@ function RootList({ children }: { children: ReactNode }) {
 interface TreeRowProps {
   node: NotepadNode;
   depth: number;
+  workspaceId: string;
   projectId: string;
   childrenMap: Map<string, NotepadNode[]>;
   activeId: string | null;
@@ -65,6 +67,7 @@ interface TreeRowProps {
 function TreeRow({
   node,
   depth,
+  workspaceId,
   projectId,
   childrenMap,
   activeId,
@@ -114,8 +117,7 @@ function TreeRow({
         )}
 
         <Link
-          to="/p/$projectId/notepads/$notepadId"
-          params={{ projectId, notepadId: node.id }}
+          {...notepadTarget(workspaceId, projectId, node.id)}
           className="flex min-w-0 flex-1 items-center gap-1.5 pl-1 pr-2 py-1"
           onPointerDown={(e) => e.stopPropagation()}
         >
@@ -193,6 +195,7 @@ function TreeRow({
               key={child.id}
               node={child}
               depth={depth + 1}
+              workspaceId={workspaceId}
               projectId={projectId}
               childrenMap={childrenMap}
               activeId={activeId}
@@ -210,19 +213,17 @@ function TreeRow({
   );
 }
 
-export function NotepadTree({ projectId }: { projectId: string }) {
+export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const params = useParams({ strict: false }) as { notepadId?: string };
   const activeNotepadId = params.notepadId;
 
-  const { data: notepads = [] } = useNotepads(projectId);
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['notepads', projectId] });
+  const { data: notepads = [] } = useNotepads(workspaceId, projectId);
 
   const createNotepad = useMutation({
-    mutationFn: async ({ parentId, title }: { parentId?: string; title?: string }) => {
-      const res = await fetch(`/api/projects/${projectId}/notepads`, {
+    mutationFn: async ({ workspaceId, projectId, parentId, title }: { workspaceId: string; projectId: string; parentId?: string; title?: string }) => {
+      const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parentId, title }),
@@ -230,25 +231,25 @@ export function NotepadTree({ projectId }: { projectId: string }) {
       if (!res.ok) throw new Error('Failed to create notepad');
       return res.json();
     },
-    onSuccess: invalidate,
+    onSuccess: (_, vars) => queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] }),
     onError: (err: any) => {
       toast.error(err?.message || 'Failed to create notepad');
     },
   });
 
   const deleteNotepad = useMutation({
-    mutationFn: async (notepadId: string) => {
-      const res = await fetch(`/api/notepads/${notepadId}`, { method: 'DELETE' });
+    mutationFn: async ({ workspaceId, projectId, notepadId }: { workspaceId: string; projectId: string; notepadId: string }) => {
+      const res = await fetch(projectApiPath(workspaceId, projectId, `notepads/${notepadId}`), { method: 'DELETE' });
       // 404 means already deleted — treat as success, not an error
       if (res.status === 404) return { ok: true, deletedId: notepadId };
       if (!res.ok) throw new Error('Failed to delete notepad');
       return res.json();
     },
     retry: false,
-    onSuccess: (_, deletedId) => {
-      invalidate();
-      if (deletedId === activeNotepadId) {
-        navigate({ to: '/p/$projectId', params: { projectId } });
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] });
+      if (vars.notepadId === activeNotepadId) {
+        navigate(projectTarget(vars.workspaceId, vars.projectId));
       }
     },
     onError: (err: any) => {
@@ -256,7 +257,7 @@ export function NotepadTree({ projectId }: { projectId: string }) {
     },
   });
 
-  const moveNote = useMoveNotepad(projectId);
+  const moveNote = useMoveNotepad();
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [projection, setProjection] = useState<Projection | null>(null);
@@ -368,6 +369,8 @@ export function NotepadTree({ projectId }: { projectId: string }) {
     }
 
     moveNote.mutate({
+      workspaceId,
+      projectId,
       notepadId: drop.activeId,
       parentId: drop.parentId,
       afterId: drop.afterId,
@@ -384,7 +387,7 @@ export function NotepadTree({ projectId }: { projectId: string }) {
   const toggleExpand = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const createChild = (parentId: string) => {
-    createNotepad.mutate({ parentId, title: 'Untitled' });
+    createNotepad.mutate({ workspaceId, projectId, parentId, title: 'Untitled' });
     setExpanded((prev) => ({ ...prev, [parentId]: true }));
   };
 
@@ -410,6 +413,7 @@ export function NotepadTree({ projectId }: { projectId: string }) {
                 key={root.id}
                 node={root}
                 depth={0}
+            workspaceId={workspaceId}
                 projectId={projectId}
                 childrenMap={childrenMap}
                 activeId={activeNotepadId ?? null}
@@ -417,7 +421,7 @@ export function NotepadTree({ projectId }: { projectId: string }) {
                 projection={projection}
                 isDeleting={deleteNotepad.isPending}
                 onCreateChild={createChild}
-                onDelete={(id) => deleteNotepad.mutate(id)}
+                onDelete={(id) => deleteNotepad.mutate({ workspaceId, projectId, notepadId: id })}
                 onToggle={toggleExpand}
               />
             ))

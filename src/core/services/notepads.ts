@@ -4,23 +4,31 @@ import type {
   INotepadRepository,
   ITagRepository,
   Notepad,
+  NotepadContent,
   StoredLink,
+  EditLock,
+  ProjectScope,
 } from '../infrastructure/types';
-import { notFound, badRequest, conflict, payloadTooLarge } from './errors';
+import {
+  notFound,
+  forbidden,
+  badRequest,
+  conflict,
+  payloadTooLarge,
+  rethrowAmbiguousDeleteGroup,
+} from './errors';
+import {
+  MAX_NOTEPAD_DEPTH,
+  MAX_CONTENT_BYTES,
+  LOCK_TTL_MS,
+  contentByteLength,
+} from '../shared/limits';
 import { positionBetween } from './utils/ordering';
-import { chunkByParamBudget } from './utils/chunk';
-import { extractFromContent, extractPlainText, type ExtractedLink } from '../shared/extract';
-import { diffLinks } from '../shared/links';
+import { extractFromContent } from '../../shared/extract';
 import { getDescendantIds, getDepth, getSubtreeHeight, wouldCauseCycle } from '../shared/tree';
 import type { ILockAdapter } from '../adapters/lock';
-import type { IStorageAdapter } from '../adapters/storage/types';
 
-/** Root notepads are depth 1; reject anything deeper than 8. */
-export const MAX_NOTEPAD_DEPTH = 8;
-/** D1 rows are limited to ~2MB; reject oversized content with 413. */
-export const MAX_CONTENT_BYTES = 1_500_000;
-/** Rolling edit-lock window (ms). */
-export const LOCK_TTL_MS = 60_000;
+export { MAX_NOTEPAD_DEPTH, MAX_CONTENT_BYTES, LOCK_TTL_MS } from '../shared/limits';
 
 export interface CreateNotepadArgs {
   workspaceId: string;
@@ -28,6 +36,7 @@ export interface CreateNotepadArgs {
   parentId?: string | null;
   title?: string;
   createdBy: string;
+  actorUserId: string;
   position?: string;
 }
 
@@ -39,6 +48,8 @@ export interface CreatedNotepad {
 
 export interface MoveNotepadArgs {
   workspaceId: string;
+  projectId: string;
+  actorUserId: string;
   notepadId: string;
   parentId?: string | null;
   afterId?: string | null;
@@ -46,27 +57,34 @@ export interface MoveNotepadArgs {
 
 export interface SoftDeleteNotepadArgs {
   workspaceId: string;
+  projectId: string;
+  actorUserId: string;
   notepadId: string;
 }
 
 export interface RestoreNotepadArgs {
   workspaceId: string;
+  projectId: string;
+  actorUserId: string;
   notepadId: string;
 }
 
 export interface PermanentDeleteNotepadArgs {
   workspaceId: string;
+  projectId: string;
+  actorUserId: string;
   notepadId: string;
-  storage?: IStorageAdapter | null;
 }
 
 export interface SaveContentArgs {
+  workspaceId: string;
+  projectId: string;
   notepadId: string;
   content: string;
   baseVersion: number;
   actorId: string;
   clientId?: string;
-  notepad?: Notepad | { id: string; workspaceId: string; title: string; version: number };
+  notepad?: Omit<NotepadContent, 'content'>;
 }
 
 export interface SaveContentResult {
@@ -74,22 +92,13 @@ export interface SaveContentResult {
 }
 
 export interface PreparedSave {
-  row: { id: string; workspaceId: string; title: string; version: number };
+  row: Omit<NotepadContent, 'content'>;
   validLinks: StoredLink[];
   previousLinks: StoredLink[];
-}
-
-export interface SaveStatementArgs {
-  row: { id: string; workspaceId: string; title: string };
-  content: string;
-  baseVersion: number;
-  actorId: string;
-  validLinks: StoredLink[];
-  previousLinks: StoredLink[];
-  now: number;
 }
 
 export interface ClaimLockArgs {
+  workspaceId: string;
   notepadId: string;
   userId: string;
   clientId: string;
@@ -101,20 +110,37 @@ export class NotepadService {
     private readonly repos: {
       notepads: INotepadRepository;
       tags: ITagRepository;
-      members?: IMemberRepository;
+      members: IMemberRepository;
     },
     private readonly locks: ILockAdapter,
-    private readonly storage?: IStorageAdapter,
   ) {}
 
-  private async resolveHolderName(userId: string): Promise<string | null> {
-    if (!this.repos.members) return null;
-    try {
-      const member = await this.repos.members.findByUserIdGlobal(userId);
-      return member?.name ?? null;
-    } catch {
-      return null;
-    }
+  /** Only disclose lock-holder identity after verifying membership in the resource's workspace. */
+  async getLockHolder(workspaceId: string, userId: string, actorId: string) {
+    const member = await this.repos.members.findByUserId(workspaceId, userId);
+    return {
+      userId: member?.userId,
+      name: member?.name || 'Someone',
+      isMe: member?.userId === actorId,
+    };
+  }
+
+  private async lockedError(
+    workspaceId: string,
+    lock: Pick<EditLock, 'userId' | 'expiresAt'> | null,
+    actorId: string,
+  ) {
+    const holder = lock
+      ? await this.getLockHolder(workspaceId, lock.userId, actorId)
+      : { name: 'Someone', isMe: false };
+    return conflict(
+      'locked',
+      JSON.stringify({
+        code: 'locked',
+        holder,
+        expiresAt: lock?.expiresAt,
+      }),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -126,20 +152,20 @@ export class NotepadService {
 
     let position = args.position ?? null;
     if (args.parentId) {
-      const parent = await this.repos.notepads.findById(args.parentId);
+      const parent = await this.repos.notepads.findByIdInScope(args, args.parentId);
       if (!parent || parent.deletedAt !== null || parent.kind !== 'notepad') {
         throw notFound('not_found', 'Parent notepad not found');
       }
-      if (parent.workspaceId !== args.workspaceId || parent.projectId !== args.projectId) {
-        throw notFound('not_found', 'Parent notepad not found');
-      }
-      const parentDepth = await getDepth((id) => this.repos.notepads.getParent(id), parent.id);
+      const parentDepth = await getDepth(
+        (id) => this.repos.notepads.getParent(args, id),
+        parent.id,
+      );
       if (parentDepth + 1 > MAX_NOTEPAD_DEPTH) {
         throw badRequest('too_deep', `Notepads can nest at most ${MAX_NOTEPAD_DEPTH} deep`);
       }
-      if (!position) position = await this.repos.notepads.getLastChildPosition(parent.id);
+      if (!position) position = await this.repos.notepads.getLastChildPosition(args, parent.id);
     } else if (!position) {
-      position = await this.repos.notepads.getLastRootPosition(args.projectId);
+      position = await this.repos.notepads.getLastRootPosition(args);
     }
 
     // Ensure position is never null (fallback)
@@ -149,7 +175,7 @@ export class NotepadService {
     const now = Date.now();
     const title = args.title?.trim() || 'Untitled';
 
-    await this.repos.notepads.create({
+    const created = await this.repos.notepads.create({
       id,
       workspaceId: args.workspaceId,
       projectId: args.projectId,
@@ -163,10 +189,8 @@ export class NotepadService {
       createdBy: args.createdBy,
       createdAt: now,
       updatedAt: now,
-    });
-
-    // Insert FTS row for new notepad
-    await this.repos.notepads.insertFts(id, title, '');
+    }, { workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'editor' });
+    if (!created) throw forbidden('forbidden', 'Editor access changed while creating the notepad');
 
     return { id, position, version: 1 };
   }
@@ -175,10 +199,7 @@ export class NotepadService {
   // Move
   // ---------------------------------------------------------------------------
   async moveNotepad(args: MoveNotepadArgs): Promise<{ parentId: string | null; position: string }> {
-    const notepad = await this.repos.notepads.findByIdAndWorkspace(
-      args.notepadId,
-      args.workspaceId,
-    );
+    const notepad = await this.repos.notepads.findByIdInScope(args, args.notepadId);
     if (!notepad || notepad.deletedAt !== null) {
       throw notFound('not_found', 'Notepad not found');
     }
@@ -194,7 +215,10 @@ export class NotepadService {
       if (
         await wouldCauseCycle(
           (rootId) =>
-            getDescendantIds((parentIds) => this.repos.notepads.getChildren(parentIds), rootId),
+            getDescendantIds(
+              (parentIds) => this.repos.notepads.getChildren(notepad, parentIds),
+              rootId,
+            ),
           args.notepadId,
           targetParentId,
         )
@@ -202,19 +226,21 @@ export class NotepadService {
         throw badRequest('cycle_detected', 'Cannot move a notepad under its own descendant');
       }
 
-      const parent = await this.repos.notepads.findById(targetParentId);
+      const parent = await this.repos.notepads.findByIdInScope(notepad, targetParentId);
       if (
         !parent ||
-        parent.projectId !== notepad.projectId ||
         parent.deletedAt !== null ||
         parent.kind !== 'notepad'
       ) {
         throw notFound('not_found', 'Target parent not found');
       }
 
-      const parentDepth = await getDepth((id) => this.repos.notepads.getParent(id), parent.id);
+      const parentDepth = await getDepth(
+        (id) => this.repos.notepads.getParent(notepad, id),
+        parent.id,
+      );
       const subtreeHeight = await getSubtreeHeight(
-        (parentIds) => this.repos.notepads.getChildren(parentIds),
+        (parentIds) => this.repos.notepads.getChildren(notepad, parentIds),
         args.notepadId,
       );
       if (parentDepth + subtreeHeight > MAX_NOTEPAD_DEPTH) {
@@ -223,7 +249,10 @@ export class NotepadService {
     }
 
     // Calculate new position among target siblings
-    const siblings = await this.getSiblings(notepad.projectId, targetParentId);
+    const siblings = await this.getSiblings(
+      { workspaceId: args.workspaceId, projectId: args.projectId },
+      targetParentId,
+    );
     const otherSiblings = siblings.filter((s) => s.id !== args.notepadId);
 
     let newPosition: string;
@@ -239,15 +268,18 @@ export class NotepadService {
       newPosition = positionBetween(prev, next);
     }
 
-    await this.repos.notepads.move(args.notepadId, targetParentId, newPosition);
+    const moved = await this.repos.notepads.move(args.notepadId, targetParentId, newPosition, {
+      workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'editor',
+    });
+    if (!moved) throw forbidden('forbidden', 'Editor access changed while moving the notepad');
     return { parentId: targetParentId, position: newPosition };
   }
 
-  private async getSiblings(projectId: string, parentId: string | null): Promise<Notepad[]> {
+  private async getSiblings(scope: ProjectScope, parentId: string | null): Promise<Notepad[]> {
     // This is a simplified version - in reality we'd need a repository method
     // that filters by projectId, parentId, deletedAt, and kind
     // For now, we'll list all by project and filter in memory
-    const all = await this.repos.notepads.listByProject(projectId);
+    const all = await this.repos.notepads.listByProject(scope);
     return all.filter(
       (n) =>
         (parentId ? n.parentId === parentId : n.parentId === null) &&
@@ -260,9 +292,9 @@ export class NotepadService {
   // Soft Delete
   // ---------------------------------------------------------------------------
   async softDeleteNotepad(args: SoftDeleteNotepadArgs): Promise<void> {
-    const notepad = await this.repos.notepads.findByIdAndWorkspace(
+    const notepad = await this.repos.notepads.findByIdInScope(
+      { workspaceId: args.workspaceId, projectId: args.projectId },
       args.notepadId,
-      args.workspaceId,
     );
     if (!notepad || notepad.deletedAt !== null) {
       throw notFound('not_found', 'Notepad not found');
@@ -275,35 +307,21 @@ export class NotepadService {
       );
     }
 
-    const descendants = await getDescendantIds(
-      (parentIds) => this.repos.notepads.getChildren(parentIds),
-      args.notepadId,
-    );
-    const allIds = [args.notepadId, ...descendants];
     const now = Date.now();
-
-    // Set identical deleted_at timestamp on subtree and remove from FTS
-    for (const chunk of chunkByParamBudget(allIds, 1, 1)) {
-      for (const id of chunk) {
-        await this.repos.notepads.softDelete(id, now);
-      }
-    }
-
-    for (const chunk of chunkByParamBudget(allIds, 1, 0)) {
-      for (const id of chunk) {
-        await this.repos.notepads.deleteFts(id);
-        await this.repos.notepads.deleteLock(id);
-      }
-    }
+    // The repository owns the scoped subtree mutation and its index/lock cleanup.
+    const deleted = await this.repos.notepads.softDelete(args.notepadId, now, {
+      workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'editor',
+    });
+    if (!deleted) throw forbidden('forbidden', 'Editor access changed while deleting the notepad');
   }
 
   // ---------------------------------------------------------------------------
   // Restore
   // ---------------------------------------------------------------------------
   async restoreNotepad(args: RestoreNotepadArgs): Promise<void> {
-    const notepad = await this.repos.notepads.findByIdAndWorkspace(
+    const notepad = await this.repos.notepads.findByIdInScope(
+      { workspaceId: args.workspaceId, projectId: args.projectId },
       args.notepadId,
-      args.workspaceId,
     );
     if (!notepad || notepad.deletedAt === null) {
       throw notFound('not_found', 'Deleted notepad not found');
@@ -318,37 +336,29 @@ export class NotepadService {
 
     const deleteTimestamp = notepad.deletedAt!;
 
-    // Restore exactly the rows sharing this deletion timestamp
-    const matchingNotepads = await this.repos.notepads.restore(args.notepadId, deleteTimestamp);
-
-    // Check if restored root's parent is still deleted or missing
-    let newParentId = notepad.parentId;
-    let newPosition: string | null = null;
-    if (notepad.parentId) {
-      const parent = await this.repos.notepads.findById(notepad.parentId);
-      if (!parent || parent.deletedAt !== null) {
-        newParentId = null;
-        newPosition = await this.repos.notepads.getLastRootPosition(notepad.projectId);
-      }
+    // Restore exactly the rows sharing this deletion operation.
+    let matchingNotepads: Awaited<ReturnType<INotepadRepository['restore']>>;
+    try {
+      matchingNotepads = await this.repos.notepads.restore(args.notepadId, deleteTimestamp, {
+        workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'editor',
+      });
+    } catch (error) {
+      rethrowAmbiguousDeleteGroup(error);
+    }
+    if (matchingNotepads === null) throw forbidden('forbidden', 'Editor access changed while restoring the notepad');
+    if (!matchingNotepads.some((item) => item.id === args.notepadId)) {
+      throw conflict('deletion_changed', 'This item changed while it was being restored');
     }
 
-    if (newParentId !== notepad.parentId || newPosition) {
-      await this.repos.notepads.move(args.notepadId, newParentId, newPosition ?? notepad.position);
-    }
-
-    // Restore FTS entries
-    for (const item of matchingNotepads) {
-      await this.repos.notepads.insertFts(item.id, item.title, extractPlainText(item.content));
-    }
   }
 
   // ---------------------------------------------------------------------------
   // Permanent Delete
   // ---------------------------------------------------------------------------
   async permanentDeleteNotepad(args: PermanentDeleteNotepadArgs): Promise<void> {
-    const notepad = await this.repos.notepads.findByIdAndWorkspace(
+    const notepad = await this.repos.notepads.findByIdInScope(
+      { workspaceId: args.workspaceId, projectId: args.projectId },
       args.notepadId,
-      args.workspaceId,
     );
     if (!notepad) throw notFound('not_found', 'Notepad not found');
 
@@ -356,69 +366,28 @@ export class NotepadService {
       throw badRequest('not_in_trash', 'Only items in trash can be permanently deleted');
     }
 
-    const descendants = await getDescendantIds(
-      (parentIds) => this.repos.notepads.getChildren(parentIds),
-      args.notepadId,
-    );
-    const allIds = [args.notepadId, ...descendants];
-
-    // Collect cover keys for R2 cleanup
-    const allRows = await Promise.all(allIds.map((id) => this.repos.notepads.findById(id)));
-    const items = allRows
-      .filter((r): r is NonNullable<typeof r> => Boolean(r && r.coverKey))
-      .map((r) => ({ id: r.id, coverKey: r.coverKey! }));
-
-    // Hard delete (cascades via FK: notepadTags, notepadLinks, etc.)
-    for (const id of allIds) {
-      try {
-        const exists = await this.repos.notepads.findById(id);
-        if (exists) {
-          await this.repos.notepads.hardDelete(id);
-        }
-      } catch (err: any) {
-        if (!err?.message?.includes('not found')) throw err;
-      }
-    }
-
-    // Post-batch best-effort cleanup of R2 files
-    const storage = args.storage ?? this.storage;
-    if (storage && items.length > 0) {
-      try {
-        const id = args.notepadId;
-        const uniqueCoverKeys = Array.from(
-          new Set(items.map((i) => i.coverKey).filter((k): k is string => Boolean(k))),
-        );
-        await Promise.allSettled(
-          uniqueCoverKeys.map(async (k) => {
-            const count = await this.repos.notepads.countByCoverKey(k, id);
-            if (count === 0) {
-              await storage.delete(k);
-            }
-          }),
-        );
-      } catch (err) {
-        console.warn('R2 cleanup error after notepad deletion', err);
-      }
-    }
+    const removed = await this.repos.notepads.hardDelete(args.notepadId, {
+      workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'owner',
+    });
+    if (removed === null) throw forbidden('forbidden', 'Owner access changed while deleting the notepad');
   }
 
   // ---------------------------------------------------------------------------
   // Content Save
   // ---------------------------------------------------------------------------
-  async prepareSave(args: SaveContentArgs): Promise<PreparedSave> {
-    const row = args.notepad ?? (await this.repos.notepads.getContent(args.notepadId));
-    if (!row) throw notFound('not_found', 'Notepad not found');
-
+  private async prepareSave(
+    args: SaveContentArgs,
+    row: Omit<NotepadContent, 'content'>,
+  ): Promise<PreparedSave> {
     const extraction = extractFromContent(args.content);
-    const validLinks = this.repos.notepads.filterWorkspaceTargets
-      ? await this.repos.notepads.filterWorkspaceTargets(row.workspaceId, extraction.links as ExtractedLink[])
-      : await this.filterLinksFallback(row.workspaceId, extraction.links as ExtractedLink[]);
-    const previousLinks = await this.repos.notepads.listLinks(args.notepadId);
+    const validLinks = await this.repos.notepads.filterProjectTargets(row, extraction.links);
+    const previousLinks = await this.repos.notepads.listLinks(row, args.notepadId);
 
     return {
       row: {
         id: args.notepadId,
         workspaceId: row.workspaceId,
+        projectId: row.projectId,
         title: row.title,
         version: row.version,
       },
@@ -427,135 +396,65 @@ export class NotepadService {
     };
   }
 
-  private async filterLinksFallback(workspaceId: string, links: ExtractedLink[]): Promise<StoredLink[]> {
-    const validLinks: StoredLink[] = [];
-    for (const link of links) {
-      if (await this.repos.notepads.isValidLink(link, workspaceId)) {
-        validLinks.push(link);
-      }
-    }
-    return validLinks;
-  }
-
   async saveContent(args: SaveContentArgs): Promise<SaveContentResult> {
-    if (byteLength(args.content) > MAX_CONTENT_BYTES) {
+    if (contentByteLength(args.content) > MAX_CONTENT_BYTES) {
       throw payloadTooLarge('content_too_large', 'Notepad content exceeds 1.5 MB');
     }
 
-    // Check live edit lock
+    const scope = { workspaceId: args.workspaceId, projectId: args.projectId, now: Date.now() };
+    const row = args.notepad ?? (await this.repos.notepads.getContent(scope, args.notepadId));
+    if (!row || row.workspaceId !== args.workspaceId || row.projectId !== args.projectId) {
+      throw notFound('not_found', 'Notepad not found');
+    }
+    // Check live edit lock only after verifying the notepad's workspace.
     const now = Date.now();
-    const lock = await this.repos.notepads.getLock(args.notepadId);
+    const lock = await this.repos.notepads.getLock(scope, args.notepadId);
 
     if (
       lock &&
       lock.expiresAt > now &&
       (lock.userId !== args.actorId || lock.clientId !== args.clientId)
     ) {
-      const holderName = (await this.resolveHolderName(lock.userId)) || 'Someone';
-      throw conflict(
-        'locked',
-        JSON.stringify({
-          code: 'locked',
-          holder: {
-            userId: lock.userId,
-            name: holderName,
-            isMe: lock.userId === args.actorId,
-          },
-          expiresAt: lock.expiresAt,
-        }),
-      );
+      throw await this.lockedError(args.workspaceId, lock, args.actorId);
     }
 
-    const prepared = await this.prepareSave(args);
+    const prepared = await this.prepareSave(args, row);
     if (prepared.row.version !== args.baseVersion) {
       throw conflict('version_conflict', 'This notepad changed elsewhere');
     }
 
-    let newVersion: number;
-    if (this.repos.notepads.saveContentBatch) {
-      try {
-        newVersion = await this.repos.notepads.saveContentBatch({
-          row: prepared.row,
-          content: args.content,
-          baseVersion: args.baseVersion,
-          actorId: args.actorId,
-          validLinks: prepared.validLinks,
-          previousLinks: prepared.previousLinks,
-          now,
-          lock: args.clientId
-            ? {
-                clientId: args.clientId,
-                userId: args.actorId,
-                expiresAt: now + LOCK_TTL_MS,
-              }
-            : undefined,
-        });
-      } catch (err: any) {
-        if (err?.message === 'version_conflict') {
-          throw conflict('version_conflict', 'This notepad changed elsewhere');
-        }
-        throw err;
-      }
-    } else {
-      newVersion = await this.repos.notepads.saveContent(prepared.row.id, args.content, args.baseVersion);
-      await this.buildAndExecuteSaveStatements({
+    try {
+      const version = await this.repos.notepads.saveContentBatch({
         row: prepared.row,
+        scope: { workspaceId: args.workspaceId, projectId: row.projectId, actorUserId: args.actorId, minimumRole: 'editor' },
         content: args.content,
         baseVersion: args.baseVersion,
         actorId: args.actorId,
         validLinks: prepared.validLinks,
         previousLinks: prepared.previousLinks,
         now,
+        lock: args.clientId
+          ? { clientId: args.clientId, userId: args.actorId, expiresAt: now + LOCK_TTL_MS }
+          : undefined,
       });
-      if (args.clientId) {
-        await this.locks
-          .acquire(args.notepadId, args.actorId, args.clientId, LOCK_TTL_MS)
-          .catch(() => false);
+      return { version };
+    } catch (err) {
+      if (err instanceof Error && err.message === 'lock_conflict') {
+        throw await this.lockedError(
+          args.workspaceId,
+          await this.repos.notepads.getLock(scope, args.notepadId),
+          args.actorId,
+        );
       }
-    }
-
-    return { version: newVersion };
-  }
-
-  private async buildAndExecuteSaveStatements(args: SaveStatementArgs): Promise<void> {
-    const { row, content, baseVersion, actorId, validLinks, previousLinks, now } = args;
-    const newVersion = baseVersion + 1;
-    const plain = extractPlainText(content);
-    const { added, removed } = diffLinks(previousLinks, validLinks);
-
-    // In the core service, we build the statement args and delegate execution
-    // to the infrastructure layer (which has runBatch). For Phase 1, we'll
-    // call the repository methods directly which should handle batching internally.
-
-    // Update notepad content with version check
-    await this.repos.notepads.saveContent(row.id, content, baseVersion);
-
-    // Conditional FTS update
-    await this.repos.notepads.insertFtsConditional(row.id, row.title, plain, newVersion, content);
-
-    // Mentions
-    const addedUserIds = added.filter((l) => l.targetType === 'user').map((l) => l.targetId);
-    if (addedUserIds.length > 0) {
-      await this.repos.notepads.insertMentions({
-        workspaceId: row.workspaceId,
-        notepadId: row.id,
-        actorId,
-        addedUserIds,
-        version: newVersion,
-        content,
-        now,
-      });
-    }
-
-    // Link sync
-    if (removed.length > 0 || added.length > 0) {
-      await this.repos.notepads.replaceLinks(row.id, added, removed, newVersion, content);
+      if (err instanceof Error && err.message === 'version_conflict') {
+        throw conflict('version_conflict', 'This notepad changed elsewhere');
+      }
+      if (err instanceof Error && err.message === 'workspace_write_forbidden') {
+        throw forbidden('forbidden', 'Editor access changed while saving the notepad');
+      }
+      throw err;
     }
   }
-
-  // The buildSaveContentStatements is moved to infrastructure layer since it
-  // produces Drizzle-specific BatchItem[]. Services return statement args instead.
-  // If needed for atomicity spike, infrastructure can expose a similar function.
 
   // ---------------------------------------------------------------------------
   // Edit Locks
@@ -570,21 +469,12 @@ export class NotepadService {
     );
 
     if (!result.acquired) {
-      const holderName =
-        result.holderName ||
-        (result.holderUserId ? await this.resolveHolderName(result.holderUserId) : null) ||
-        'Someone';
-      throw conflict(
-        'locked',
-        JSON.stringify({
-          code: 'locked',
-          holder: {
-            userId: result.holderUserId,
-            name: holderName,
-            isMe: result.holderUserId === args.userId,
-          },
-          expiresAt: result.expiresAt,
-        }),
+      throw await this.lockedError(
+        args.workspaceId,
+        result.holderUserId && result.expiresAt !== undefined
+          ? { userId: result.holderUserId, expiresAt: result.expiresAt }
+          : null,
+        args.userId,
       );
     }
 
@@ -598,36 +488,34 @@ export class NotepadService {
   // ---------------------------------------------------------------------------
   // Tags
   // ---------------------------------------------------------------------------
-  async setNotepadTags(notepadId: string, tagIds: string[], workspaceId: string): Promise<void> {
-    const notepad = await this.repos.notepads.findByIdAndWorkspace(notepadId, workspaceId);
+  async setNotepadTags(notepadId: string, tagIds: string[], scope: ProjectScope, actorUserId: string): Promise<void> {
+    const notepad = await this.repos.notepads.findByIdInScope(scope, notepadId);
     if (!notepad) throw notFound('not_found', 'Notepad not found');
 
     // Invariant I9: Every tag must belong to the notepad's project
     const uniqueTagIds = [...new Set(tagIds)];
     if (uniqueTagIds.length > 0) {
       for (const tagId of uniqueTagIds) {
-        const tag = await this.repos.tags.findById(tagId);
-        if (!tag || tag.projectId !== notepad.projectId) {
+        const tag = await this.repos.tags.findByIdInScope(
+          scope,
+          tagId,
+        );
+        if (!tag) {
           throw badRequest('invalid_tags', 'All tags must belong to the notepad project');
         }
       }
     }
 
-    await this.repos.notepads.setTagIds(notepadId, uniqueTagIds);
+    const updated = await this.repos.notepads.setTagIds(notepadId, uniqueTagIds, {
+      workspaceId: scope.workspaceId, projectId: scope.projectId, actorUserId, minimumRole: 'editor',
+    });
+    if (!updated) throw forbidden('forbidden', 'Editor access changed while updating notepad tags');
   }
 
   // ---------------------------------------------------------------------------
   // Tree Queries
   // ---------------------------------------------------------------------------
-  async getTree(projectId: string): Promise<Notepad[]> {
-    return this.repos.notepads.listByProject(projectId);
+  async listByProject(scope: ProjectScope): Promise<Notepad[]> {
+    return this.repos.notepads.listByProject(scope);
   }
-
-  async listByProject(projectId: string): Promise<Notepad[]> {
-    return this.repos.notepads.listByProject(projectId);
-  }
-}
-
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
 }

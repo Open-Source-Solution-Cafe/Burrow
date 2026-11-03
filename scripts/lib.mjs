@@ -4,17 +4,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv as canonicalLoadEnv } from '../src/server/env.ts';
+import { selectDatabaseTarget } from '../src/server/database-target.ts';
+import { splitSqlStatements } from '../src/server/sql-statements.ts';
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * Resolves the bootstrap token for local development, setup, and click-through tests.
- * Returns env.BOOTSTRAP_TOKEN if non-empty and not 'dev-bootstrap-token', or generates
- * a secure random 32-character hex token.
+ * Never uses hardcoded or predictable default tokens ('dev-bootstrap-token', 'test-bootstrap-token').
+ * If a custom token (>= 16 characters) is not explicitly provided, generates a unique,
+ * cryptographically secure 32-character hex token.
  */
 export function getBootstrapToken(env = process.env) {
   const token = env.BOOTSTRAP_TOKEN?.trim();
-  return token && token !== 'dev-bootstrap-token' ? token : crypto.randomBytes(16).toString('hex');
+  const knownPlaceholders = new Set(['dev-bootstrap-token', 'test-bootstrap-token']);
+  return token && !knownPlaceholders.has(token) && token.length >= 16
+    ? token
+    : crypto.randomBytes(16).toString('hex');
 }
 
 /** Resolve a dependency's executable path without relying on PATH/shell shims. */
@@ -43,18 +49,105 @@ export function hasFlag(flag) {
 
 /** Check if the command was invoked with any remote flag: --remote, --r, or -r. */
 export function isRemoteTarget() {
-  const isRemote = hasFlag('--remote') || hasFlag('--r') || hasFlag('-r');
-  const isLocal = hasFlag('--local') || hasFlag('--l') || hasFlag('-l');
-  if (isRemote && isLocal) {
-    console.error('❌ ERROR: Cannot specify both --remote and --local target flags.');
-    process.exit(1);
+  return selectDatabaseTarget(process.argv.slice(2), {}, root).kind === 'remote';
+}
+
+export function getDatabaseTarget() {
+  loadEnv();
+  return selectDatabaseTarget(process.argv.slice(2), process.env, root);
+}
+
+function d1TargetArgs(target) {
+  return target.kind === 'remote'
+    ? [
+        ...getWranglerConfigArgs({ required: true, purpose: 'remote database operation' }),
+        '--remote',
+      ]
+    : ['--local', '--persist-to', target.persistTo];
+}
+
+export async function migrateDatabase(
+  target,
+  { dryRun = false, configArgs, databaseName = 'burrow' } = {},
+) {
+  if (target.kind === 'node') {
+    if (dryRun) {
+      console.log(`  [dry-run] Migrate SQLite ${target.sqlitePath}`);
+      return;
+    }
+    const { openSqliteDatabase } = await import('../src/server/sqlite.ts');
+    openSqliteDatabase(target.sqlitePath, path.join(root, 'migrations')).close();
+    return;
   }
-  return isRemote;
+  const targetArgs =
+    target.kind === 'remote' && configArgs ? [...configArgs, '--remote'] : d1TargetArgs(target);
+  run(bin('wrangler'), ['d1', 'migrations', 'apply', databaseName, ...targetArgs], {
+    dryRun,
+    env: { CI: '1' },
+  });
+}
+
+/** Execute the canonical SQL file on the selected DB; invariant queries are semicolon-delimited. */
+export async function executeDatabaseFile(target, sqlFile, { readOnly = false } = {}) {
+  if (target.kind === 'postgres') {
+    if (!readOnly) throw new Error('PostgreSQL SQL-file execution is read-only');
+    const postgres = (await import('postgres')).default;
+    const client = postgres(target.url, { max: 1, connect_timeout: 10, onnotice: () => {} });
+    try {
+      const statements = splitSqlStatements(fs.readFileSync(sqlFile, 'utf8'));
+      return await client.begin(async (transaction) => {
+        await transaction.unsafe('SET TRANSACTION READ ONLY');
+        const resultSets = [];
+        for (const statement of statements) {
+          resultSets.push({ results: await transaction.unsafe(statement) });
+        }
+        return resultSets;
+      });
+    } finally {
+      await client.end();
+    }
+  }
+  if (target.kind === 'node') {
+    const { default: Database } = await import('better-sqlite3');
+    const sqlite = new Database(target.sqlitePath, { readonly: readOnly, fileMustExist: true });
+    try {
+      const source = fs.readFileSync(sqlFile, 'utf8');
+      if (readOnly) {
+        return splitSqlStatements(source).map((statement) => ({
+          results: sqlite.prepare(statement).all(),
+        }));
+      }
+      sqlite.pragma('foreign_keys = ON');
+      sqlite.transaction(() => sqlite.exec(source))();
+      return [];
+    } finally {
+      sqlite.close();
+    }
+  }
+  const res = run(
+    bin('wrangler'),
+    ['d1', 'execute', 'burrow', ...d1TargetArgs(target), '--file', sqlFile, '--json'],
+    { capture: true, quiet: true },
+  );
+  const parsed = parseFirstJson(res.stdout);
+  if (parsed === null) throw new Error('Could not parse d1 execute output');
+  return Array.isArray(parsed) ? parsed : [parsed];
 }
 
 /** Print a loud, prominent target banner at the start of a command. */
 export function printTargetBanner(action, isRemote) {
-  const target = isRemote ? '☁️  REMOTE (Cloudflare Production)' : '💻 LOCAL (SQLite ./data)';
+  const target =
+    typeof isRemote === 'object'
+      ? isRemote.kind === 'node'
+        ? `💻 LOCAL SQLite (${isRemote.sqlitePath})`
+        : isRemote.kind === 'worker'
+          ? `💻 LOCAL Worker/D1 (${isRemote.persistTo})`
+          : isRemote.kind === 'postgres'
+            ? `PostgreSQL (${new URL(isRemote.url).host}${new URL(isRemote.url).pathname})`
+            : '☁️  REMOTE (Cloudflare Production)'
+      : isRemote
+        ? '☁️  REMOTE (Cloudflare Production)'
+        : '💻 LOCAL (SQLite ./data)';
   console.log('======================================================');
   console.log(`ACTION: ${action.toUpperCase()}`);
   console.log(`TARGET: ${target}`);
@@ -92,7 +185,7 @@ export function run(cmd, args = [], opts = {}) {
     encoding: 'utf8',
     cwd,
     env: { ...process.env, ...env },
-    shell: process.platform === 'win32' && !isScript,
+    shell: process.platform === 'win32' && !isScript && !command.toLowerCase().endsWith('.exe'),
     maxBuffer: 64 * 1024 * 1024,
   });
   if (res.error) throw res.error;
@@ -113,9 +206,7 @@ export function step(title) {
 
 /** Parse a JSON string that may contain comments or trailing commas (JSONC). */
 export function parseJsonc(text) {
-  const cleaned = text
-    .replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '')
-    .replace(/,(\s*[}\]])/g, '$1');
+  const cleaned = text.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '').replace(/,(\s*[}\]])/g, '$1');
   return JSON.parse(cleaned);
 }
 

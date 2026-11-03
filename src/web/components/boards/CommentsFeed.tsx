@@ -4,7 +4,7 @@ import {
   useComments,
   useCreateComment,
   useDeleteComment,
-  useMe,
+  useAccount,
   useMembers,
   type CommentItem,
 } from '../../lib/queries';
@@ -13,6 +13,8 @@ import { Badge } from '../ui/Badge';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface CommentsFeedProps {
+  workspaceId: string;
+  projectId: string;
   cardId: string;
 }
 
@@ -95,10 +97,11 @@ function CommentRow({
   );
 }
 
-export function CommentsFeed({ cardId }: CommentsFeedProps) {
-  const { data: comments = [], isLoading } = useComments(cardId);
-  const { data: me } = useMe();
-  const { data: members = [] } = useMembers();
+export function CommentsFeed({ workspaceId, projectId, cardId }: CommentsFeedProps) {
+  const { data: comments = [], isLoading } = useComments(workspaceId, projectId, cardId);
+  const { data: account } = useAccount();
+  const role = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role;
+  const { data: members = [] } = useMembers(workspaceId);
   const createComment = useCreateComment();
   const deleteComment = useDeleteComment();
 
@@ -148,7 +151,7 @@ export function CommentsFeed({ cardId }: CommentsFeedProps) {
     const content = draft.trim();
     if (!content || createComment.isPending) return;
     createComment.mutate(
-      { cardId, content },
+      { workspaceId, projectId, cardId, content },
       {
         onSuccess: () => {
           setDraft('');
@@ -186,7 +189,7 @@ export function CommentsFeed({ cardId }: CommentsFeedProps) {
             <CommentRow
               key={comment.id}
               comment={comment}
-              canDelete={comment.userId === me?.user?.id || me?.role === 'owner'}
+              canDelete={comment.userId === account?.user.id || role === 'owner'}
               onDelete={() => setCommentToDelete(comment.id)}
             />
           ))}
@@ -250,7 +253,7 @@ export function CommentsFeed({ cardId }: CommentsFeedProps) {
           busy={deleteComment.isPending}
           onConfirm={async () => {
             try {
-              await deleteComment.mutateAsync({ cardId, commentId: commentToDelete });
+              await deleteComment.mutateAsync({ workspaceId, projectId, cardId, commentId: commentToDelete });
               setCommentToDelete(null);
             } catch {
               setCommentToDelete(null);

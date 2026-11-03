@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { createConsoleEmailProvider } from '../../src/core/adapters/db/d1/adapters/email/console';
-import { createResendEmailProvider } from '../../src/core/adapters/db/d1/adapters/email/resend';
-import { createEmailFromEnv } from '../../src/core/adapters/db/d1/adapters/email/factory';
+import { createConsoleEmailProvider } from '../../src/core/adapters/email/console';
+import { createResendEmailProvider } from '../../src/core/adapters/email/resend';
+import { createEmailFromEnv } from '../../src/core/adapters/email/factory';
 import { inviteEmail } from '../../src/core/services/email-templates';
 
 describe('Email integration', () => {

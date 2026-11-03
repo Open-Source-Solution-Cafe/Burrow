@@ -1,10 +1,12 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
+import { getAccountWorkspaceScope } from './account-scope';
 
 describe('Invites email integration end-to-end', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let ownerCookie = '';
+  let workspaceId = '';
 
   beforeAll(async () => {
     const baseApp = createWorkerApp(env);
@@ -24,6 +26,11 @@ describe('Invites email integration end-to-end', () => {
     );
     expect(signupRes.status).toBe(200);
     ownerCookie = signupRes.headers.get('set-cookie')!;
+    workspaceId = (await getAccountWorkspaceScope((path) => baseApp.request(
+      `http://localhost${path}`,
+      { headers: { Cookie: ownerCookie } },
+      env,
+    ))).workspaceId;
   });
 
   it('e2e without RESEND_API_KEY: invite creates successfully with console fallback', async () => {
@@ -33,7 +40,7 @@ describe('Invites email integration end-to-end', () => {
     });
 
     const res = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {
@@ -86,7 +93,7 @@ describe('Invites email integration end-to-end', () => {
       });
 
       const res = await app.request(
-        'http://localhost/api/invites',
+        `http://localhost/api/workspaces/${workspaceId}/invites`,
         {
           method: 'POST',
           headers: {
@@ -152,7 +159,7 @@ describe('Invites email integration end-to-end', () => {
       });
 
       const res = await app.request(
-        'http://localhost/api/invites',
+        `http://localhost/api/workspaces/${workspaceId}/invites`,
         {
           method: 'POST',
           headers: {

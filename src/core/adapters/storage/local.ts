@@ -108,6 +108,10 @@ export class LocalStorageAdapter implements IStorageAdapter {
     await this.pruneEmptyDirs(rootResolved);
   }
 
+  async listObjects(): Promise<string[]> {
+    return (await this.walk(this.root)).sort();
+  }
+
   private async walk(dir: string, base = ''): Promise<string[]> {
     let entries;
     try {

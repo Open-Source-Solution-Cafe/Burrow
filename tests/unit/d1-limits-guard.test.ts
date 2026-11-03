@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { wrapNodeDb } from '../../src/worker/db/client';
+import { wrapNodeDb } from '../../src/core/adapters/db/d1/client';
 import { runBatch } from '../../src/core/adapters/db/d1/lib/batch';
-import { D1_MAX_BOUND_PARAMS } from '../../src/core/adapters/db/d1/lib/chunk';
+import { D1_MAX_BOUND_PARAMS } from '../../src/core/services/utils/chunk';
 
 describe('Node DB wrapper D1 limit guards', () => {
   it('exports valid named constants matching Cloudflare D1 documentation', () => {

@@ -1,7 +1,7 @@
 import type { IInviteRepository, Invite, CreateInviteData } from '../../../../infrastructure/types';
 import { eq, and, isNull, gt } from 'drizzle-orm';
 import type { PostgresDb } from '../index';
-import { invites } from '../schema';
+import { invites, members, user } from '../schema';
 
 export class PostgresInviteRepository implements IInviteRepository {
   constructor(private db: PostgresDb) {}
@@ -36,13 +36,45 @@ export class PostgresInviteRepository implements IInviteRepository {
     return result[0];
   }
 
-  async accept(id: string): Promise<boolean> {
-    const res = await this.db
-      .update(invites)
-      .set({ acceptedAt: Date.now() })
-      .where(and(eq(invites.id, id), isNull(invites.acceptedAt)))
-      .returning({ id: invites.id });
-    return res.length > 0;
+  async acceptForUser(tokenHash: string, userId: string, now: number) {
+    return this.db.transaction(async (tx) => {
+      // Serialize invite acceptance per account, including different tokens.
+      const [account] = await tx.select().from(user).where(eq(user.id, userId)).for('update');
+      const [invite] = await tx
+        .select()
+        .from(invites)
+        .where(eq(invites.tokenHash, tokenHash))
+        .for('update');
+      if (
+        !account ||
+        !invite ||
+        invite.acceptedAt !== null ||
+        invite.expiresAt <= Math.max(now, Date.now()) ||
+        account.email.trim().toLowerCase() !== invite.email.trim().toLowerCase()
+      )
+        return null;
+
+      const existing = await tx
+        .select()
+        .from(members)
+        .where(and(eq(members.workspaceId, invite.workspaceId), eq(members.userId, userId)));
+      const member =
+        existing[0] ??
+        (
+          await tx
+            .insert(members)
+            .values({
+              workspaceId: invite.workspaceId,
+              userId,
+              role: invite.role,
+              joinedAt: now,
+            })
+            .returning()
+        )[0];
+      if (!member) throw new Error('Failed to create invite membership');
+      await tx.update(invites).set({ acceptedAt: now }).where(eq(invites.id, invite.id));
+      return { workspaceId: invite.workspaceId, role: member.role };
+    });
   }
 
   async delete(id: string, workspaceId: string): Promise<void> {

@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
 import { expectInvariantsHold } from './helpers';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const app = createWorkerApp(env);
 
@@ -14,9 +15,12 @@ type TreeNode = {
   isFavorite: boolean | number;
 };
 
-async function getTree(projectId: string, cookie: string): Promise<TreeNode[]> {
+const projectPath = (workspaceId: string, projectId: string, suffix: string) =>
+  `/api/workspaces/${workspaceId}/projects/${projectId}${suffix}`;
+
+async function getTree(workspaceId: string, projectId: string, cookie: string): Promise<TreeNode[]> {
   const res = await app.request(
-    `http://localhost/api/projects/${projectId}/notepads`,
+    `http://localhost${projectPath(workspaceId, projectId, '/notepads')}`,
     { headers: { Cookie: cookie } },
     env,
   );
@@ -28,6 +32,7 @@ async function getTree(projectId: string, cookie: string): Promise<TreeNode[]> {
 describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let ownerCookie = '';
+  let workspaceId = '';
   let projectId = '';
   let parentId = '';
   let childId = '';
@@ -50,17 +55,15 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
-      { headers: { Cookie: ownerCookie } },
-      env,
+    const scope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: ownerCookie } }, env),
     );
-    const me = (await meRes.json()) as { lastProjectId: string };
-    projectId = me.lastProjectId;
+    workspaceId = scope.workspaceId;
+    projectId = scope.projectId;
     expect(projectId).toBeDefined();
 
     const pRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -72,7 +75,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     parentId = ((await pRes.json()) as { id: string }).id;
 
     const cRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -83,7 +86,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     expect(cRes.status).toBe(201);
     childId = ((await cRes.json()) as { id: string }).id;
 
-    const tree = await getTree(projectId, ownerCookie);
+    const tree = await getTree(workspaceId, projectId, ownerCookie);
     const parent = tree.find((n) => n.id === parentId);
     const child = tree.find((n) => n.id === childId);
     expect(parent).toBeDefined();
@@ -102,20 +105,20 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
 
   it('excludes a soft-deleted child from the tree but keeps the parent', async () => {
     const delRes = await app.request(
-      `http://localhost/api/notepads/${childId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
     expect(delRes.status).toBe(200);
 
-    const tree = await getTree(projectId, ownerCookie);
+    const tree = await getTree(workspaceId, projectId, ownerCookie);
     expect(tree.find((n) => n.id === childId)).toBeUndefined();
     expect(tree.find((n) => n.id === parentId)).toBeDefined();
   });
 
   it('lists the deleted child in trash, restores it, and shows it in the tree again', async () => {
     const trashRes = await app.request(
-      `http://localhost/api/projects/${projectId}/trash`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/trash`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -124,13 +127,13 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     expect(trash.notepads.some((n) => n.id === childId)).toBe(true);
 
     const restoreRes = await app.request(
-      `http://localhost/api/notepads/${childId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
     expect(restoreRes.status).toBe(200);
 
-    const tree = await getTree(projectId, ownerCookie);
+    const tree = await getTree(workspaceId, projectId, ownerCookie);
     expect(tree.find((n) => n.id === childId)).toBeDefined();
     expect(tree.find((n) => n.id === parentId)).toBeDefined();
 
@@ -139,7 +142,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
 
   it('excludes card-kind notepads from the tree', async () => {
     const boardRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -151,7 +154,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     const board = (await boardRes.json()) as { id: string };
 
     const boardDetailRes = await app.request(
-      `http://localhost/api/boards/${board.id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${board.id}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -160,7 +163,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     const columnId = detail.columns[0]!.id;
 
     const cardRes = await app.request(
-      `http://localhost/api/columns/${columnId}/cards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/columns/${columnId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -177,7 +180,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     const cardNotepadId = card.notepadId ?? card.linkedNotepadId;
     expect(cardNotepadId).toBeDefined();
 
-    const tree = await getTree(projectId, ownerCookie);
+    const tree = await getTree(workspaceId, projectId, ownerCookie);
     expect(tree.find((n) => n.id === cardNotepadId)).toBeUndefined();
     // Regular notepads are still present
     expect(tree.find((n) => n.id === parentId)).toBeDefined();
@@ -189,7 +192,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
   it('reorders root notepads and moves child notepads', async () => {
     // Create a second root notepad
     const p2Res = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -201,7 +204,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     const parent2Id = ((await p2Res.json()) as { id: string }).id;
 
     // Initially, tree has parentId before parent2Id
-    let tree = await getTree(projectId, ownerCookie);
+    let tree = await getTree(workspaceId, projectId, ownerCookie);
     let roots = tree.filter((n) => n.parentId === null);
     expect(roots.findIndex((n) => n.id === parentId)).toBeLessThan(
       roots.findIndex((n) => n.id === parent2Id),
@@ -209,7 +212,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
 
     // Move parent2 to the beginning of roots (afterId: null, parentId: null)
     const moveRes1 = await app.request(
-      `http://localhost/api/notepads/${parent2Id}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parent2Id}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -219,14 +222,14 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     );
     expect(moveRes1.status).toBe(200);
 
-    tree = await getTree(projectId, ownerCookie);
+    tree = await getTree(workspaceId, projectId, ownerCookie);
     roots = tree.filter((n) => n.parentId === null);
     expect(roots[0]!.id).toBe(parent2Id);
     expect(roots[roots.length - 1]!.id).toBe(parentId);
 
     // Move childId out of parentId and into parent2Id
     const moveRes2 = await app.request(
-      `http://localhost/api/notepads/${childId}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childId}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -236,13 +239,13 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     );
     expect(moveRes2.status).toBe(200);
 
-    tree = await getTree(projectId, ownerCookie);
+    tree = await getTree(workspaceId, projectId, ownerCookie);
     const movedChild = tree.find((n) => n.id === childId);
     expect(movedChild?.parentId).toBe(parent2Id);
 
     // Move childId to root after parentId
     const moveRes3 = await app.request(
-      `http://localhost/api/notepads/${childId}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childId}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -252,7 +255,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     );
     expect(moveRes3.status).toBe(200);
 
-    tree = await getTree(projectId, ownerCookie);
+    tree = await getTree(workspaceId, projectId, ownerCookie);
     roots = tree.filter((n) => n.parentId === null);
     const parentIndex = roots.findIndex((r) => r.id === parentId);
     const childIndex = roots.findIndex((r) => r.id === childId);
@@ -260,7 +263,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
 
     // Star parentId and verify isFavorite persists across detail and tree endpoints
     const starRes = await app.request(
-      `http://localhost/api/notepads/${parentId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -271,7 +274,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     expect(starRes.status).toBe(200);
 
     const detailRes = await app.request(
-      `http://localhost/api/notepads/${parentId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -279,12 +282,12 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
     const detail = (await detailRes.json()) as { isFavorite: boolean };
     expect(Boolean(detail.isFavorite)).toBe(true);
 
-    tree = await getTree(projectId, ownerCookie);
+    tree = await getTree(workspaceId, projectId, ownerCookie);
     expect(Boolean(tree.find((n) => n.id === parentId)?.isFavorite)).toBe(true);
 
     // Unstar sets isFavorite back to false
     const unstarRes = await app.request(
-      `http://localhost/api/notepads/${parentId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -293,7 +296,7 @@ describe('Notepad tree excludes soft-deleted and card-kind notepads', () => {
       env,
     );
     expect(unstarRes.status).toBe(200);
-    tree = await getTree(projectId, ownerCookie);
+    tree = await getTree(workspaceId, projectId, ownerCookie);
     expect(Boolean(tree.find((n) => n.id === parentId)?.isFavorite)).toBe(false);
 
     await expectInvariantsHold(env.DB);

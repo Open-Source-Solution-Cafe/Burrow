@@ -3,6 +3,14 @@ import { Command } from 'cmdk';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { Home, Kanban, LogOut, Search, Settings, Trash2, Users } from 'lucide-react';
 import { useBoards, useProjects, useRecentNotepads, useSearch, useSignOut } from '../lib/queries';
+import {
+  boardTarget,
+  notepadTarget,
+  projectTarget,
+  trashTarget,
+  workspaceMembersTarget,
+  workspaceSettingsTarget,
+} from '../lib/workspaceRoutes';
 import { ModalShell } from './ui/ModalShell';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { toast } from 'sonner';
@@ -19,15 +27,21 @@ export function CommandPalette() {
   const signOutMutation = useSignOut();
 
   const navigate = useNavigate();
-  const { projectId } = useParams({ strict: false }) as { projectId?: string };
-  const { data: projects = [] } = useProjects();
-  const activeProject = projects.find((p) => p.id === projectId) || projects[0];
+  const { workspaceId, projectId } = useParams({ strict: false }) as {
+    workspaceId?: string;
+    projectId?: string;
+  };
+  const { data: projects = [], isLoading: projectsLoading, isError: projectsError } =
+    useProjects(workspaceId);
+  const activeProject =
+    projectId === undefined ? projects[0] : projects.find((p) => p.id === projectId);
   const currentProjectId = activeProject?.id;
 
-  const { data: recentNotepads = [] } = useRecentNotepads(currentProjectId);
-  const { data: boards = [] } = useBoards(currentProjectId);
+  const { data: recentNotepads = [] } = useRecentNotepads(workspaceId, currentProjectId);
+  const { data: boards = [] } = useBoards(workspaceId, currentProjectId);
   const { data: searchResults = [], isLoading: isSearching } = useSearch(
-    query,
+    scope === 'project' && !currentProjectId ? '' : query,
+    workspaceId,
     scope === 'project' ? currentProjectId : undefined,
     scope,
   );
@@ -101,15 +115,29 @@ export function CommandPalette() {
 
             {/* Results List */}
             <Command.List className="max-h-80 overflow-y-auto p-2 space-y-1">
+              {scope === 'project' && !currentProjectId && (
+                <div className="p-4 text-center text-xs text-[var(--muted)]" role="status">
+                  {projectsLoading
+                    ? 'Loading project…'
+                    : projectsError
+                      ? 'Unable to load projects. Please try again.'
+                      : projectId !== undefined
+                        ? 'Project not found or no longer available. Select a project from the sidebar.'
+                        : 'Select a project to search within it.'}
+                </div>
+              )}
               {isSearching && (
                 <div className="p-4 text-center text-xs text-[var(--muted)]">Searching…</div>
               )}
 
-              {query.trim().length > 0 && !isSearching && searchResults.length === 0 && (
-                <Command.Empty className="p-6 text-center text-xs text-[var(--muted)]">
-                  No matching results found for "{query}".
-                </Command.Empty>
-              )}
+              {query.trim().length > 0 &&
+                (scope === 'all' || currentProjectId) &&
+                !isSearching &&
+                searchResults.length === 0 && (
+                  <Command.Empty className="p-6 text-center text-xs text-[var(--muted)]">
+                    No matching results found for "{query}".
+                  </Command.Empty>
+                )}
 
               {/* FTS Search Results */}
               {query.trim().length > 0 && searchResults.length > 0 && (
@@ -123,10 +151,8 @@ export function CommandPalette() {
                       onSelect={() =>
                         handleSelect(() => {
                           if (item.kind === 'notepad') {
-                            navigate({
-                              to: '/p/$projectId/notepads/$notepadId',
-                              params: { projectId: item.projectId, notepadId: item.id },
-                            });
+                            if (!workspaceId) return;
+                            navigate(notepadTarget(workspaceId, item.projectId, item.id));
                           } else {
                             // card: navigate to its board if available, else its project
                             const cardItem = item as typeof item & {
@@ -134,16 +160,14 @@ export function CommandPalette() {
                               cardId?: string;
                             };
                             if (cardItem.boardId) {
+                              if (!workspaceId) return;
                               navigate({
-                                to: '/p/$projectId/boards/$boardId',
-                                params: { projectId: item.projectId, boardId: cardItem.boardId },
+                                ...boardTarget(workspaceId, item.projectId, cardItem.boardId),
                                 search: { cardId: cardItem.cardId ?? item.id } as any,
                               });
                             } else {
-                              navigate({
-                                to: '/p/$projectId',
-                                params: { projectId: item.projectId },
-                              });
+                              if (!workspaceId) return;
+                              navigate(projectTarget(workspaceId, item.projectId));
                             }
                           }
                         })
@@ -183,11 +207,8 @@ export function CommandPalette() {
                           key={np.id}
                           onSelect={() =>
                             handleSelect(() => {
-                              if (!currentProjectId) return;
-                              navigate({
-                                to: '/p/$projectId/notepads/$notepadId',
-                                params: { projectId: currentProjectId, notepadId: np.id },
-                              });
+                              if (!workspaceId || !currentProjectId) return;
+                              navigate(notepadTarget(workspaceId, currentProjectId, np.id));
                             })
                           }
                           className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
@@ -207,10 +228,7 @@ export function CommandPalette() {
                       <Command.Item
                         onSelect={() =>
                           handleSelect(() => {
-                            navigate({
-                              to: '/p/$projectId',
-                              params: { projectId: currentProjectId },
-                            });
+                            if (workspaceId) navigate(projectTarget(workspaceId, currentProjectId));
                           })
                         }
                         className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
@@ -225,11 +243,8 @@ export function CommandPalette() {
                         key={b.id}
                         onSelect={() =>
                           handleSelect(() => {
-                            if (!currentProjectId) return;
-                            navigate({
-                              to: '/p/$projectId/boards/$boardId',
-                              params: { projectId: currentProjectId, boardId: b.id },
-                            });
+                            if (!workspaceId || !currentProjectId) return;
+                            navigate(boardTarget(workspaceId, currentProjectId, b.id));
                           })
                         }
                         className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
@@ -243,10 +258,7 @@ export function CommandPalette() {
                       <Command.Item
                         onSelect={() =>
                           handleSelect(() => {
-                            navigate({
-                              to: '/p/$projectId/trash',
-                              params: { projectId: currentProjectId },
-                            });
+                            if (workspaceId) navigate(trashTarget(workspaceId, currentProjectId));
                           })
                         }
                         className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
@@ -259,7 +271,7 @@ export function CommandPalette() {
                     <Command.Item
                       onSelect={() =>
                         handleSelect(() => {
-                          navigate({ to: '/settings/members' });
+                          if (workspaceId) navigate(workspaceMembersTarget(workspaceId));
                         })
                       }
                       className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
@@ -271,7 +283,7 @@ export function CommandPalette() {
                     <Command.Item
                       onSelect={() =>
                         handleSelect(() => {
-                          navigate({ to: '/settings' });
+                          if (workspaceId) navigate(workspaceSettingsTarget(workspaceId));
                         })
                       }
                       className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"

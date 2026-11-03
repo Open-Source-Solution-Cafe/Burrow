@@ -72,7 +72,7 @@ Real-time collaboration, comments, public sharing, database/table views, offline
 | Auth            | **Better Auth** with the Drizzle/D1 adapter                                                                                                      |
 | Files           | **R2** (images, covers)                                                                                                                          |
 | Validation      | `zod` + `@hono/zod-validator`; share types with the client via Hono RPC (`hc`)                                                                   |
-| Tests           | Vitest + `@cloudflare/vitest-pool-workers` (API), Playwright (e2e)                                                                               |
+| Tests           | Vitest + `@cloudflare/vitest-plugin` (API), Playwright (e2e)                                                                                     |
 | Tooling         | pnpm, ESLint, Prettier, Wrangler CLI (deploys run from your machine; no CI/CD pipeline)                                                          |
 
 ---

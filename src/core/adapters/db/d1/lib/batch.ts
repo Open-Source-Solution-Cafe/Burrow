@@ -1,7 +1,7 @@
 import type { BatchItem } from 'drizzle-orm/batch';
 import type { DB } from '../client';
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
-import { D1_MAX_BOUND_PARAMS } from './chunk';
+import { D1_MAX_BOUND_PARAMS } from '../../../../services/utils/chunk';
 
 // Cloudflare D1 documented limit: max 100 bound parameters per query/statement
 // (https://developers.cloudflare.com/d1/platform/limits/).

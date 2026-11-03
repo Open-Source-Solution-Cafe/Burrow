@@ -5,6 +5,7 @@ import { createWorkerApp } from '../../src/worker/index';
 describe('Invites info and existing user flow API contract', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let ownerCookie = '';
+  let workspaceId = '';
   let app: ReturnType<typeof createWorkerApp>;
 
   beforeAll(async () => {
@@ -27,12 +28,19 @@ describe('Invites info and existing user flow API contract', () => {
     );
     expect(signupRes.status).toBe(200);
     ownerCookie = signupRes.headers.get('set-cookie')!;
+    const account = await app.request(
+      'http://localhost/api/account',
+      { headers: { Cookie: ownerCookie } },
+      env,
+    );
+    const accountData = (await account.json()) as { workspaces: Array<{ id: string }> };
+    workspaceId = accountData.workspaces[0]!.id;
   });
 
   it('GET /api/invites/info/:token returns userExists: false for new unregistered users', async () => {
     // Create invite for uncreated user
     const createRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {
@@ -76,7 +84,7 @@ describe('Invites info and existing user flow API contract', () => {
   it('GET /api/invites/info/:token returns userExists: true when user account exists in system', async () => {
     // 1. Register a user first via an invite
     const invite1Res = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {
@@ -113,7 +121,7 @@ describe('Invites info and existing user flow API contract', () => {
 
     // Remove member from workspace so they have no workspace (existing user in user table, not in members)
     const removeRes = await app.request(
-      `http://localhost/api/members/${userData.user.id}`,
+      `http://localhost/api/workspaces/${workspaceId}/members/${userData.user.id}`,
       {
         method: 'DELETE',
         headers: {
@@ -126,7 +134,7 @@ describe('Invites info and existing user flow API contract', () => {
 
     // 2. Owner invites this existing user again
     const invite2Res = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {

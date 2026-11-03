@@ -69,19 +69,32 @@ export class PostgresNotificationRepository implements INotificationRepository {
     })) as any;
   }
 
-  async markRead(userId: string, notificationIds: string[]): Promise<void> {
+  async markRead(userId: string, workspaceId: string, notificationIds: string[]): Promise<void> {
     if (notificationIds.length === 0) return;
     await this.db
       .update(notifications)
       .set({ readAt: Date.now() })
-      .where(and(eq(notifications.userId, userId), inArray(notifications.id, notificationIds)));
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.workspaceId, workspaceId),
+          isNull(notifications.readAt),
+          inArray(notifications.id, notificationIds),
+        ),
+      );
   }
 
-  async markAllRead(userId: string): Promise<void> {
+  async markAllRead(userId: string, workspaceId: string): Promise<void> {
     await this.db
       .update(notifications)
       .set({ readAt: Date.now() })
-      .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)));
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.workspaceId, workspaceId),
+          isNull(notifications.readAt),
+        ),
+      );
   }
 
   async createMentions(args: {

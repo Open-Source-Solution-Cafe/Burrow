@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { useProjects, useCreateProject } from '../../lib/queries';
+import { useAccount, useProjects, useCreateProject } from '../../lib/queries';
+import { projectTarget } from '../../lib/workspaceRoutes';
 import { useTheme } from '../../lib/theme';
 import { ModalShell } from '../ui/ModalShell';
 import { Input } from '../ui/Input';
@@ -12,20 +13,14 @@ interface ProjectSwitcherProps {
   currentProjectId?: string;
 }
 
-function getProjectInitials(name?: string): string {
-  if (!name || !name.trim()) return 'MP';
-  const words = name.trim().split(/\s+/);
-  if (words.length >= 2) {
-    return `${words[0]?.[0] ?? ''}${words[1]?.[0] ?? ''}`.toUpperCase();
-  }
-  return name.trim().slice(0, 2).toUpperCase();
-}
-
 export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
   const navigate = useNavigate();
+  const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { isModern } = useTheme();
-  const { data: projects = [] } = useProjects();
-  const createProject = useCreateProject();
+  const { data: account } = useAccount();
+  const hasMembership = account?.workspaces.some((workspace) => workspace.id === workspaceId);
+  const { data: projects = [], isLoading, isError } = useProjects(workspaceId);
+  const createProject = useCreateProject(workspaceId);
 
   const [isOpen, setIsOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -33,7 +28,15 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
   const [newProjectIcon, setNewProjectIcon] = useState('📁');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const currentProject = projects.find((p) => p.id === currentProjectId) || projects[0];
+  const currentProject = projects.find((p) => p.id === currentProjectId);
+  const unavailable = currentProjectId !== undefined && !currentProject;
+  const label = isLoading
+    ? 'Loading project…'
+    : isError
+      ? 'Projects unavailable'
+      : unavailable
+        ? 'Project unavailable'
+        : currentProject?.name || 'Select project';
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -41,19 +44,42 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
         setIsOpen(false);
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setIsOpen(false);
+    }
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
-  const handleSelect = (projectId: string) => {
-    localStorage.setItem('burrow-last-project', projectId);
+  useEffect(() => {
     setIsOpen(false);
-    navigate({ to: `/p/${projectId}` });
+    setShowCreateModal(false);
+    setNewProjectName('');
+  }, [workspaceId, account?.user.id]);
+
+  const handleSelect = (projectId: string) => {
+    if (!workspaceId || !hasMembership) return;
+    localStorage.setItem(`burrow-last-project:${workspaceId}`, projectId);
+    setIsOpen(false);
+    navigate(projectTarget(workspaceId, projectId));
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjectName.trim()) return;
+    if (
+      !workspaceId ||
+      !hasMembership ||
+      createProject.isPending ||
+      isLoading ||
+      isError ||
+      unavailable ||
+      !newProjectName.trim()
+    )
+      return;
     try {
       const res = await createProject.mutateAsync({
         name: newProjectName.trim(),
@@ -72,22 +98,26 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       {isModern ? (
         <button
           type="button"
+          aria-label={`Switch project: ${label}`}
+          aria-expanded={isOpen}
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-2 py-1 text-[13px] font-semibold text-side-text hover:text-text transition cursor-pointer min-w-0"
+          className="flex w-full items-center gap-2 py-1 text-[13px] font-semibold text-side-text hover:text-text transition cursor-pointer min-w-0"
         >
           <span className="w-5 h-5 theme-radius-sm bg-accent text-accent-ink flex items-center justify-center text-[10px] font-bold shrink-0">
-            {getProjectInitials(currentProject?.name)}
+            {currentProject?.icon || '📁'}
           </span>
-          <span className="truncate">{currentProject?.name || 'Select Project'}</span>
+          <span className="truncate">{label}</span>
           <ChevronDown className="w-3.5 h-3.5 text-muted shrink-0 opacity-70" />
         </button>
       ) : (
         <button
           type="button"
+          aria-label={`Switch project: ${label}`}
+          aria-expanded={isOpen}
           onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 py-1 text-[14px] font-display text-side-text hover:text-text transition cursor-pointer min-w-0"
+          className="flex w-full items-center gap-1.5 py-1 text-[14px] font-display text-side-text hover:text-text transition cursor-pointer min-w-0"
         >
-          <span className="truncate">{currentProject?.name || 'Select Project'}</span>
+          <span className="truncate">{label}</span>
           <ChevronDown className="w-3.5 h-3.5 text-ink-muted shrink-0" />
         </button>
       )}
@@ -98,7 +128,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
             Projects
           </div>
           <div className="max-h-60 overflow-y-auto">
-            {projects.map((p) => (
+            {(hasMembership ? projects : []).map((p) => (
               <button
                 key={p.id}
                 onClick={() => handleSelect(p.id)}
@@ -115,6 +145,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
 
           <div className="border-t border-hair mt-1 pt-1">
             <button
+              disabled={!hasMembership || isLoading || isError || unavailable}
               onClick={() => {
                 setIsOpen(false);
                 setShowCreateModal(true);
@@ -129,7 +160,14 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       )}
 
       <ModalShell
-        open={showCreateModal}
+        open={
+          showCreateModal &&
+          !!workspaceId &&
+          !!hasMembership &&
+          !isLoading &&
+          !isError &&
+          !unavailable
+        }
         onClose={() => setShowCreateModal(false)}
         title="Create Project"
         className="sm:max-w-sm"

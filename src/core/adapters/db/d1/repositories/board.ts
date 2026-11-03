@@ -1,6 +1,6 @@
 import type { DB } from '../client';
 import * as t from '../schema';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type {
   IBoardRepository,
   Board,
@@ -10,99 +10,134 @@ import type {
   UpdateBoardData,
   CreateColumnData,
   UpdateColumnData,
+  BoardMutationScope,
+  ProjectScope,
 } from '../../../../infrastructure/types';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { runBatch } from '../lib/batch';
-import { chunkByParamBudget, chunkInList } from '../lib/chunk';
-import { extractPlainText } from '../../../../shared/extract';
+import { chunkByParamBudget, chunkInList } from '../../../../services/utils/chunk';
+import { extractPlainText } from '../../../../../shared/extract';
+import { boardInProjectScope } from '../../board-source';
+
+const roleCheck = (scope: BoardMutationScope) => sql`exists (
+  select 1 from members m
+  where m.workspace_id = ${scope.workspaceId}
+    and m.user_id = ${scope.actorUserId}
+    and (${scope.minimumRole === 'owner' ? sql`m.role = 'owner'` : sql`m.role in ('owner', 'editor')`})
+)`;
+
+function batchSucceeded(result: unknown): boolean {
+  return Boolean(
+    Array.isArray(result) &&
+      (result[0] as { results?: unknown[] } | undefined)?.results?.length,
+  );
+}
 
 export function createBoardRepository(db: DB): IBoardRepository {
+  const sourceProjectMatches = sql`exists (select 1 from projects where projects.id = ${t.boards.projectId} and projects.workspace_id = ${t.boards.workspaceId})`;
   return {
-    async listByProject(projectId: string): Promise<Board[]> {
+    async listByProject(scope: ProjectScope): Promise<Board[]> {
       const rows = await db
         .select()
         .from(t.boards)
-        .where(and(eq(t.boards.projectId, projectId), isNull(t.boards.deletedAt)))
+        .where(
+          and(
+            eq(t.boards.projectId, scope.projectId),
+            eq(t.boards.workspaceId, scope.workspaceId),
+            isNull(t.boards.deletedAt),
+            sourceProjectMatches,
+          ),
+        )
         .orderBy(asc(t.boards.position));
       return rows.map(mapBoard);
     },
 
-    async findById(id: string): Promise<Board | null> {
-      const [row] = await db.select().from(t.boards).where(eq(t.boards.id, id));
-      return row ? mapBoard(row) : null;
-    },
-
-    async findByIdAndWorkspace(id: string, workspaceId: string): Promise<Board | null> {
+    async findByIdInScope(scope: ProjectScope, id: string): Promise<Board | null> {
       const [row] = await db
         .select()
         .from(t.boards)
-        .where(and(eq(t.boards.id, id), eq(t.boards.workspaceId, workspaceId)));
+        .where(and(eq(t.boards.id, id), boardInProjectScope(scope, id)));
       return row ? mapBoard(row) : null;
     },
 
-    async create(data: CreateBoardData): Promise<Board> {
-      await db.insert(t.boards).values(data);
-      return {
-        id: data.id,
-        workspaceId: data.workspaceId,
-        projectId: data.projectId,
-        name: data.name,
-        icon: data.icon ?? null,
-        position: data.position,
-        deletedAt: null,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      };
+    async createWithColumns(data: CreateBoardData, columns: CreateColumnData[], scope: BoardMutationScope): Promise<boolean> {
+      const statements: BatchItem<any>[] = [db.run(sql`INSERT INTO boards
+        (id, workspace_id, project_id, name, icon, position, created_at, updated_at)
+        SELECT ${data.id}, ${data.workspaceId}, ${data.projectId}, ${data.name}, ${data.icon ?? null},
+          ${data.position}, ${data.createdAt}, ${data.updatedAt}
+        WHERE ${roleCheck(scope)} AND ${data.workspaceId} = ${scope.workspaceId}
+          AND EXISTS (SELECT 1 FROM projects p WHERE p.id = ${data.projectId} AND p.workspace_id = ${scope.workspaceId})
+        RETURNING id`)];
+      for (const column of columns) {
+        statements.push(db.run(sql`INSERT INTO board_columns
+          (id, board_id, name, color, position, wip_limit)
+          SELECT ${column.id}, ${column.boardId}, ${column.name}, ${column.color ?? null}, ${column.position}, ${column.wipLimit ?? null}
+          WHERE EXISTS (SELECT 1 FROM boards b WHERE b.id = ${data.id}
+            AND b.workspace_id = ${scope.workspaceId} AND ${roleCheck(scope)})`));
+      }
+      return batchSucceeded(await runBatch(db, statements));
     },
 
-    async update(id: string, data: UpdateBoardData): Promise<void> {
-      await db.update(t.boards).set(data).where(eq(t.boards.id, id));
+    async updateGuarded(id: string, data: UpdateBoardData, scope: BoardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`UPDATE boards SET
+        name = CASE WHEN ${data.name !== undefined ? 1 : 0} THEN ${data.name ?? null} ELSE name END,
+        icon = CASE WHEN ${data.icon !== undefined ? 1 : 0} THEN ${data.icon ?? null} ELSE icon END,
+        updated_at = ${data.updatedAt}
+        WHERE id = ${id} AND workspace_id = ${scope.workspaceId} AND deleted_at IS NULL
+          AND ${roleCheck(scope)} AND ${sourceProjectMatches}
+        RETURNING id`);
+      return rows.length === 1;
     },
 
-    async softDelete(id: string, deletedAt: number): Promise<void> {
-      const cardRows = await db
-        .select({ notepadId: t.cards.notepadId })
-        .from(t.cards)
-        .where(eq(t.cards.boardId, id));
-
-      const notepadIds = cardRows.map((r) => r.notepadId);
-
+    async softDeleteGuarded(id: string, deletedAt: number, scope: BoardMutationScope): Promise<boolean> {
+      const deletionOperationId = crypto.randomUUID();
       const statements: BatchItem<any>[] = [
-        db.update(t.boards).set({ deletedAt, updatedAt: deletedAt }).where(eq(t.boards.id, id)),
+        db.update(t.boards).set({ deletedAt, deletionOperationId, updatedAt: deletedAt }).where(and(
+          eq(t.boards.id, id), eq(t.boards.workspaceId, scope.workspaceId), isNull(t.boards.deletedAt), sourceProjectMatches,
+          sql`${roleCheck(scope)}`,
+        )).returning({ id: t.boards.id }),
+        db.run(sql`UPDATE notepads SET deleted_at = ${deletedAt}, deletion_operation_id = ${deletionOperationId}, updated_at = ${deletedAt}
+          WHERE id IN (SELECT c.notepad_id FROM cards c
+            JOIN boards b ON b.id = c.board_id
+            JOIN projects p ON p.id = b.project_id AND p.workspace_id = b.workspace_id
+            JOIN board_columns bc ON bc.id = c.column_id AND bc.board_id = c.board_id
+            JOIN notepads n ON n.id = c.notepad_id AND n.project_id = p.id AND n.workspace_id = p.workspace_id AND n.kind = 'card'
+            WHERE c.board_id = ${id} AND b.deleted_at = ${deletedAt} AND b.deletion_operation_id = ${deletionOperationId}
+              AND b.workspace_id = ${scope.workspaceId}
+              AND ${roleCheck(scope)} AND n.deleted_at IS NULL)`),
+        db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN (SELECT c.notepad_id FROM cards c
+          JOIN boards b ON b.id = c.board_id
+          JOIN projects p ON p.id = b.project_id AND p.workspace_id = b.workspace_id
+          JOIN board_columns bc ON bc.id = c.column_id AND bc.board_id = c.board_id
+          JOIN notepads n ON n.id = c.notepad_id AND n.project_id = p.id AND n.workspace_id = p.workspace_id AND n.kind = 'card'
+          WHERE c.board_id = ${id} AND b.deleted_at = ${deletedAt} AND b.deletion_operation_id = ${deletionOperationId}
+            AND b.workspace_id = ${scope.workspaceId}
+            AND ${roleCheck(scope)})`),
       ];
 
-      if (notepadIds.length > 0) {
-        for (const chunk of chunkByParamBudget(notepadIds, 1, 2)) {
-          statements.push(
-            db
-              .update(t.notepads)
-              .set({ deletedAt, updatedAt: deletedAt })
-              .where(inArray(t.notepads.id, chunk)),
-          );
-        }
-        for (const chunk of chunkByParamBudget(notepadIds, 1, 0)) {
-          statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk}`));
-        }
-      }
-
-      await runBatch(db, statements);
+      return batchSucceeded(await runBatch(db, statements));
     },
 
-    async restore(id: string): Promise<void> {
+    async restoreGuarded(id: string, scope: BoardMutationScope): Promise<boolean> {
       const [board] = await db
-        .select({ deletedAt: t.boards.deletedAt })
+        .select({ deletedAt: t.boards.deletedAt, deletionOperationId: t.boards.deletionOperationId })
         .from(t.boards)
-        .where(eq(t.boards.id, id));
-      if (!board) return;
+        .where(and(eq(t.boards.id, id), eq(t.boards.workspaceId, scope.workspaceId), sql`${roleCheck(scope)}`));
+      if (!board) return false;
       const deleteTimestamp = board.deletedAt;
+      const deletionOperationId = board.deletionOperationId;
+      if (deleteTimestamp === null) return false;
       const now = Date.now();
 
-      // Find cards to restore: if board has a deletedAt timestamp, restore cards matching it;
-      // if board is already restored (deletedAt is null), find any remaining deleted cards under this board (idempotent retry).
-      const cardCondition =
-        deleteTimestamp !== null && deleteTimestamp !== undefined
-          ? and(eq(t.cards.boardId, id), eq(t.notepads.deletedAt, deleteTimestamp))
-          : and(eq(t.cards.boardId, id), isNotNull(t.notepads.deletedAt));
+      const cardCondition = and(
+        eq(t.cards.boardId, id),
+        deletionOperationId
+          ? eq(t.notepads.deletionOperationId, deletionOperationId)
+          : eq(t.notepads.deletedAt, deleteTimestamp),
+        sql`exists (select 1 from boards b join projects p on p.id = b.project_id and p.workspace_id = b.workspace_id
+          join board_columns bc on bc.id = cards.column_id and bc.board_id = cards.board_id
+          where b.id = cards.board_id and notepads.project_id = p.id and notepads.workspace_id = p.workspace_id and notepads.kind = 'card')`,
+      );
 
       const cards = await db
         .select({
@@ -114,123 +149,183 @@ export function createBoardRepository(db: DB): IBoardRepository {
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
         .where(cardCondition);
 
-      const notepadIds = cards.map((c) => c.id);
+      if (!deletionOperationId && cards.length > 0) {
+        throw new Error('ambiguous_delete_group');
+      }
 
-      const statements: BatchItem<any>[] = [
-        db.update(t.boards).set({ deletedAt: null, updatedAt: now }).where(eq(t.boards.id, id)),
+      const boardConditions = [
+        eq(t.boards.id, id),
+        eq(t.boards.workspaceId, scope.workspaceId),
+        eq(t.boards.deletedAt, deleteTimestamp),
+        sql`${roleCheck(scope)}`,
       ];
+      if (deletionOperationId) {
+        boardConditions.push(eq(t.boards.deletionOperationId, deletionOperationId));
+      }
+      const statements: BatchItem<any>[] = [
+        db.update(t.boards).set({ deletedAt: null, deletionOperationId: null, updatedAt: now }).where(and(...boardConditions)).returning({ id: t.boards.id }),
+      ];
+      if (deletionOperationId) {
+        statements.push(db.run(sql`UPDATE notepads SET deleted_at = NULL, deletion_operation_id = NULL, updated_at = ${now}
+          WHERE id IN (SELECT c.notepad_id FROM cards c
+            JOIN boards b ON b.id = c.board_id
+            JOIN projects p ON p.id = b.project_id AND p.workspace_id = b.workspace_id
+            JOIN board_columns bc ON bc.id = c.column_id AND bc.board_id = c.board_id
+            JOIN notepads n ON n.id = c.notepad_id AND n.project_id = p.id AND n.workspace_id = p.workspace_id AND n.kind = 'card'
+            WHERE c.board_id = ${id} AND n.deletion_operation_id = ${deletionOperationId}
+              AND EXISTS (SELECT 1 FROM boards authorized WHERE authorized.id = ${id}
+                AND authorized.workspace_id = ${scope.workspaceId} AND authorized.deleted_at IS NULL
+                AND ${roleCheck(scope)}))`));
+      }
 
-      if (notepadIds.length > 0) {
-        for (const chunk of chunkByParamBudget(notepadIds, 1, 2)) {
-          statements.push(
-            db
-              .update(t.notepads)
-              .set({ deletedAt: null, updatedAt: now })
-              .where(inArray(t.notepads.id, chunk)),
-          );
-        }
-        // Delete existing FTS entries for notepadIds first so re-running restore is idempotent
-        for (const chunk of chunkByParamBudget(notepadIds, 1, 0)) {
-          statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk}`));
+      if (cards.length > 0) {
+        const restoredIds = cards.map((card) => card.id);
+        for (const chunk of chunkByParamBudget(restoredIds, 1, 0)) {
+          statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk}
+            AND EXISTS (SELECT 1 FROM boards authorized WHERE authorized.id = ${id}
+              AND authorized.workspace_id = ${scope.workspaceId} AND authorized.deleted_at IS NULL
+              AND ${roleCheck(scope)})`));
         }
         for (const card of cards) {
           const plainText = extractPlainText(card.content);
           statements.push(
             db.run(
-              sql`INSERT INTO notepads_fts(notepad_id, title, body) VALUES (${card.id}, ${card.title}, ${plainText})`,
+              sql`INSERT INTO notepads_fts(notepad_id, title, body)
+                SELECT ${card.id}, ${card.title}, ${plainText}
+                WHERE EXISTS (SELECT 1 FROM boards authorized WHERE authorized.id = ${id}
+                  AND authorized.workspace_id = ${scope.workspaceId} AND authorized.deleted_at IS NULL
+                  AND ${roleCheck(scope)})`,
             ),
           );
         }
       }
 
       // Execute in a single atomic batch (Cloudflare D1 batch duration limit: 30s)
-      await runBatch(db, statements);
+      return batchSucceeded(await runBatch(db, statements));
     },
 
-    async hardDelete(id: string): Promise<void> {
-      const cardRows = await db
-        .select({ notepadId: t.cards.notepadId })
-        .from(t.cards)
-        .where(eq(t.cards.boardId, id));
-
-      const notepadIds = cardRows.map((r) => r.notepadId);
-
+    async hardDeleteGuarded(id: string, scope: BoardMutationScope): Promise<boolean> {
       const statements: BatchItem<any>[] = [];
-      if (notepadIds.length > 0) {
-        for (const chunk of chunkByParamBudget(notepadIds, 1, 0)) {
-          statements.push(
-            db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk}`),
-            db.run(sql`DELETE FROM notepad_links WHERE target_id IN ${chunk}`),
-            db.delete(t.notepads).where(inArray(t.notepads.id, chunk)),
-          );
-        }
-      }
-      statements.push(db.delete(t.boards).where(eq(t.boards.id, id)));
+      const validCardBodies = sql`SELECT c.notepad_id FROM cards c
+        JOIN boards b ON b.id = c.board_id
+        JOIN projects p ON p.id = b.project_id AND p.workspace_id = b.workspace_id
+        JOIN board_columns bc ON bc.id = c.column_id AND bc.board_id = c.board_id
+        JOIN notepads n ON n.id = c.notepad_id AND n.project_id = p.id AND n.workspace_id = p.workspace_id AND n.kind = 'card'
+        WHERE c.board_id = ${id} AND b.workspace_id = ${scope.workspaceId}
+          AND b.deleted_at IS NOT NULL AND ${roleCheck(scope)}`;
+      statements.push(
+        db.run(sql`UPDATE boards SET updated_at = updated_at WHERE id = ${id}
+          AND workspace_id = ${scope.workspaceId} AND deleted_at IS NOT NULL AND ${roleCheck(scope)}
+          RETURNING id`),
+        db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN (${validCardBodies})`),
+        db.run(sql`DELETE FROM notepad_links WHERE target_type IN ('notepad', 'card') AND target_id IN (${validCardBodies})
+          AND source_id IN (SELECT source.id FROM notepads source
+            JOIN boards b ON b.id = ${id} AND b.workspace_id = ${scope.workspaceId}
+            WHERE ${roleCheck(scope)}
+              AND source.project_id = b.project_id AND source.workspace_id = b.workspace_id)`),
+        db.run(sql`DELETE FROM notepads WHERE id IN (${validCardBodies}) AND EXISTS (
+          SELECT 1 FROM boards b WHERE b.id = ${id} AND b.workspace_id = ${scope.workspaceId}
+            AND b.deleted_at IS NOT NULL AND ${roleCheck(scope)})`),
+      );
+      statements.push(db.delete(t.boards).where(and(
+        eq(t.boards.id, id), eq(t.boards.workspaceId, scope.workspaceId),
+        sql`${t.boards.deletedAt} IS NOT NULL`, sql`${roleCheck(scope)}`,
+      )).returning({ id: t.boards.id }));
 
       // Execute in a single atomic batch (Cloudflare D1 batch duration limit: 30s)
-      await runBatch(db, statements);
+      return batchSucceeded(await runBatch(db, statements));
     },
 
     // Columns
-    async listColumns(boardId: string): Promise<BoardColumn[]> {
+    async listColumns(scope: ProjectScope, boardId: string): Promise<BoardColumn[]> {
       const rows = await db
         .select()
         .from(t.boardColumns)
-        .where(eq(t.boardColumns.boardId, boardId))
+        .where(and(eq(t.boardColumns.boardId, boardId), boardInProjectScope(scope, boardId)))
         .orderBy(asc(t.boardColumns.position));
       return rows.map(mapColumn);
     },
 
-    async findColumnById(id: string): Promise<BoardColumn | null> {
-      const [row] = await db.select().from(t.boardColumns).where(eq(t.boardColumns.id, id));
-      return row ? mapColumn(row) : null;
-    },
-
-    async findColumnByIdAndWorkspace(
-      columnId: string,
-      workspaceId: string,
-    ): Promise<BoardColumn | null> {
+    async findColumnByIdInScope(scope: ProjectScope, columnId: string): Promise<BoardColumn | null> {
       const [row] = await db
         .select({ column: t.boardColumns })
         .from(t.boardColumns)
         .innerJoin(t.boards, eq(t.boards.id, t.boardColumns.boardId))
-        .where(
-          and(
-            eq(t.boardColumns.id, columnId),
-            eq(t.boards.workspaceId, workspaceId),
-            isNull(t.boards.deletedAt),
-          ),
-        );
+        .where(and(
+          eq(t.boardColumns.id, columnId),
+          isNull(t.boards.deletedAt),
+          sourceProjectMatches,
+          eq(t.boards.workspaceId, scope.workspaceId),
+          eq(t.boards.projectId, scope.projectId),
+        ));
       return row ? mapColumn(row.column) : null;
     },
 
-    async createColumn(data: CreateColumnData): Promise<BoardColumn> {
-      await db.insert(t.boardColumns).values(data);
-      return {
-        id: data.id,
-        boardId: data.boardId,
-        name: data.name,
-        color: data.color ?? null,
-        position: data.position,
-        wipLimit: data.wipLimit ?? null,
-      };
+    async createColumnGuarded(data: CreateColumnData, scope: BoardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`INSERT INTO board_columns
+        (id, board_id, name, color, position, wip_limit)
+        SELECT ${data.id}, ${data.boardId}, ${data.name}, ${data.color ?? null}, ${data.position}, ${data.wipLimit ?? null}
+        WHERE EXISTS (SELECT 1 FROM boards b WHERE b.id = ${data.boardId}
+          AND b.workspace_id = ${scope.workspaceId} AND b.deleted_at IS NULL
+          AND ${roleCheck(scope)} AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))
+        RETURNING id`);
+      return rows.length === 1;
     },
 
-    async updateColumn(id: string, data: UpdateColumnData): Promise<void> {
-      await db.update(t.boardColumns).set(data).where(eq(t.boardColumns.id, id));
+    async updateColumnGuarded(id: string, data: UpdateColumnData, scope: BoardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`UPDATE board_columns SET
+        name = CASE WHEN ${data.name !== undefined ? 1 : 0} THEN ${data.name ?? null} ELSE name END,
+        color = CASE WHEN ${data.color !== undefined ? 1 : 0} THEN ${data.color ?? null} ELSE color END,
+        wip_limit = CASE WHEN ${data.wipLimit !== undefined ? 1 : 0} THEN ${data.wipLimit ?? null} ELSE wip_limit END
+        WHERE id = ${id} AND EXISTS (SELECT 1 FROM boards b WHERE b.id = board_id
+          AND b.workspace_id = ${scope.workspaceId} AND b.deleted_at IS NULL
+          AND ${roleCheck(scope)} AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))
+        RETURNING id`);
+      return rows.length === 1;
     },
 
-    async moveColumn(id: string, position: string): Promise<void> {
-      await db.update(t.boardColumns).set({ position }).where(eq(t.boardColumns.id, id));
+    async moveColumnGuarded(id: string, position: string, scope: BoardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`UPDATE board_columns SET position = ${position}
+        WHERE id = ${id} AND EXISTS (SELECT 1 FROM boards b WHERE b.id = board_id
+          AND b.workspace_id = ${scope.workspaceId} AND b.deleted_at IS NULL
+          AND ${roleCheck(scope)} AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))
+        RETURNING id`);
+      return rows.length === 1;
     },
 
-    async deleteColumn(id: string): Promise<void> {
-      await db.delete(t.boardColumns).where(eq(t.boardColumns.id, id));
+    async deleteColumnGuarded(id: string, moveToColumnId: string | null, scope: BoardMutationScope): Promise<boolean> {
+      const source = await db.select({ boardId: t.boardColumns.boardId }).from(t.boardColumns).where(eq(t.boardColumns.id, id));
+      const boardId = source[0]?.boardId;
+      if (!boardId) return false;
+      const destinationCondition = moveToColumnId
+        ? sql`exists (select 1 from board_columns dest where dest.id = ${moveToColumnId} and dest.board_id = ${boardId})`
+        : sql`not exists (select 1 from cards c where c.column_id = ${id})`;
+      const statements: BatchItem<any>[] = [
+        db.run(sql`UPDATE board_columns SET position = position WHERE id = ${id}
+          AND EXISTS (SELECT 1 FROM boards b WHERE b.id = ${boardId} AND b.workspace_id = ${scope.workspaceId}
+            AND b.deleted_at IS NULL AND ${roleCheck(scope)}
+            AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))
+          AND ${destinationCondition} RETURNING id`),
+      ];
+      if (moveToColumnId) {
+        statements.push(db.run(sql`UPDATE cards SET column_id = ${moveToColumnId}
+          WHERE column_id = ${id} AND EXISTS (SELECT 1 FROM board_columns dest WHERE dest.id = ${moveToColumnId} AND dest.board_id = ${boardId})
+            AND EXISTS (SELECT 1 FROM boards b WHERE b.id = ${boardId} AND b.workspace_id = ${scope.workspaceId}
+              AND b.deleted_at IS NULL AND ${roleCheck(scope)}
+              AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))`));
+      }
+      statements.push(db.run(sql`DELETE FROM board_columns WHERE id = ${id} AND board_id = ${boardId}
+        AND ${destinationCondition} AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.column_id = ${id})
+        AND EXISTS (SELECT 1 FROM boards b WHERE b.id = ${boardId} AND b.workspace_id = ${scope.workspaceId}
+          AND b.deleted_at IS NULL AND ${roleCheck(scope)}
+          AND EXISTS (SELECT 1 FROM projects p WHERE p.id = b.project_id AND p.workspace_id = b.workspace_id))
+        RETURNING id`));
+      return batchSucceeded(await runBatch(db, statements));
     },
 
     async getBoardWithDetails(
+      scope: ProjectScope,
       boardId: string,
-      workspaceId: string,
     ): Promise<BoardWithDetails | null> {
       const [board] = await db
         .select()
@@ -238,7 +333,9 @@ export function createBoardRepository(db: DB): IBoardRepository {
         .where(
           and(
             eq(t.boards.id, boardId),
-            eq(t.boards.workspaceId, workspaceId),
+            eq(t.boards.workspaceId, scope.workspaceId),
+            eq(t.boards.projectId, scope.projectId),
+            sourceProjectMatches,
             isNull(t.boards.deletedAt),
           ),
         );
@@ -265,13 +362,26 @@ export function createBoardRepository(db: DB): IBoardRepository {
         })
         .from(t.cards)
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(and(eq(t.cards.boardId, boardId), isNull(t.notepads.deletedAt)))
+        .innerJoin(
+          t.boardColumns,
+          and(eq(t.boardColumns.id, t.cards.columnId), eq(t.boardColumns.boardId, t.cards.boardId)),
+        )
+        .where(
+          and(
+            eq(t.cards.boardId, boardId),
+            eq(t.notepads.workspaceId, scope.workspaceId),
+            eq(t.notepads.projectId, scope.projectId),
+            eq(t.notepads.kind, 'card'),
+            isNull(t.notepads.deletedAt),
+          ),
+        )
         .orderBy(asc(t.cards.position));
 
       const cardIds = cardsWithNotepads.map((c) => c.id);
-      const assignees: { cardId: string; userId: string; name: string; image: string | null }[] = [];
+      const assignees: { cardId: string; userId: string; name: string; image: string | null }[] =
+        [];
       if (cardIds.length > 0) {
-        for (const chunk of chunkInList(cardIds)) {
+        for (const chunk of chunkInList(cardIds, 1)) {
           const rows = await db
             .select({
               cardId: t.cardAssignees.cardId,
@@ -281,6 +391,13 @@ export function createBoardRepository(db: DB): IBoardRepository {
             })
             .from(t.cardAssignees)
             .innerJoin(t.user, eq(t.user.id, t.cardAssignees.userId))
+            .innerJoin(
+              t.members,
+              and(
+                eq(t.members.userId, t.cardAssignees.userId),
+                eq(t.members.workspaceId, scope.workspaceId),
+              ),
+            )
             .where(inArray(t.cardAssignees.cardId, chunk));
           assignees.push(...rows);
         }
@@ -299,7 +416,7 @@ export function createBoardRepository(db: DB): IBoardRepository {
       const notepadIds = cardsWithNotepads.map((c) => c.notepadId);
       const tags: { notepadId: string; tagId: string; name: string; color: string | null }[] = [];
       if (notepadIds.length > 0) {
-        for (const chunk of chunkInList(notepadIds)) {
+        for (const chunk of chunkInList(notepadIds, 1)) {
           const rows = await db
             .select({
               notepadId: t.notepadTags.notepadId,
@@ -309,7 +426,9 @@ export function createBoardRepository(db: DB): IBoardRepository {
             })
             .from(t.notepadTags)
             .innerJoin(t.tags, eq(t.tags.id, t.notepadTags.tagId))
-            .where(inArray(t.notepadTags.notepadId, chunk));
+            .where(
+              and(inArray(t.notepadTags.notepadId, chunk), eq(t.tags.projectId, board.projectId)),
+            );
           tags.push(...rows);
         }
       }
@@ -381,11 +500,18 @@ export function createBoardRepository(db: DB): IBoardRepository {
     },
 
     // Trash
-    async listDeletedByProject(projectId: string): Promise<Board[]> {
+    async listDeletedByProject(scope: ProjectScope): Promise<Board[]> {
       const rows = await db
         .select()
         .from(t.boards)
-        .where(and(eq(t.boards.projectId, projectId), sql`${t.boards.deletedAt} IS NOT NULL`))
+        .where(
+          and(
+            eq(t.boards.projectId, scope.projectId),
+            eq(t.boards.workspaceId, scope.workspaceId),
+            sql`${t.boards.deletedAt} IS NOT NULL`,
+            sourceProjectMatches,
+          ),
+        )
         .orderBy(desc(t.boards.deletedAt));
       return rows.map(mapBoard);
     },
@@ -401,6 +527,7 @@ function mapBoard(row: typeof t.boards.$inferSelect): Board {
     icon: row.icon,
     position: row.position,
     deletedAt: row.deletedAt ?? null,
+    deletionOperationId: row.deletionOperationId ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

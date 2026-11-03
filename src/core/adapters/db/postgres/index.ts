@@ -7,6 +7,7 @@ import { schema } from './schema';
 import type { ServerConfig } from '../../../../server/config';
 import { PostgresWorkspaceRepository } from './repositories/workspace';
 import { PostgresProjectRepository } from './repositories/project';
+import { PostgresProjectFileRepository } from './repositories/project-file';
 import { PostgresBoardRepository } from './repositories/board';
 import { PostgresCardRepository } from './repositories/card';
 import { PostgresNotepadRepository } from './repositories/notepad';
@@ -17,8 +18,8 @@ import { PostgresInviteRepository } from './repositories/invite';
 import { PostgresSearchAdapter } from './search';
 import { PostgresLockAdapter } from './lock';
 import { createPostgresAuthProvider } from './auth';
-import { createEmailFromEnv } from '../d1/adapters/email/factory';
-import { createStorageFromEnv } from '../d1/adapters/storage/factory';
+import { createEmailFromEnv } from '../../email/factory';
+import { createStorageFromEnv } from '../../storage/factory';
 
 /**
  * Postgres database instance type
@@ -30,34 +31,27 @@ export type PostgresDb = PostgresJsDatabase<typeof schema>;
  * Opens pg connection, runs migrations, returns Infrastructure with all adapters.
  */
 export async function createPostgresInfrastructure(config: ServerConfig): Promise<Infrastructure> {
-  // Determine if we're using postgres or SQLite (dev fallback)
-  const isPostgres =
-    config.DATABASE_URL?.startsWith('postgres://') ||
-    config.DATABASE_URL?.startsWith('postgresql://');
-
-  let db: PostgresDb;
-
-  if (isPostgres && config.DATABASE_URL) {
-    // PostgreSQL connection
-    const client = postgres(config.DATABASE_URL, {
-      max: 10,
-      idle_timeout: 30,
-      connect_timeout: 10,
-    });
-    db = drizzle(client, { schema });
-    await applyMigrations(client, join(process.cwd(), 'migrations'));
-  } else {
-    // SQLite fallback for development - use dynamic import to avoid tsconfig issues
-    const { openNodeDb } = await import('../../../../server/db');
-    const sqlitePath = config.SQLITE_PATH ?? './data/burrow.db';
-    const { db: sqliteDb } = openNodeDb(sqlitePath, join(process.cwd(), 'migrations'));
-    db = sqliteDb as unknown as PostgresDb;
+  if (!config.DATABASE_URL?.match(/^postgres(ql)?:\/\//)) {
+    throw new Error('PostgreSQL requires a postgres:// or postgresql:// DATABASE_URL');
   }
+  const client = postgres(config.DATABASE_URL, {
+    max: 10,
+    idle_timeout: 30,
+    connect_timeout: 10,
+  });
+  try {
+    await applyPostgresMigrations(client);
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+  const db = drizzle(client, { schema });
 
   // Create repositories
   const repositories = {
     workspaces: new PostgresWorkspaceRepository(db),
     projects: new PostgresProjectRepository(db),
+    projectFiles: new PostgresProjectFileRepository(db),
     boards: new PostgresBoardRepository(db),
     cards: new PostgresCardRepository(db),
     notepads: new PostgresNotepadRepository(db),
@@ -108,56 +102,28 @@ export async function createPostgresInfrastructure(config: ServerConfig): Promis
 }
 
 /**
- * Apply SQL migrations to PostgreSQL.
- * Creates _migrations tracking table and applies migrations/*.sql in order.
- * Note: The existing SQLite migrations use SQLite syntax. For production,
- * you should create PostgreSQL-specific migrations. For now, we apply them
- * as-is which may work for compatible syntax.
+ * Apply PostgreSQL migrations atomically with their ledger. The transaction lock
+ * serializes concurrent startup; SQLite migrations are never read here.
  */
-async function applyMigrations(
-  sql: ReturnType<typeof postgres>,
-  migrationsDir: string,
+export async function applyPostgresMigrations(
+  client: ReturnType<typeof postgres>,
+  migrationsDir = join(process.cwd(), 'migrations/postgres'),
 ): Promise<void> {
-  await sql`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      filename TEXT PRIMARY KEY,
-      applied_at BIGINT NOT NULL
-    )
-  `;
-
-  const applied = new Set(
-    (await sql`SELECT filename FROM _migrations`).map((row: any) => row.filename),
-  );
-
   const files = readdirSync(migrationsDir)
     .filter((name) => name.endsWith('.sql'))
     .sort();
-
-  for (const file of files) {
-    if (applied.has(file)) {
-      continue;
+  await client.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(hashtext('burrow:migrations'))`;
+    await tx`CREATE TABLE IF NOT EXISTS _migrations (filename TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)`;
+    const applied = new Set(
+      (await tx<{ filename: string }[]>`SELECT filename FROM _migrations`).map(
+        (row) => row.filename,
+      ),
+    );
+    for (const file of files) {
+      if (applied.has(file)) continue;
+      await tx.unsafe(readFileSync(join(migrationsDir, file), 'utf8'));
+      await tx`INSERT INTO _migrations (filename, applied_at) VALUES (${file}, ${Date.now()})`;
     }
-    const content = readFileSync(join(migrationsDir, file), 'utf8');
-    // Skip FTS migration (notepads_fts virtual table) - not compatible with Postgres
-    if (file === '0001_fts.sql') {
-      // Create the search_vector column and GIN index instead
-      await sql`
-        ALTER TABLE notepads ADD COLUMN IF NOT EXISTS plain_text TEXT;
-        ALTER TABLE notepads ADD COLUMN IF NOT EXISTS search_vector tsvector
-          GENERATED ALWAYS AS (to_tsvector('english', title || ' ' || coalesce(plain_text, ''))) STORED;
-        CREATE INDEX IF NOT EXISTS notepads_fts_idx ON notepads USING GIN (search_vector);
-      `;
-    } else {
-      // Execute the migration (may need pg-specific adjustments)
-      await sql.unsafe(content);
-    }
-    await sql`INSERT INTO _migrations (filename, applied_at) VALUES (${file}, ${Date.now()})`;
-  }
-}
-
-/**
- * Close the database connection (for graceful shutdown).
- */
-export async function closePostgresInfrastructure(): Promise<void> {
-  // The sql client is closed by the caller if needed
+  });
 }

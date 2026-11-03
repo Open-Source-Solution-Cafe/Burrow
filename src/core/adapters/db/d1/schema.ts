@@ -5,10 +5,12 @@ import {
   text,
   index,
   uniqueIndex,
+  check,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 /**
- * Burrow Drizzle schema (source of truth) - copied from worker for D1 adapter.
+ * Canonical SQLite schema shared by Worker/D1 and Node/SQLite.
  * Timestamps are integer Unix milliseconds. IDs are text (nanoid).
  * NOTE: `notepads_fts` is a hand-written FTS5 virtual table; it is intentionally
  * NOT defined here and is excluded from drizzle-kit via tablesFilter.
@@ -80,6 +82,26 @@ export const verification = sqliteTable('verification', {
 // Workspace / members / invites
 // ---------------------------------------------------------------------------
 
+export const bootstrapState = sqliteTable(
+  'bootstrap_state',
+  {
+    id: integer('id').primaryKey(),
+    status: text('status', { enum: ['empty', 'claimed', 'complete'] }).notNull(),
+    claimEmail: text('claim_email'),
+    userId: text('user_id'),
+    workspaceId: text('workspace_id'),
+  },
+  (t) => [
+    check('bootstrap_singleton', sql`${t.id} = 1`),
+    check(
+      'bootstrap_state_valid',
+      sql`(${t.status} = 'empty' AND ${t.claimEmail} IS NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
+        OR (${t.status} = 'claimed' AND ${t.claimEmail} IS NOT NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
+        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL AND ${t.userId} IS NOT NULL AND ${t.workspaceId} IS NOT NULL)))`,
+    ),
+  ],
+);
+
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
@@ -93,11 +115,11 @@ export const members = sqliteTable(
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull().unique(), // one workspace per user in v1
+    userId: text('user_id').notNull(),
     role: text('role', { enum: ['owner', 'editor', 'viewer'] }).notNull(),
     joinedAt: integer('joined_at').notNull(),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] })],
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index('members_user').on(t.userId)],
 );
 
 export const invites = sqliteTable(
@@ -140,6 +162,25 @@ export const projects = sqliteTable(
   (t) => [index('projects_ws').on(t.workspaceId, t.position)],
 );
 
+export const projectFiles = sqliteTable(
+  'project_files',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull(),
+    filename: text('filename'),
+    byteSize: integer('byte_size'),
+    createdBy: text('created_by').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.storageKey] }),
+    index('project_files_storage_key_idx').on(t.storageKey),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Notepads
 // ---------------------------------------------------------------------------
@@ -164,6 +205,7 @@ export const notepads = sqliteTable(
     position: text('position').notNull(),
     isFavorite: integer('is_favorite', { mode: 'boolean' }).notNull().default(false),
     deletedAt: integer('deleted_at'),
+    deletionOperationId: text('deletion_operation_id'),
     createdBy: text('created_by').notNull(),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
@@ -172,6 +214,7 @@ export const notepads = sqliteTable(
     index('notepads_tree').on(t.projectId, t.parentId, t.position),
     index('notepads_deleted_idx').on(t.projectId, t.deletedAt),
     index('notepads_project_deleted_position_idx').on(t.projectId, t.deletedAt, t.position),
+    index('notepads_deletion_operation_idx').on(t.deletionOperationId),
   ],
 );
 
@@ -191,6 +234,7 @@ export const boards = sqliteTable(
     icon: text('icon'),
     position: text('position').notNull(),
     deletedAt: integer('deleted_at'),
+    deletionOperationId: text('deletion_operation_id'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },

@@ -1,14 +1,19 @@
+import { cardInProjectScope, cardSourceAgreement, liveCardSource } from '../../card-source';
 import type { DB } from '../client';
 import * as t from '../schema';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { runBatch } from '../lib/batch';
-import { chunkByParamBudget, chunkInList } from '../lib/chunk';
+import { chunkByParamBudget, chunkInList } from '../../../../services/utils/chunk';
+import { cardCreationRows } from '../../../../entities/card';
+import { ftsInsertNowStmt } from '../lib/search';
 import type {
   ICardRepository,
   Card,
-  CreateCardData,
-  UpdateCardData,
+  CardMutationScope,
+  CommentDeleteResult,
+  CreateCommentMutation,
+  UpdateCardMutation,
   CardSubtask,
   CreateSubtaskData,
   UpdateSubtaskData,
@@ -16,15 +21,90 @@ import type {
   MyTasksFilters,
   MyTaskItem,
   CardSummary,
+  ProjectScope,
   Comment,
-  CreateCommentData,
   CardPriority,
   CardWithDetails,
+  CardPlan,
 } from '../../../../infrastructure/types';
+
+const memberRole = (scope: CardMutationScope) => sql`EXISTS (
+  SELECT 1 FROM members m WHERE m.workspace_id = ${scope.workspaceId}
+    AND m.user_id = ${scope.actorUserId}
+    AND (${scope.minimumRole === 'owner' ? sql`m.role = 'owner'` : sql`m.role IN ('owner', 'editor')`})
+)`;
+
+const cardInScope = (scope: CardMutationScope, cardId: string) => sql`EXISTS (
+  SELECT 1 FROM cards c
+  JOIN boards b ON b.id = c.board_id
+  JOIN projects p ON p.id = b.project_id
+  JOIN board_columns col ON col.id = c.column_id AND col.board_id = c.board_id
+  JOIN notepads n ON n.id = c.notepad_id
+  WHERE c.id = ${cardId} AND p.workspace_id = ${scope.workspaceId}
+    AND b.workspace_id = p.workspace_id AND n.workspace_id = p.workspace_id
+    AND n.project_id = p.id AND n.kind = 'card' AND b.deleted_at IS NULL
+    AND n.deleted_at IS NULL AND ${memberRole(scope)}
+)`;
+
+function batchSucceeded(result: unknown): boolean {
+  return Boolean(
+    Array.isArray(result) &&
+      (result[0] as { results?: unknown[] } | undefined)?.results?.length,
+  );
+}
 
 export function createCardRepository(db: DB): ICardRepository {
   return {
-    async findById(id: string): Promise<Card | null> {
+    async createFromPlan(plan: CardPlan): Promise<boolean> {
+      const rows = cardCreationRows(plan);
+      const scope: CardMutationScope = {
+        workspaceId: plan.workspaceId,
+        actorUserId: plan.actorId,
+        minimumRole: 'editor',
+      };
+      const body = rows.notepads.find((row) => row.id === plan.notepadId)!;
+      const guardedBody = db.run(sql`INSERT INTO notepads
+        (id, workspace_id, project_id, parent_id, kind, title, content, version, position,
+         is_favorite, created_by, created_at, updated_at)
+        SELECT ${body.id}, ${body.workspaceId}, ${body.projectId}, ${body.parentId}, ${body.kind},
+          ${body.title}, ${body.content}, ${body.version}, ${body.position}, ${body.isFavorite ? 1 : 0},
+          ${body.createdBy}, ${body.createdAt}, ${body.updatedAt}
+        WHERE ${memberRole(scope)}
+          AND EXISTS (SELECT 1 FROM projects p WHERE p.id = ${plan.projectId} AND p.workspace_id = ${plan.workspaceId})
+          AND EXISTS (SELECT 1 FROM boards b JOIN board_columns col ON col.board_id = b.id
+            WHERE b.id = ${plan.boardId} AND b.project_id = ${plan.projectId}
+              AND b.workspace_id = ${plan.workspaceId} AND b.deleted_at IS NULL
+              AND col.id = ${plan.columnId})
+        RETURNING id`);
+      const statements: BatchItem<'sqlite'>[] = [guardedBody, db.run(ftsInsertNowStmt(body.id, body.title, body.plainText))];
+      for (const row of rows.notepads) {
+        if (row.id === body.id) continue;
+        statements.push(db.insert(t.notepads).values(row));
+        statements.push(db.run(ftsInsertNowStmt(row.id, row.title, row.plainText)));
+      }
+      statements.push(db.insert(t.cards).values(rows.card));
+      if (rows.links.length) statements.push(db.insert(t.notepadLinks).values(rows.links));
+      for (const chunk of chunkByParamBudget(rows.assignees, 2)) {
+        statements.push(db.insert(t.cardAssignees).values(chunk));
+      }
+      for (const chunk of chunkByParamBudget(rows.tags, 2)) {
+        statements.push(db.insert(t.notepadTags).values(chunk));
+      }
+      for (const chunk of chunkByParamBudget(rows.notifications, 10)) {
+        statements.push(db.insert(t.notifications).values(chunk));
+      }
+      try {
+        const result = await runBatch(db, statements);
+        return batchSucceeded(result);
+      } catch (error) {
+        if (error instanceof Error && /FOREIGN KEY constraint failed|SQLITE_CONSTRAINT_FOREIGNKEY/i.test(error.message)) {
+          return false;
+        }
+        throw error;
+      }
+    },
+
+    async findByIdInScope(scope: ProjectScope, id: string): Promise<Card | null> {
       const [row] = await db
         .select({
           id: t.cards.id,
@@ -44,35 +124,14 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cards)
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(eq(t.cards.id, id));
+        .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
+        .where(and(eq(t.cards.id, id), cardInProjectScope(scope, id), cardSourceAgreement(t)));
       return row ? mapCard(row) : null;
     },
 
-    async findByIdAndWorkspace(id: string, workspaceId: string): Promise<Card | null> {
-      const [row] = await db
-        .select({
-          id: t.cards.id,
-          boardId: t.cards.boardId,
-          columnId: t.cards.columnId,
-          notepadId: t.cards.notepadId,
-          position: t.cards.position,
-          priority: t.cards.priority,
-          dueDate: t.cards.dueDate,
-          createdAt: t.cards.createdAt,
-          title: t.notepads.title,
-          content: t.notepads.content,
-          version: t.notepads.version,
-          projectId: t.notepads.projectId,
-          workspaceId: t.notepads.workspaceId,
-          deletedAt: t.notepads.deletedAt,
-        })
-        .from(t.cards)
-        .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(and(eq(t.cards.id, id), eq(t.notepads.workspaceId, workspaceId)));
-      return row ? mapCard(row) : null;
-    },
-
-    async getCardWithDetails(id: string, workspaceId: string): Promise<CardWithDetails | null> {
+    async getCardWithDetails(scope: ProjectScope, id: string): Promise<CardWithDetails | null> {
       const [card] = await db
         .select({
           id: t.cards.id,
@@ -91,25 +150,38 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cards)
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(
-          and(
-            eq(t.cards.id, id),
-            eq(t.notepads.workspaceId, workspaceId),
-            isNull(t.notepads.deletedAt),
-          ),
-        );
+        .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
+        .where(and(
+          eq(t.cards.id, id),
+          eq(t.projects.id, scope.projectId),
+          eq(t.projects.workspaceId, scope.workspaceId),
+          cardInProjectScope(scope, id),
+          liveCardSource(t),
+        ));
 
       if (!card) return null;
 
       const [board] = await db
         .select({ name: t.boards.name })
         .from(t.boards)
-        .where(eq(t.boards.id, card.boardId));
+        .where(and(
+          eq(t.boards.id, card.boardId),
+          eq(t.boards.projectId, scope.projectId),
+          eq(t.boards.workspaceId, scope.workspaceId),
+        ));
 
       const [column] = await db
         .select({ name: t.boardColumns.name })
         .from(t.boardColumns)
-        .where(eq(t.boardColumns.id, card.columnId));
+        .innerJoin(t.boards, eq(t.boards.id, t.boardColumns.boardId))
+        .where(and(
+          eq(t.boardColumns.id, card.columnId),
+          eq(t.boardColumns.boardId, card.boardId),
+          eq(t.boards.projectId, scope.projectId),
+          eq(t.boards.workspaceId, scope.workspaceId),
+        ));
 
       const assignees = await db
         .select({
@@ -119,6 +191,10 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cardAssignees)
         .innerJoin(t.user, eq(t.user.id, t.cardAssignees.userId))
+        .innerJoin(
+          t.members,
+                and(eq(t.members.userId, t.cardAssignees.userId), eq(t.members.workspaceId, scope.workspaceId)),
+        )
         .where(eq(t.cardAssignees.cardId, id));
 
       const tags = await db
@@ -128,8 +204,16 @@ export function createCardRepository(db: DB): ICardRepository {
           color: t.tags.color,
         })
         .from(t.notepadTags)
+        .innerJoin(t.notepads, eq(t.notepads.id, t.notepadTags.notepadId))
         .innerJoin(t.tags, eq(t.tags.id, t.notepadTags.tagId))
-        .where(eq(t.notepadTags.notepadId, card.notepadId));
+        .where(
+          and(
+            eq(t.notepadTags.notepadId, card.notepadId),
+            eq(t.tags.projectId, scope.projectId),
+            eq(t.notepads.projectId, scope.projectId),
+            eq(t.notepads.workspaceId, scope.workspaceId),
+          ),
+        );
 
       const subtasks = await db
         .select()
@@ -143,15 +227,17 @@ export function createCardRepository(db: DB): ICardRepository {
         .from(t.editLocks)
         .where(eq(t.editLocks.notepadId, card.notepadId));
 
-      let lock: { userId: string; clientId: string; name: string; expiresAt: number } | null = null;
+      let lock: { userId?: string; clientId?: string; name: string; expiresAt: number } | null =
+        null;
       if (lockRow && lockRow.expiresAt > now) {
         const [holder] = await db
           .select({ name: t.user.name })
           .from(t.user)
-          .where(eq(t.user.id, lockRow.userId));
+          .innerJoin(t.members, eq(t.members.userId, t.user.id))
+          .where(and(eq(t.user.id, lockRow.userId), eq(t.members.workspaceId, scope.workspaceId)));
         lock = {
-          userId: lockRow.userId,
-          clientId: lockRow.clientId,
+          userId: holder ? lockRow.userId : undefined,
+          clientId: holder ? lockRow.clientId : undefined,
           name: holder?.name || 'Someone',
           expiresAt: lockRow.expiresAt,
         };
@@ -169,80 +255,101 @@ export function createCardRepository(db: DB): ICardRepository {
       };
     },
 
-    async create(data: CreateCardData): Promise<Card> {
-      await db.insert(t.cards).values(data);
-      // CreateCardData doesn't have all Card fields, so we need to fetch the created card
-      const [row] = await db
-        .select({
-          id: t.cards.id,
-          boardId: t.cards.boardId,
-          columnId: t.cards.columnId,
-          notepadId: t.cards.notepadId,
-          position: t.cards.position,
-          priority: t.cards.priority,
-          dueDate: t.cards.dueDate,
-          createdAt: t.cards.createdAt,
-          title: t.notepads.title,
-          content: t.notepads.content,
-          version: t.notepads.version,
-          projectId: t.notepads.projectId,
-          workspaceId: t.notepads.workspaceId,
-        })
-        .from(t.cards)
-        .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(eq(t.cards.id, data.id));
-      return mapCard(row!);
+    async updateGuarded(args: UpdateCardMutation): Promise<boolean> {
+      const { cardId, scope, data, assigneeIds, tagIds, title, now } = args;
+      const guard = db.run(sql`UPDATE cards SET id = id WHERE id = ${cardId}
+        AND ${cardInScope(scope, cardId)} RETURNING id`);
+      const statements: BatchItem<'sqlite'>[] = [guard];
+      for (const candidate of args.assignmentNotifications ?? []) {
+        statements.push(db.run(sql`INSERT INTO notifications
+          (id, workspace_id, user_id, type, actor_id, notepad_id, card_id, read_at, created_at)
+          SELECT ${candidate.id}, ${scope.workspaceId}, ${candidate.userId}, 'assigned',
+            ${scope.actorUserId}, c.notepad_id, c.id, NULL, ${now}
+          FROM cards c WHERE c.id = ${cardId} AND ${cardInScope(scope, cardId)}
+            AND EXISTS (SELECT 1 FROM members target WHERE target.workspace_id = ${scope.workspaceId} AND target.user_id = ${candidate.userId})
+            AND NOT EXISTS (SELECT 1 FROM card_assignees old WHERE old.card_id = c.id AND old.user_id = ${candidate.userId})`));
+      }
+      if (assigneeIds !== undefined) {
+        statements.push(db.run(sql`DELETE FROM card_assignees WHERE card_id = ${cardId} AND ${cardInScope(scope, cardId)}`));
+        for (const chunk of chunkByParamBudget([...new Set(assigneeIds)], 2, 0)) {
+          for (const userId of chunk) {
+            statements.push(db.run(sql`INSERT INTO card_assignees (card_id, user_id)
+              SELECT ${cardId}, ${userId} WHERE ${cardInScope(scope, cardId)}
+                AND EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ${scope.workspaceId} AND m.user_id = ${userId})`));
+          }
+        }
+      }
+      if (tagIds !== undefined) {
+        statements.push(db.run(sql`DELETE FROM notepad_tags WHERE notepad_id = (SELECT notepad_id FROM cards WHERE id = ${cardId})
+          AND ${cardInScope(scope, cardId)}`));
+        for (const chunk of chunkByParamBudget([...new Set(tagIds)], 2, 0)) {
+          for (const tagId of chunk) {
+            statements.push(db.run(sql`INSERT INTO notepad_tags (notepad_id, tag_id)
+              SELECT c.notepad_id, ${tagId} FROM cards c WHERE c.id = ${cardId} AND ${cardInScope(scope, cardId)}
+                AND EXISTS (SELECT 1 FROM tags t JOIN notepads n ON n.id = c.notepad_id
+                  WHERE t.id = ${tagId} AND t.project_id = n.project_id)`));
+          }
+        }
+      }
+      if (Object.keys(data).length > 0) {
+        statements.push(db.update(t.cards).set(data).where(and(eq(t.cards.id, cardId), sql`${cardInScope(scope, cardId)}`)));
+      }
+      if (title) {
+        statements.push(db.run(sql`UPDATE notepads SET title = ${title.value}, updated_at = ${now}
+          WHERE id = (SELECT notepad_id FROM cards WHERE id = ${cardId}) AND ${cardInScope(scope, cardId)}`));
+        statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id = (SELECT notepad_id FROM cards WHERE id = ${cardId})
+          AND ${cardInScope(scope, cardId)}`));
+        statements.push(db.run(sql`INSERT INTO notepads_fts (notepad_id, project_id, title, body)
+          SELECT n.id, n.project_id, ${title.value}, ${title.plainText} FROM notepads n
+          JOIN cards c ON c.notepad_id = n.id WHERE c.id = ${cardId} AND ${cardInScope(scope, cardId)}`));
+      }
+      return batchSucceeded(await runBatch(db, statements));
     },
 
-    async update(id: string, data: UpdateCardData): Promise<void> {
-      await db.update(t.cards).set(data).where(eq(t.cards.id, id));
-    },
-
-    async move(id: string, columnId: string, position: string): Promise<void> {
-      await db.update(t.cards).set({ columnId, position }).where(eq(t.cards.id, id));
-    },
-
-    async softDelete(_id: string, _deletedAt: number): Promise<void> {
-      // Cards don't have deletedAt; they use the notepad's deletedAt
-      // This is handled by the service calling notepad.softDelete
-      throw new Error('Use notepad repository for card soft delete');
-    },
-
-    async restore(_id: string): Promise<void> {
-      // Cards don't have deletedAt; they use the notepad's deletedAt
-      // This is handled by the service calling notepad.restore
-      throw new Error('Use notepad repository for card restore');
-    },
-
-    async hardDelete(id: string): Promise<void> {
-      await db.delete(t.cards).where(eq(t.cards.id, id));
+    async moveGuarded(id: string, columnId: string, position: string, scope: CardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`UPDATE cards SET column_id = ${columnId}, position = ${position}
+        WHERE id = ${id} AND ${cardInScope(scope, id)} AND EXISTS (
+          SELECT 1 FROM boards b JOIN board_columns col ON col.board_id = b.id
+          WHERE b.id = cards.board_id AND col.id = ${columnId} AND b.workspace_id = ${scope.workspaceId}
+            AND b.deleted_at IS NULL
+        ) RETURNING id`);
+      return rows.length === 1;
     },
 
     // Subtasks
-    async listSubtasks(cardId: string): Promise<CardSubtask[]> {
+    async listSubtasks(scope: ProjectScope, cardId: string): Promise<CardSubtask[]> {
       const rows = await db
         .select()
         .from(t.cardSubtasks)
-        .where(eq(t.cardSubtasks.cardId, cardId))
+        .where(and(eq(t.cardSubtasks.cardId, cardId), cardInProjectScope(scope, cardId)))
         .orderBy(asc(t.cardSubtasks.position));
       return rows.map(mapSubtask);
     },
 
-    async createSubtask(data: CreateSubtaskData): Promise<CardSubtask> {
-      await db.insert(t.cardSubtasks).values(data);
-      return mapSubtask(data);
+    async createSubtaskGuarded(data: CreateSubtaskData, scope: CardMutationScope): Promise<CardSubtask | null> {
+      const rows = await db.all<CardSubtask>(sql`INSERT INTO card_subtasks (id, card_id, title, completed, position, created_at)
+        SELECT ${data.id}, ${data.cardId}, ${data.title}, ${data.completed ? 1 : 0}, ${data.position}, ${data.createdAt}
+        WHERE ${cardInScope(scope, data.cardId)} RETURNING id, card_id AS "cardId", title, completed, position, created_at AS "createdAt"`);
+      return rows[0] ? mapSubtask(rows[0]) : null;
     },
 
-    async updateSubtask(id: string, data: UpdateSubtaskData): Promise<void> {
-      await db.update(t.cardSubtasks).set(data).where(eq(t.cardSubtasks.id, id));
+    async updateSubtaskGuarded(id: string, cardId: string, data: UpdateSubtaskData, scope: CardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`UPDATE card_subtasks SET
+        title = CASE WHEN ${data.title !== undefined ? 1 : 0} THEN ${data.title ?? null} ELSE title END,
+        completed = CASE WHEN ${data.completed !== undefined ? 1 : 0} THEN ${data.completed ? 1 : 0} ELSE completed END,
+        position = CASE WHEN ${data.position !== undefined ? 1 : 0} THEN ${data.position ?? null} ELSE position END
+        WHERE id = ${id} AND card_id = ${cardId} AND ${cardInScope(scope, cardId)} RETURNING id`);
+      return rows.length === 1;
     },
 
-    async deleteSubtask(id: string): Promise<void> {
-      await db.delete(t.cardSubtasks).where(eq(t.cardSubtasks.id, id));
+    async deleteSubtaskGuarded(id: string, cardId: string, scope: CardMutationScope): Promise<boolean> {
+      const rows = await db.all<{ id: string }>(sql`DELETE FROM card_subtasks WHERE id = ${id} AND card_id = ${cardId}
+        AND ${cardInScope(scope, cardId)} RETURNING id`);
+      return rows.length === 1;
     },
 
     // Assignees
-    async listAssignees(cardId: string): Promise<CardAssignee[]> {
+    async listAssignees(scope: ProjectScope, cardId: string): Promise<CardAssignee[]> {
       const rows = await db
         .select({
           cardId: t.cardAssignees.cardId,
@@ -252,28 +359,13 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cardAssignees)
         .innerJoin(t.user, eq(t.user.id, t.cardAssignees.userId))
-        .where(eq(t.cardAssignees.cardId, cardId));
+        .where(and(eq(t.cardAssignees.cardId, cardId), cardInProjectScope(scope, cardId)));
       return rows.map((r) => ({
         cardId: r.cardId,
         userId: r.userId,
         name: r.name,
         image: r.image,
       }));
-    },
-
-    async setAssignees(cardId: string, userIds: string[]): Promise<void> {
-      const uniqueUserIds = [...new Set(userIds)];
-      const statements: BatchItem<'sqlite'>[] = [
-        db.delete(t.cardAssignees).where(eq(t.cardAssignees.cardId, cardId)),
-      ];
-      if (uniqueUserIds.length > 0) {
-        for (const chunk of chunkByParamBudget(uniqueUserIds, 2, 0)) {
-          statements.push(
-            db.insert(t.cardAssignees).values(chunk.map((userId) => ({ cardId, userId }))),
-          );
-        }
-      }
-      await runBatch(db, statements);
     },
 
     async validateAssignees(workspaceId: string, userIds: string[]): Promise<{ userId: string }[]> {
@@ -286,31 +378,32 @@ export function createCardRepository(db: DB): ICardRepository {
     },
 
     // Tags
-    async listTagIds(notepadId: string): Promise<string[]> {
+    async listTagIds(scope: ProjectScope, notepadId: string): Promise<string[]> {
       const rows = await db
         .select({ tagId: t.notepadTags.tagId })
         .from(t.notepadTags)
-        .where(eq(t.notepadTags.notepadId, notepadId));
+        .innerJoin(t.notepads, eq(t.notepads.id, t.notepadTags.notepadId))
+        .innerJoin(
+          t.projects,
+          and(
+            eq(t.projects.id, t.notepads.projectId),
+            eq(t.projects.workspaceId, t.notepads.workspaceId),
+          ),
+        )
+        .innerJoin(
+          t.tags,
+          and(eq(t.tags.id, t.notepadTags.tagId), eq(t.tags.projectId, t.notepads.projectId)),
+        )
+        .where(and(
+          eq(t.notepadTags.notepadId, notepadId),
+          eq(t.notepads.workspaceId, scope.workspaceId),
+          eq(t.notepads.projectId, scope.projectId),
+        ));
       return rows.map((r) => r.tagId);
     },
 
-    async setTagIds(notepadId: string, tagIds: string[]): Promise<void> {
-      const uniqueTagIds = [...new Set(tagIds)];
-      const statements: BatchItem<'sqlite'>[] = [
-        db.delete(t.notepadTags).where(eq(t.notepadTags.notepadId, notepadId)),
-      ];
-      if (uniqueTagIds.length > 0) {
-        for (const chunk of chunkByParamBudget(uniqueTagIds, 2, 0)) {
-          statements.push(
-            db.insert(t.notepadTags).values(chunk.map((tagId) => ({ notepadId, tagId }))),
-          );
-        }
-      }
-      await runBatch(db, statements);
-    },
-
     // Comments
-    async listComments(cardId: string): Promise<Comment[]> {
+    async listComments(scope: ProjectScope, cardId: string): Promise<Comment[]> {
       const rows = await db
         .select({
           id: t.cardComments.id,
@@ -324,31 +417,45 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cardComments)
         .innerJoin(t.user, eq(t.user.id, t.cardComments.userId))
-        .where(eq(t.cardComments.cardId, cardId))
+        .where(and(eq(t.cardComments.cardId, cardId), cardInProjectScope(scope, cardId)))
         .orderBy(asc(t.cardComments.createdAt));
       return rows.map(mapComment);
     },
 
-    async createComment(data: CreateCommentData): Promise<Comment> {
-      await db.insert(t.cardComments).values(data);
-      // Fetch the user info for name and image
-      const [user] = await db
-        .select({ name: t.user.name, image: t.user.image })
-        .from(t.user)
-        .where(eq(t.user.id, data.userId));
-      return {
-        id: data.id,
-        cardId: data.cardId,
-        userId: data.userId,
-        content: data.content,
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-        name: user?.name ?? 'Someone',
-        image: user?.image ?? null,
-      };
+    async createCommentGuarded(args: CreateCommentMutation): Promise<Comment | null> {
+      const { data, scope, now } = args;
+      const statements: BatchItem<'sqlite'>[] = [db.run(sql`INSERT INTO card_comments
+        (id, card_id, user_id, content, created_at, updated_at)
+        SELECT ${data.id}, ${data.cardId}, ${data.userId}, ${data.content}, ${data.createdAt}, ${data.updatedAt}
+        WHERE ${cardInScope(scope, data.cardId)} AND ${data.userId} = ${scope.actorUserId}
+        RETURNING id`)];
+      for (const target of args.mentionNotifications) {
+        statements.push(db.run(sql`INSERT INTO notifications
+          (id, workspace_id, user_id, type, actor_id, notepad_id, card_id, read_at, created_at)
+          SELECT ${target.id}, ${scope.workspaceId}, ${target.userId}, 'mention', ${scope.actorUserId},
+            c.notepad_id, c.id, NULL, ${now} FROM cards c
+          WHERE c.id = ${data.cardId} AND ${cardInScope(scope, data.cardId)}
+            AND EXISTS (SELECT 1 FROM card_comments cc WHERE cc.id = ${data.id} AND cc.card_id = c.id)
+            AND EXISTS (SELECT 1 FROM members m WHERE m.workspace_id = ${scope.workspaceId} AND m.user_id = ${target.userId})`));
+      }
+      const succeeded = batchSucceeded(await runBatch(db, statements));
+      if (!succeeded) return null;
+      const [source] = await db.select({ projectId: t.projects.id }).from(t.cards)
+        .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
+        .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
+        .where(and(
+          eq(t.cards.id, data.cardId),
+          eq(t.projects.workspaceId, scope.workspaceId),
+          cardSourceAgreement(t),
+        ));
+      return source
+        ? this.getComment({ workspaceId: scope.workspaceId, projectId: source.projectId }, data.id, data.cardId)
+        : null;
     },
 
-    async getComment(id: string, cardId: string): Promise<Comment | null> {
+    async getComment(scope: ProjectScope, id: string, cardId: string): Promise<Comment | null> {
       const [row] = await db
         .select({
           id: t.cardComments.id,
@@ -362,16 +469,28 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cardComments)
         .innerJoin(t.user, eq(t.user.id, t.cardComments.userId))
-        .where(and(eq(t.cardComments.id, id), eq(t.cardComments.cardId, cardId)));
+        .where(and(
+          eq(t.cardComments.id, id),
+          eq(t.cardComments.cardId, cardId),
+          cardInProjectScope(scope, cardId),
+        ));
       return row ? mapComment(row) : null;
     },
 
-    async deleteComment(id: string): Promise<void> {
-      await db.delete(t.cardComments).where(eq(t.cardComments.id, id));
+    async deleteCommentGuarded(id: string, cardId: string, scope: CardMutationScope): Promise<CommentDeleteResult> {
+      const deleted = await db.all<{ id: string }>(sql`DELETE FROM card_comments WHERE id = ${id} AND card_id = ${cardId}
+        AND ${cardInScope(scope, cardId)} AND EXISTS (
+          SELECT 1 FROM members m WHERE m.workspace_id = ${scope.workspaceId} AND m.user_id = ${scope.actorUserId}
+            AND (card_comments.user_id = ${scope.actorUserId} OR m.role = 'owner')
+        ) RETURNING id`);
+      if (deleted.length === 1) return 'deleted';
+      const [comment] = await db.select({ id: t.cardComments.id }).from(t.cardComments)
+        .where(and(eq(t.cardComments.id, id), eq(t.cardComments.cardId, cardId)));
+      return comment ? 'forbidden' : 'not_found';
     },
 
     // Queries
-    async listByColumn(columnId: string): Promise<Card[]> {
+    async listByColumn(scope: ProjectScope, columnId: string): Promise<Card[]> {
       const rows = await db
         .select({
           id: t.cards.id,
@@ -390,7 +509,15 @@ export function createCardRepository(db: DB): ICardRepository {
         })
         .from(t.cards)
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-        .where(and(eq(t.cards.columnId, columnId), isNull(t.notepads.deletedAt)))
+        .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
+        .where(and(
+          eq(t.cards.columnId, columnId),
+          eq(t.projects.workspaceId, scope.workspaceId),
+          eq(t.projects.id, scope.projectId),
+          liveCardSource(t),
+        ))
         .orderBy(asc(t.cards.position));
       return rows.map(mapCard);
     },
@@ -426,9 +553,8 @@ export function createCardRepository(db: DB): ICardRepository {
         .where(
           and(
             eq(t.cardAssignees.userId, userId),
-            eq(t.notepads.workspaceId, workspaceId),
-            isNull(t.notepads.deletedAt),
-            isNull(t.boards.deletedAt),
+            eq(t.projects.workspaceId, workspaceId),
+            liveCardSource(t),
             isNull(t.projects.archivedAt),
             filters.projectId ? eq(t.boards.projectId, filters.projectId) : undefined,
           ),
@@ -467,6 +593,13 @@ export function createCardRepository(db: DB): ICardRepository {
           })
           .from(t.notepadTags)
           .innerJoin(t.tags, eq(t.tags.id, t.notepadTags.tagId))
+          .innerJoin(
+            t.notepads,
+            and(
+              eq(t.notepads.id, t.notepadTags.notepadId),
+              eq(t.notepads.projectId, t.tags.projectId),
+            ),
+          )
           .where(inArray(t.notepadTags.notepadId, chunk));
         tagRows.push(...more);
       }
@@ -498,23 +631,12 @@ export function createCardRepository(db: DB): ICardRepository {
       }));
     },
 
-    async getCardsSummary(workspaceId: string, cardIds: string[]): Promise<CardSummary[]> {
+    async getCardsSummary(scope: ProjectScope, cardIds: string[]): Promise<CardSummary[]> {
       if (cardIds.length === 0) return [];
-      const cappedIds = cardIds.slice(0, 500);
 
-      const rows: {
-        id: string;
-        notepadId: string;
-        boardId: string;
-        columnId: string;
-        priority: string | null;
-        dueDate: number | null;
-        title: string;
-        boardName: string;
-        columnName: string;
-      }[] = [];
+      const rows: Array<Omit<CardSummary, 'assignees'>> = [];
 
-      for (const chunk of chunkInList(cappedIds, 1)) {
+      for (const chunk of chunkInList([...new Set(cardIds)], 3)) {
         const chunkRows = await db
           .select({
             id: t.cards.id,
@@ -530,12 +652,20 @@ export function createCardRepository(db: DB): ICardRepository {
           .from(t.cards)
           .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
           .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
-          .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
+          .innerJoin(
+            t.boardColumns,
+            and(
+              eq(t.boardColumns.id, t.cards.columnId),
+              eq(t.boardColumns.boardId, t.cards.boardId),
+            ),
+          )
+          .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
           .where(
             and(
               inArray(t.cards.id, chunk),
-              eq(t.notepads.workspaceId, workspaceId),
-              isNull(t.notepads.deletedAt),
+              eq(t.projects.workspaceId, scope.workspaceId),
+              eq(t.projects.id, scope.projectId),
+              liveCardSource(t),
             ),
           );
         rows.push(...chunkRows);
@@ -544,14 +674,9 @@ export function createCardRepository(db: DB): ICardRepository {
       if (rows.length === 0) return [];
 
       const fetchedCardIds = rows.map((r) => r.id);
-      const assignees: {
-        cardId: string;
-        userId: string;
-        name: string;
-        image: string | null;
-      }[] = [];
+      const assignees: Array<{ cardId: string } & CardSummary['assignees'][number]> = [];
 
-      for (const chunk of chunkInList(fetchedCardIds, 0)) {
+      for (const chunk of chunkInList(fetchedCardIds, 1)) {
         const chunkAssignees = await db
           .select({
             cardId: t.cardAssignees.cardId,
@@ -560,39 +685,30 @@ export function createCardRepository(db: DB): ICardRepository {
             image: t.user.image,
           })
           .from(t.cardAssignees)
-          .innerJoin(t.user, eq(t.user.id, t.cardAssignees.userId))
+          .innerJoin(
+            t.members,
+            and(
+              eq(t.members.userId, t.cardAssignees.userId),
+              eq(t.members.workspaceId, scope.workspaceId),
+            ),
+          )
+          .innerJoin(t.user, eq(t.user.id, t.members.userId))
           .where(inArray(t.cardAssignees.cardId, chunk));
         assignees.push(...chunkAssignees);
       }
 
-      const assigneesByCard = new Map<string, typeof assignees>();
-      for (const a of assignees) {
-        const list = assigneesByCard.get(a.cardId) || [];
-        list.push(a);
-        assigneesByCard.set(a.cardId, list);
+      const assigneesByCard = new Map<string, CardSummary['assignees']>();
+      for (const { cardId, ...assignee } of assignees) {
+        const list = assigneesByCard.get(cardId) || [];
+        list.push(assignee);
+        assigneesByCard.set(cardId, list);
       }
-
-      return rows.map((r) => ({
-        id: r.id,
-        notepadId: r.notepadId,
-        title: r.title,
-        boardId: r.boardId,
-        boardName: r.boardName,
-        columnId: r.columnId,
-        columnName: r.columnName,
-        priority: r.priority as CardPriority | null,
-        dueDate: r.dueDate,
-        assignees: (assigneesByCard.get(r.id) || []).map((a) => ({
-          userId: a.userId,
-          name: a.name,
-          image: a.image,
-        })),
-      }));
+      return rows.map((row) => ({ ...row, assignees: assigneesByCard.get(row.id) || [] }));
     },
 
     // Search/suggest
     async findByPattern(
-      projectId: string,
+      scope: ProjectScope,
       pattern: string,
       limit: number,
     ): Promise<{ id: string; title: string; boardName: string; priority: CardPriority | null }[]> {
@@ -607,11 +723,13 @@ export function createCardRepository(db: DB): ICardRepository {
         .from(t.cards)
         .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
         .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .innerJoin(t.boardColumns, eq(t.boardColumns.id, t.cards.columnId))
         .where(
           and(
-            eq(t.boards.projectId, projectId),
-            isNull(t.notepads.deletedAt),
-            isNull(t.boards.deletedAt),
+            eq(t.projects.id, scope.projectId),
+            eq(t.projects.workspaceId, scope.workspaceId),
+            liveCardSource(t),
             sql`${t.notepads.title} LIKE ${searchPattern}`,
           ),
         )

@@ -1,5 +1,4 @@
 // Re-export all services
-export { WorkspaceService } from './services/workspaces';
 export { ProjectService } from './services/projects';
 export {
   NotepadService,
@@ -11,7 +10,6 @@ export { BoardService } from './services/boards';
 export { CardService } from './services/cards';
 export { MemberService } from './services/members';
 export { CommentService, extractMentionedUserIds } from './services/comments';
-export { NotificationService } from './services/notifications';
 export { TagService } from './services/tags';
 export { InviteService } from './services/invites';
 
@@ -43,8 +41,8 @@ export {
   type ExtractResult,
   type ExtractedLink,
   type ExtractedMention,
-} from './shared/extract';
-export { diffLinks, filterWorkspaceTargets } from './shared/links';
+} from '../shared/extract';
+export { diffLinks } from './shared/links';
 export { getDescendantIds, getDepth, getSubtreeHeight, wouldCauseCycle } from './shared/tree';
 export { hashToken } from './shared/crypto';
 export {
@@ -54,7 +52,7 @@ export {
   NOTEPAD_LINK_BLOCK,
   CARD_LINK_BLOCK,
   BOARD_LINK_BLOCK,
-} from './shared/blocks';
+} from '../shared/blocks';
 
 // Re-export infrastructure
 export type {
@@ -100,8 +98,10 @@ export type { IEmailProvider, SendEmailParams } from './adapters/email';
 
 // Re-export middleware
 export { securityHeaders, bodyLimit, DEFAULT_MAX_BODY_BYTES } from './middleware/security';
-export { createSessionMiddleware, requireSession, requireRole } from './middleware/session';
-export { zValidator } from './middleware/validator';
+export {
+  createIdentityMiddleware,
+  requireRole,
+} from './middleware/session';
 
 // Re-export app factory
 export { createCoreApp } from './app';

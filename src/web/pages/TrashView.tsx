@@ -14,12 +14,16 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 
 export function TrashView() {
-  const { projectId } = useParams({ strict: false }) as { projectId?: string };
-  const { data: projects = [] } = useProjects();
-  const project = projects.find((p) => p.id === projectId) || projects[0];
+  const { workspaceId, projectId } = useParams({ strict: false }) as {
+    workspaceId?: string;
+    projectId?: string;
+  };
+  const { data: projects = [], isLoading: projectsLoading, isError: projectsError } =
+    useProjects(workspaceId);
+  const project = projectId === undefined ? projects[0] : projects.find((p) => p.id === projectId);
   const currentProjectId = project?.id;
 
-  const { data: trash, isLoading } = useTrash(currentProjectId);
+  const { data: trash, isLoading, isError: trashError } = useTrash(workspaceId, currentProjectId);
   const restoreNotepad = useRestoreNotepad();
   const permanentDeleteNotepad = usePermanentDeleteNotepad();
   const restoreBoard = useRestoreBoard();
@@ -30,32 +34,48 @@ export function TrashView() {
     type: 'notepad' | 'board';
     id: string;
     name: string;
+    workspaceId: string;
+    projectId: string;
   } | null>(null);
 
   const notepads = trash?.notepads || [];
   const boards = trash?.boards || [];
 
   const handleRestoreNotepad = (notepadId: string) => {
-    if (!currentProjectId) return;
-    restoreNotepad.mutate({ notepadId, projectId: currentProjectId });
+    if (!workspaceId || !currentProjectId) return;
+    restoreNotepad.mutate({ workspaceId, notepadId, projectId: currentProjectId });
   };
 
   const handlePermanentDeleteNotepad = (notepadId: string, title: string) => {
-    if (!currentProjectId) return;
-    setConfirmDelete({ type: 'notepad', id: notepadId, name: title });
+    if (!workspaceId || !currentProjectId) return;
+    setConfirmDelete({ type: 'notepad', id: notepadId, name: title, workspaceId, projectId: currentProjectId });
   };
 
   const handleRestoreBoard = (boardId: string) => {
-    if (!currentProjectId) return;
-    restoreBoard.mutate({ boardId, projectId: currentProjectId });
+    if (!workspaceId || !currentProjectId) return;
+    restoreBoard.mutate({ workspaceId, boardId, projectId: currentProjectId });
   };
 
   const handlePermanentDeleteBoard = (boardId: string, name: string) => {
-    if (!currentProjectId) return;
-    setConfirmDelete({ type: 'board', id: boardId, name });
+    if (!workspaceId || !currentProjectId) return;
+    setConfirmDelete({ type: 'board', id: boardId, name, workspaceId, projectId: currentProjectId });
   };
 
   const totalCount = notepads.length + boards.length;
+
+  if (projectsLoading || projectsError || !project || trashError) {
+    return (
+      <div className="flex-1 p-8 text-sm text-[var(--muted)]" role="status">
+        {projectsLoading
+          ? 'Loading project…'
+          : projectsError
+            ? 'Unable to load projects. Please try again.'
+            : !project
+              ? 'Project not found or no longer available. Select a project from the sidebar.'
+              : 'Unable to load trash. Please try again.'}
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -192,7 +212,7 @@ export function TrashView() {
         )}
       </div>
 
-      {confirmDelete && (
+      {confirmDelete && confirmDelete.workspaceId === workspaceId && confirmDelete.projectId === currentProjectId && (
         <ConfirmDialog
           open
           title={`Permanently delete ${confirmDelete.type === 'notepad' ? 'notepad' : 'board'}?`}
@@ -205,17 +225,19 @@ export function TrashView() {
           danger
           busy={permanentDeleteNotepad.isPending || permanentDeleteBoard.isPending}
           onConfirm={async () => {
-            if (!currentProjectId) return;
+            if (!workspaceId || !currentProjectId || confirmDelete.workspaceId !== workspaceId || confirmDelete.projectId !== currentProjectId) return;
             try {
               if (confirmDelete.type === 'notepad') {
                 await permanentDeleteNotepad.mutateAsync({
+                  workspaceId: confirmDelete.workspaceId,
                   notepadId: confirmDelete.id,
-                  projectId: currentProjectId,
+                  projectId: confirmDelete.projectId,
                 });
               } else {
                 await permanentDeleteBoard.mutateAsync({
+                  workspaceId: confirmDelete.workspaceId,
                   boardId: confirmDelete.id,
-                  projectId: currentProjectId,
+                  projectId: confirmDelete.projectId,
                 });
               }
               setConfirmDelete(null);

@@ -21,6 +21,8 @@ import { Input } from '../ui/Input';
 import { StatusDiamond } from '../ui/StatusDiamond';
 
 interface SubtasksSectionProps {
+  workspaceId: string;
+  projectId: string;
   cardId: string;
   boardId: string;
   subtasks: SubtaskItem[];
@@ -28,10 +30,14 @@ interface SubtasksSectionProps {
 
 function SubtaskRow({
   subtask,
+  workspaceId,
+  projectId,
   cardId,
   boardId,
 }: {
   subtask: SubtaskItem;
+  workspaceId: string;
+  projectId: string;
   cardId: string;
   boardId: string;
 }) {
@@ -59,7 +65,7 @@ function SubtaskRow({
   const commitRename = () => {
     const trimmed = draft.trim();
     if (trimmed && trimmed !== subtask.title) {
-      updateSubtask.mutate({ cardId, boardId, subtaskId: subtask.id, title: trimmed });
+      updateSubtask.mutate({ workspaceId, projectId, cardId, boardId, subtaskId: subtask.id, title: trimmed });
     } else {
       setDraft(subtask.title);
     }
@@ -87,6 +93,8 @@ function SubtaskRow({
         type="button"
         onClick={() =>
           updateSubtask.mutate({
+            workspaceId,
+            projectId,
             cardId,
             boardId,
             subtaskId: subtask.id,
@@ -132,7 +140,7 @@ function SubtaskRow({
 
       <button
         type="button"
-        onClick={() => deleteSubtask.mutate({ cardId, boardId, subtaskId: subtask.id })}
+        onClick={() => deleteSubtask.mutate({ workspaceId, projectId, cardId, boardId, subtaskId: subtask.id })}
         title="Remove subtask"
         aria-label="Remove subtask"
         className="p-0.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition shrink-0"
@@ -143,7 +151,7 @@ function SubtaskRow({
   );
 }
 
-export function SubtasksSection({ cardId, boardId, subtasks }: SubtasksSectionProps) {
+export function SubtasksSection({ workspaceId, projectId, cardId, boardId, subtasks }: SubtasksSectionProps) {
   const createSubtask = useCreateSubtask();
   const updateSubtask = useUpdateSubtask();
   const [draft, setDraft] = useState('');
@@ -159,7 +167,7 @@ export function SubtasksSection({ cardId, boardId, subtasks }: SubtasksSectionPr
     const title = draft.trim();
     if (!title || createSubtask.isPending) return;
     createSubtask.mutate(
-      { cardId, boardId, title },
+      { workspaceId, projectId, cardId, boardId, title },
       {
         onSuccess: () => {
           setDraft('');
@@ -176,7 +184,7 @@ export function SubtasksSection({ cardId, boardId, subtasks }: SubtasksSectionPr
     const afterId = computeLinearReorderAfterId(subtasks, String(active.id), String(over.id));
     if (afterId === undefined) return;
 
-    updateSubtask.mutate({ cardId, boardId, subtaskId: String(active.id), afterId });
+    updateSubtask.mutate({ workspaceId, projectId, cardId, boardId, subtaskId: String(active.id), afterId });
   };
 
   return (
@@ -212,7 +220,7 @@ export function SubtasksSection({ cardId, boardId, subtasks }: SubtasksSectionPr
           <SortableContext items={subtasks.map((s) => s.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-0.5 mb-2">
               {subtasks.map((subtask) => (
-                <SubtaskRow key={subtask.id} subtask={subtask} cardId={cardId} boardId={boardId} />
+                <SubtaskRow key={subtask.id} subtask={subtask} workspaceId={workspaceId} projectId={projectId} cardId={cardId} boardId={boardId} />
               ))}
             </div>
           </SortableContext>

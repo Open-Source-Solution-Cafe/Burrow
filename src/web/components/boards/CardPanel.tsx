@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Calendar, Flag, Plus, Tag, Trash2, Users, X } from 'lucide-react';
 import { NotepadEditor } from '../../editor/NotepadEditor';
 import {
   useCard,
+  useCreateTag,
   useDeleteCard,
   useMembers,
   useMoveCard,
@@ -22,6 +22,7 @@ import { SegmentedControl } from '../ui/SegmentedControl';
 import { StatusDiamond } from '../ui/StatusDiamond';
 
 interface CardPanelProps {
+  workspaceId: string;
   cardId: string;
   boardId: string;
   projectId: string;
@@ -37,11 +38,11 @@ const PRIORITIES = [
   { value: 'urgent', label: 'Urgent', colorVar: 'var(--danger)' },
 ] as const;
 
-export function CardPanel({ cardId, boardId, projectId, columns, onClose }: CardPanelProps) {
-  const queryClient = useQueryClient();
-  const { data: card, isLoading } = useCard(cardId);
-  const { data: members = [] } = useMembers();
-  const { data: projectTags = [] } = useProjectTags(projectId);
+export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, onClose }: CardPanelProps) {
+  const { data: card, isLoading } = useCard(workspaceId, projectId, cardId);
+  const { data: members = [] } = useMembers(workspaceId);
+  const { data: projectTags = [] } = useProjectTags(workspaceId, projectId);
+  const createTagMutation = useCreateTag();
   const updateCardMutation = useUpdateCard();
   const moveCardMutation = useMoveCard();
   const deleteCardMutation = useDeleteCard();
@@ -69,6 +70,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
   const handleTitleBlur = () => {
     if (title.trim() && title !== card.title) {
       updateCardMutation.mutate({
+        workspaceId,
+        projectId,
         cardId,
         boardId,
         title: title.trim(),
@@ -78,6 +81,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
 
   const handlePriorityChange = (priority: 'low' | 'medium' | 'high' | 'urgent' | null) => {
     updateCardMutation.mutate({
+      workspaceId,
+      projectId,
       cardId,
       boardId,
       priority,
@@ -88,6 +93,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
     const val = e.target.value;
     const timestamp = val ? new Date(val).getTime() : null;
     updateCardMutation.mutate({
+      workspaceId,
+      projectId,
       cardId,
       boardId,
       dueDate: timestamp,
@@ -97,6 +104,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
   const handleColumnChange = (newColId: string) => {
     if (newColId !== card.columnId) {
       moveCardMutation.mutate({
+        workspaceId,
+        projectId,
         cardId,
         boardId,
         columnId: newColId,
@@ -114,6 +123,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
       ? current.filter((id: string) => id !== userId)
       : [...current, userId];
     updateCardMutation.mutate({
+      workspaceId,
+      projectId,
       cardId,
       boardId,
       assigneeIds: next,
@@ -127,6 +138,8 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
       : [...currentTagIds, tagId];
     updateCardMutation.mutate(
       {
+        workspaceId,
+        projectId,
         cardId,
         boardId,
         tagIds: nextTagIds,
@@ -148,27 +161,15 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
     }
     setIsSubmittingTag(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/tags`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: trimmed }),
-      });
-      if (!res.ok) {
-        const errJson = (await res.json().catch(() => ({}))) as {
-          error?: { message?: string };
-          message?: string;
-        };
-        throw new Error(errJson.error?.message || errJson.message || 'Failed to create tag');
-      }
-      const newTag = (await res.json()) as { id: string; name: string };
-      await queryClient.invalidateQueries({ queryKey: ['projects', projectId, 'tags'] });
-      await queryClient.invalidateQueries({ queryKey: ['tags', projectId] });
+      const newTag = await createTagMutation.mutateAsync({ workspaceId, projectId, name: trimmed });
       toast.success(`Tag #${newTag.name} created`);
 
       const currentTagIds = (tags || []).map((t: any) => t.id);
       if (!currentTagIds.includes(newTag.id)) {
         updateCardMutation.mutate(
           {
+            workspaceId,
+            projectId,
             cardId,
             boardId,
             tagIds: [...currentTagIds, newTag.id],
@@ -191,7 +192,7 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
 
   const handleDelete = () => {
     deleteCardMutation.mutate(
-      { cardId, boardId },
+      { workspaceId, projectId, cardId, boardId },
       {
         onSuccess: () => {
           onClose();
@@ -199,7 +200,7 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
             duration: 6000,
             action: {
               label: 'Undo',
-              onClick: () => restoreCardMutation.mutate({ cardId }),
+              onClick: () => restoreCardMutation.mutate({ workspaceId, projectId, cardId }),
             },
           });
         },
@@ -423,7 +424,7 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
         </div>
 
         {/* Subtasks / Checklist */}
-        <SubtasksSection cardId={cardId} boardId={boardId} subtasks={subtasks} />
+        <SubtasksSection workspaceId={workspaceId} projectId={projectId} cardId={cardId} boardId={boardId} subtasks={subtasks} />
 
         {/* Card Body (BlockNote Notepad Editor) */}
         {card.notepadId && (
@@ -431,12 +432,18 @@ export function CardPanel({ cardId, boardId, projectId, columns, onClose }: Card
             <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)] mb-2">
               Card Notes & Body
             </h3>
-            <NotepadEditor notepadId={card.notepadId} hideTitle hideFavorite />
+            <NotepadEditor
+              workspaceId={workspaceId}
+              notepadId={card.notepadId}
+              projectId={card.projectId}
+              hideTitle
+              hideFavorite
+            />
           </div>
         )}
 
         {/* Discussion thread */}
-        <CommentsFeed cardId={cardId} />
+        <CommentsFeed workspaceId={workspaceId} projectId={projectId} cardId={cardId} />
       </div>
     </div>
   );

@@ -8,14 +8,17 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { projectApiPath } from '../lib/workspaceRoutes';
 
 interface NotepadPickerModalProps {
+  workspaceId: string;
   projectId: string;
   onClose: () => void;
   onSelectNotepad: (notepadId: string) => void;
 }
 
 export function NotepadPickerModal({
+  workspaceId,
   projectId,
   onClose,
   onSelectNotepad,
@@ -32,7 +35,7 @@ export function NotepadPickerModal({
     if (!newTitle.trim() || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/notepads`, {
+      const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle.trim() }),
@@ -45,7 +48,7 @@ export function NotepadPickerModal({
         throw new Error(err.error?.message || err.message || 'Failed to create notepad');
       }
       const data = (await res.json()) as { id: string };
-      queryClient.invalidateQueries({ queryKey: ['notepads', projectId] });
+      queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, projectId] });
       onSelectNotepad(data.id);
       onClose();
     } catch (err: any) {
@@ -63,7 +66,7 @@ export function NotepadPickerModal({
     }
     try {
       const res = await fetch(
-        `/api/suggest?type=notepad&projectId=${projectId}&q=${encodeURIComponent(q.trim())}`,
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=notepad&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q.trim())}`,
       );
       if (!res.ok) {
         throw new Error('Failed to search notepads');
@@ -171,13 +174,14 @@ export function NotepadPickerModal({
 }
 
 interface TaskPickerModalProps {
+  workspaceId: string;
   projectId: string;
   onClose: () => void;
   onCardCreated: (cardId: string) => void;
 }
 
-export function TaskPickerModal({ projectId, onClose, onCardCreated }: TaskPickerModalProps) {
-  const { data: boards = [] } = useBoards(projectId);
+export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated }: TaskPickerModalProps) {
+  const { data: boards = [] } = useBoards(workspaceId, projectId);
   const createCardMutation = useCreateCard();
 
   const [selectedBoardId, setSelectedBoardId] = useState(boards[0]?.id || '');
@@ -196,7 +200,7 @@ export function TaskPickerModal({ projectId, onClose, onCardCreated }: TaskPicke
   useEffect(() => {
     if (!selectedBoardId) return;
     let cancelled = false;
-    fetch(`/api/boards/${selectedBoardId}`)
+    fetch(projectApiPath(workspaceId, projectId, `boards/${selectedBoardId}`))
       .then((res) => (res.ok ? res.json() : null))
       .then((board: { columns?: Array<{ id: string; name: string }> } | null) => {
         if (cancelled || !board) return;
@@ -207,12 +211,12 @@ export function TaskPickerModal({ projectId, onClose, onCardCreated }: TaskPicke
           return cols[0]?.id || '';
         });
       })
-      .catch((err) => console.error(err));
+      .catch((err) => toast.error(err?.message || 'Failed to load board columns'));
 
     return () => {
       cancelled = true;
     };
-  }, [selectedBoardId]);
+  }, [selectedBoardId, workspaceId, projectId]);
 
   const handleBoardChange = (bId: string) => {
     setSelectedBoardId(bId);
@@ -224,6 +228,8 @@ export function TaskPickerModal({ projectId, onClose, onCardCreated }: TaskPicke
     setIsSubmitting(true);
     try {
       const res = await createCardMutation.mutateAsync({
+        workspaceId,
+        projectId,
         boardId: selectedBoardId,
         columnId: selectedColId,
         title: title.trim(),
@@ -313,13 +319,14 @@ export function TaskPickerModal({ projectId, onClose, onCardCreated }: TaskPicke
 }
 
 interface BoardPickerModalProps {
+  workspaceId: string;
   projectId: string;
   onClose: () => void;
   onSelectBoard: (boardId: string) => void;
 }
 
-export function BoardPickerModal({ projectId, onClose, onSelectBoard }: BoardPickerModalProps) {
-  const { data: boards = [], isLoading } = useBoards(projectId);
+export function BoardPickerModal({ workspaceId, projectId, onClose, onSelectBoard }: BoardPickerModalProps) {
+  const { data: boards = [], isLoading } = useBoards(workspaceId, projectId);
 
   return (
     <ModalShell open onClose={onClose} title="Link Board" className="sm:max-w-md">

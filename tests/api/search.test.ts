@@ -1,13 +1,15 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import type { SearchHit } from '../../src/worker/adapters/search/types';
+import type { SearchHit } from '../../src/core/adapters/search';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const app = createWorkerApp(env);
 
-describe('GET /api/search endpoint contract', () => {
+describe('GET /api/workspaces/:wid/search endpoint contract', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let cookie = '';
+  let workspaceId = '';
   let projectId = '';
   let boardId = '';
   let cardId = '';
@@ -34,18 +36,18 @@ describe('GET /api/search endpoint contract', () => {
     expect(userRes.status).toBe(200);
     cookie = userRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
+    const scope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: cookie } },
       env,
-    );
-    const me = (await meRes.json()) as { lastProjectId: string };
-    projectId = me.lastProjectId;
+    ));
+    workspaceId = scope.workspaceId;
+    projectId = scope.projectId;
     expect(projectId).toBeDefined();
 
     // 2. Create Tag "#bug"
     const tagRes = await app.request(
-      `http://localhost/api/projects/${projectId}/tags`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/tags`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -59,7 +61,7 @@ describe('GET /api/search endpoint contract', () => {
 
     // 3. Create Board and retrieve first column
     const boardRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -72,7 +74,7 @@ describe('GET /api/search endpoint contract', () => {
     boardId = b.id;
 
     const boardDetailRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${boardId}`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -84,7 +86,7 @@ describe('GET /api/search endpoint contract', () => {
 
     // 4. Create Card with #bug tag
     const cardRes = await app.request(
-      `http://localhost/api/columns/${colId}/cards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/columns/${colId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -103,7 +105,7 @@ describe('GET /api/search endpoint contract', () => {
 
     // 5. Create Plain Notepad tagged with #bug
     const npRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -116,7 +118,7 @@ describe('GET /api/search endpoint contract', () => {
     plainNotepadId = np.id;
 
     const tagAttachRes = await app.request(
-      `http://localhost/api/notepads/${plainNotepadId}/tags`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${plainNotepadId}/tags`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -127,9 +129,35 @@ describe('GET /api/search endpoint contract', () => {
     expect(tagAttachRes.status).toBe(200);
   });
 
+  it('rejects project search without a project ID instead of widening search', async () => {
+      const response = await app.request(
+        `http://localhost/api/workspaces/${workspaceId}/search?q=Crash&scope=project`,
+        {
+          headers: { Cookie: cookie },
+        },
+        env,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: { code: 'project_required', message: 'Project search requires a project ID' },
+      });
+  });
+
+  it('allows workspace-wide search only when requested explicitly', async () => {
+    const response = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/search?q=Crash&scope=all`,
+      {
+        headers: { Cookie: cookie },
+      },
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as SearchHit[]).map((hit) => hit.id)).toContain(cardNotepadId);
+  });
+
   it('searching #bug finds both notepads and cards tagged #bug', async () => {
     const res = await app.request(
-      `http://localhost/api/search?q=${encodeURIComponent('#bug')}&projectId=${projectId}&scope=project`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=${encodeURIComponent('#bug')}&projectId=${projectId}&scope=project`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -150,7 +178,7 @@ describe('GET /api/search endpoint contract', () => {
   it('card search results include cardId and boardId', async () => {
     // Search by card title
     const res = await app.request(
-      `http://localhost/api/search?q=Crash&projectId=${projectId}&scope=project`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=Crash&projectId=${projectId}&scope=project`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -165,7 +193,7 @@ describe('GET /api/search endpoint contract', () => {
 
     // Regular notepad should not have cardId or boardId
     const npRes = await app.request(
-      `http://localhost/api/search?q=triage&projectId=${projectId}&scope=project`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=triage&projectId=${projectId}&scope=project`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -176,5 +204,50 @@ describe('GET /api/search endpoint contract', () => {
     expect(npHit?.kind).toBe('notepad');
     expect(npHit?.cardId).toBeUndefined();
     expect(npHit?.boardId).toBeUndefined();
+  });
+
+  it('indexes inline tag labels without creating reference links or notifications', async () => {
+    const created = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
+      {
+        method: 'POST',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Inline tag document' }),
+      },
+      env,
+    );
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+    const content = JSON.stringify([
+      {
+        type: 'paragraph',
+        content: [{ type: 'mention', props: { kind: 'tag', id: tagId, label: 'axolotlindex' } }],
+      },
+    ]);
+    const saved = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${id}/content`,
+      {
+        method: 'PUT',
+        headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, baseVersion: 1 }),
+      },
+      env,
+    );
+    expect(saved.status).toBe(200);
+
+    const search = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/search?q=axolotlindex&projectId=${projectId}&scope=project`,
+      { headers: { Cookie: cookie } },
+      env,
+    );
+    expect(search.status).toBe(200);
+    expect(((await search.json()) as SearchHit[]).map((hit) => hit.id)).toContain(id);
+    for (const table of ['notepad_links', 'notifications']) {
+      const column = table === 'notepad_links' ? 'source_id' : 'notepad_id';
+      const row = await env.DB.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${column} = ?`)
+        .bind(id)
+        .first<{ n: number }>();
+      expect(row?.n).toBe(0);
+    }
   });
 });

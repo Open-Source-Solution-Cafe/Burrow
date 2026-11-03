@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { SqlLockAdapter } from '../../src/core/adapters/db/d1/adapters/lock/sql-lock';
-import { createDb } from '../../src/worker/db/client';
-import * as schema from '../../src/worker/db/schema';
+import { createDb } from '../../src/core/adapters/db/d1/client';
+import * as schema from '../../src/core/adapters/db/d1/schema';
 
 const sleep = (ms: number): Promise<void> =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -70,6 +70,7 @@ describe('SqlLockAdapter contract', () => {
     const rival = await locks().acquire(resourceId, userB, clientB, LOCK_TTL_MS);
     expect(rival.acquired).toBe(false);
     expect(rival.holderUserId).toBe(userA);
+    expect(rival).not.toHaveProperty('holderName');
 
     // Same user on a different tab/client is also rejected while the lock is live.
     const sameUserOtherClient = await locks().acquire(resourceId, userA, clientB, LOCK_TTL_MS);

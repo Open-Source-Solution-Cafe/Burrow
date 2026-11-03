@@ -1,10 +1,11 @@
-import { createStorageFromEnv } from './adapters/storage/factory';
+import { createStorageFromEnv } from '../../storage/factory';
 import { SqliteFtsSearchAdapter } from './adapters/search/sqlite-fts';
 import { SqlLockAdapter } from './adapters/lock/sql-lock';
-import { createEmailFromEnv } from './adapters/email/factory';
+import { createEmailFromEnv } from '../../email/factory';
 import { createAuthProviderWithDB } from './auth';
 import { createWorkspaceRepository } from './repositories/workspace';
 import { createProjectRepository } from './repositories/project';
+import { createProjectFileRepository } from './repositories/project-file';
 import { createBoardRepository } from './repositories/board';
 import { createCardRepository } from './repositories/card';
 import { createNotepadRepository } from './repositories/notepad';
@@ -12,8 +13,6 @@ import { createTagRepository } from './repositories/tag';
 import { createNotificationRepository } from './repositories/notification';
 import { createMemberRepository } from './repositories/member';
 import { createInviteRepository } from './repositories/invite';
-import { eq } from 'drizzle-orm';
-import * as t from './schema';
 import type { Infrastructure } from '../../../infrastructure/types';
 import type { DB } from './client';
 
@@ -41,10 +40,7 @@ interface EnvBindings {
 export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure {
   // Create adapters (stateless, can be shared)
   const search = new SqliteFtsSearchAdapter(db);
-  const locks = new SqlLockAdapter(db, async (userId) => {
-    const [u] = await db.select({ name: t.user.name }).from(t.user).where(eq(t.user.id, userId));
-    return u?.name ?? null;
-  });
+  const locks = new SqlLockAdapter(db);
   const storage = createStorageFromEnv(env);
   const auth = createAuthProviderWithDB(db, env);
   const email = createEmailFromEnv(env);
@@ -53,6 +49,7 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
   const repositories = {
     workspaces: createWorkspaceRepository(db),
     projects: createProjectRepository(db),
+    projectFiles: createProjectFileRepository(db),
     boards: createBoardRepository(db),
     cards: createCardRepository(db),
     notepads: createNotepadRepository(db),
@@ -74,4 +71,4 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
 }
 
 // Re-export constants for services that need them
-export { MAX_NOTEPAD_DEPTH, MAX_CONTENT_BYTES, LOCK_TTL_MS } from './lib/constants';
+export { MAX_NOTEPAD_DEPTH, MAX_CONTENT_BYTES, LOCK_TTL_MS } from '../../../shared/limits';

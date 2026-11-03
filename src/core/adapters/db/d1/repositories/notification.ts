@@ -3,7 +3,7 @@ import * as t from '../schema';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { runBatch } from '../lib/batch';
-import { chunkByParamBudget, chunkInList } from '../lib/chunk';
+import { chunkByParamBudget, chunkInList } from '../../../../services/utils/chunk';
 import type { INotificationRepository, Notification } from '../../../../infrastructure/types';
 
 export function createNotificationRepository(db: DB): INotificationRepository {
@@ -64,33 +64,40 @@ export function createNotificationRepository(db: DB): INotificationRepository {
       );
     },
 
-    async markRead(userId: string, notificationIds: string[]): Promise<void> {
+    async markRead(userId: string, workspaceId: string, notificationIds: string[]): Promise<void> {
+      if (notificationIds.length === 0) return;
       const now = Date.now();
-      if (notificationIds.length === 0) {
-        await db
-          .update(t.notifications)
-          .set({ readAt: now })
-          .where(and(eq(t.notifications.userId, userId), isNull(t.notifications.readAt)));
-        return;
-      }
       const statements: BatchItem<'sqlite'>[] = [];
-      for (const chunk of chunkInList(notificationIds, 2)) {
+      for (const chunk of chunkInList(notificationIds, 3)) {
         statements.push(
           db
             .update(t.notifications)
             .set({ readAt: now })
-            .where(and(eq(t.notifications.userId, userId), inArray(t.notifications.id, chunk))),
+            .where(
+              and(
+                eq(t.notifications.userId, userId),
+                eq(t.notifications.workspaceId, workspaceId),
+                isNull(t.notifications.readAt),
+                inArray(t.notifications.id, chunk),
+              ),
+            ),
         );
       }
       await runBatch(db, statements);
     },
 
-    async markAllRead(userId: string): Promise<void> {
+    async markAllRead(userId: string, workspaceId: string): Promise<void> {
       const now = Date.now();
       await db
         .update(t.notifications)
         .set({ readAt: now })
-        .where(and(eq(t.notifications.userId, userId), isNull(t.notifications.readAt)));
+        .where(
+          and(
+            eq(t.notifications.userId, userId),
+            eq(t.notifications.workspaceId, workspaceId),
+            isNull(t.notifications.readAt),
+          ),
+        );
     },
 
     async createMentions(args: {

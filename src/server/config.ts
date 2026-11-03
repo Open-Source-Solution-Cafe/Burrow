@@ -1,4 +1,9 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
+
+export function generateBootstrapToken(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
 
 const configSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3005),
@@ -6,7 +11,7 @@ const configSchema = z.object({
   LOCAL_STORAGE_PATH: z.string().min(1).default('./data/uploads'),
   BETTER_AUTH_SECRET: z.string().min(1).default('dev-secret-change-me-32-bytes-minimum!!'),
   BETTER_AUTH_URL: z.string().min(1).default('http://localhost:3005'),
-  BOOTSTRAP_TOKEN: z.string().default('dev-bootstrap-token'),
+  BOOTSTRAP_TOKEN: z.string().default(() => generateBootstrapToken()),
   DATABASE_URL: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -23,6 +28,8 @@ export type ServerConfig = z.infer<typeof configSchema>;
 /** Load + validate the Node server env. Throws a zod error on bad input. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const isProd = env.NODE_ENV === 'production';
+  const knownPlaceholders = new Set(['dev-bootstrap-token', 'test-bootstrap-token']);
+
   if (isProd) {
     if (
       !env.BETTER_AUTH_SECRET ||
@@ -36,7 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     }
     if (
       !env.BOOTSTRAP_TOKEN ||
-      env.BOOTSTRAP_TOKEN === 'dev-bootstrap-token' ||
+      knownPlaceholders.has(env.BOOTSTRAP_TOKEN) ||
       env.BOOTSTRAP_TOKEN.length < 16
     ) {
       throw new Error(
@@ -45,13 +52,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     }
   }
 
+  let bootstrapToken = env.BOOTSTRAP_TOKEN?.trim();
+  if (!bootstrapToken || (!isProd && knownPlaceholders.has(bootstrapToken))) {
+    bootstrapToken = generateBootstrapToken();
+  }
+
   return configSchema.parse({
     PORT: env.PORT,
     SQLITE_PATH: env.SQLITE_PATH,
     LOCAL_STORAGE_PATH: env.LOCAL_STORAGE_PATH,
     BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
     BETTER_AUTH_URL: env.BETTER_AUTH_URL,
-    BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN,
+    BOOTSTRAP_TOKEN: bootstrapToken,
     DATABASE_URL: env.DATABASE_URL,
     RESEND_API_KEY: env.RESEND_API_KEY,
     EMAIL_FROM: env.EMAIL_FROM,

@@ -3,7 +3,8 @@
  * One-command setup. Idempotent. Run with `pnpm run setup`.
  *
  * Targets:
- *   (default)              Local setup (installs deps, migrates local D1, prints dev URLs & token)
+ *   (default)              Local setup (installs deps, migrates Node SQLite, prints dev URLs & token)
+ *   --worker               Local Worker/D1 persisted under ./data
  *   --remote, --r, -r      Remote setup (provisions Cloudflare D1/R2, migrates, builds, deploys, sets secrets)
  *
  * Flags:
@@ -20,7 +21,8 @@ import {
   bin,
   getBootstrapToken,
   hasFlag,
-  isRemoteTarget,
+  getDatabaseTarget,
+  migrateDatabase,
   printTargetBanner,
   root,
   run,
@@ -33,13 +35,14 @@ import {
 } from './lib.mjs';
 
 const dryRun = hasFlag('--dry-run');
-const isRemote = isRemoteTarget();
+const target = getDatabaseTarget();
+const isRemote = target.kind === 'remote';
 const domain = argValue('--domain');
 const workerName = argValue('--name');
 const WRANGLER_ARGS = workerName ? ['--name', workerName] : [];
 
 async function main() {
-  printTargetBanner('Setup', isRemote);
+  printTargetBanner('Setup', target);
 
   step('Preflight');
   const nodeMajor = Number(process.versions.node.split('.')[0]);
@@ -51,24 +54,22 @@ async function main() {
   loadEnv();
   run('pnpm', ['install'], { dryRun });
 
-  step('Apply migrations to local D1');
-  run(bin('wrangler'), ['d1', 'migrations', 'apply', 'burrow', '--local'], {
-    dryRun,
-    env: { CI: '1' },
-  });
-
   if (!isRemote) {
+    step('Apply migrations to the selected local database');
+    await migrateDatabase(target, { dryRun });
     const localBootstrapToken = getBootstrapToken();
     const localUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3005';
     console.log('\n======================================================');
     console.log('✅ Local setup complete!');
     console.log(`  Local Web URL:      ${localUrl}`);
-    console.log('  Local Worker API:   http://127.0.0.1:8787');
+    console.log('  Local Backend API:  http://127.0.0.1:8787');
     console.log(`  BETTER_AUTH_URL:    ${localUrl}`);
     console.log('  BETTER_AUTH_SECRET: [configured]');
     console.log(`  BOOTSTRAP_TOKEN:    ${localBootstrapToken}`);
     console.log('======================================================');
-    console.log('\nRun `pnpm dev` to start the local development server.');
+    console.log(
+      `\nRun \`pnpm ${target.kind === 'worker' ? 'dev:worker' : 'dev'}\` to start development.`,
+    );
     console.log('To set up remote Cloudflare production instead, run:');
     console.log('  pnpm run setup -r\n');
     return;
@@ -113,10 +114,7 @@ async function main() {
   const configArgs = dryRun ? [] : getWranglerConfigArgs({ d1IdOverride: d1Id });
 
   step('Apply migrations to remote D1');
-  run(bin('wrangler'), [...configArgs, 'd1', 'migrations', 'apply', dbName, '--remote'], {
-    dryRun,
-    env: { CI: '1' },
-  });
+  await migrateDatabase(target, { dryRun, configArgs, databaseName: dbName });
 
   step('Typecheck + build');
   run(bin('typescript', 'tsc'), ['-b'], { dryRun });

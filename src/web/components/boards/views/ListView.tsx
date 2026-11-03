@@ -7,6 +7,8 @@ import { StatusDiamond } from '../../ui/StatusDiamond';
 import { PRIORITY_BADGES, PRIORITIES, type ColumnItem, type Priority } from './types';
 
 interface ListViewProps {
+  workspaceId: string;
+  projectId: string;
   boardId: string;
   columns: ColumnItem[];
   onCardClick: (cardId: string) => void;
@@ -33,7 +35,7 @@ function parseDateInput(v: string): number | null {
  * collapsible group headers, Title/Priority/Due/Assignees/Tags columns,
  * inline quick-edit for priority and due date.
  */
-export function ListView({ boardId, columns, onCardClick }: ListViewProps) {
+export function ListView({ workspaceId, projectId, boardId, columns, onCardClick }: ListViewProps) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const updateCard = useUpdateCard();
 
@@ -138,6 +140,8 @@ export function ListView({ boardId, columns, onCardClick }: ListViewProps) {
                           onChange={(e) => {
                             const v = e.target.value;
                             updateCard.mutate({
+                              workspaceId,
+                              projectId,
                               cardId: card.id,
                               boardId,
                               priority: v ? (v as Priority) : null,
@@ -174,6 +178,8 @@ export function ListView({ boardId, columns, onCardClick }: ListViewProps) {
                             onChange={(e) => {
                               const ts = e.target.value ? parseDateInput(e.target.value) : null;
                               updateCard.mutate({
+                                workspaceId,
+                                projectId,
                                 cardId: card.id,
                                 boardId,
                                 dueDate: e.target.value ? ts : null,

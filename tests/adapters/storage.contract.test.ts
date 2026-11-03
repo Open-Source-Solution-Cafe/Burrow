@@ -116,6 +116,16 @@ describe('R2StorageAdapter contract', () => {
     expect(new TextDecoder().decode(survivorBytes)).toBe('survivor');
   });
 
+  it('lists object keys in deterministic order without changing the bucket', async () => {
+    const keys = [`contract/inventory-${crypto.randomUUID()}.txt`, `contract/inventory-${crypto.randomUUID()}.txt`].sort();
+    await adapter.put(keys[1]!, new Uint8Array([2]));
+    await adapter.put(keys[0]!, new Uint8Array([1]));
+
+    expect(await adapter.listObjects()).toEqual(expect.arrayContaining(keys));
+    expect(await adapter.get(keys[0]!)).not.toBeNull();
+    expect(await adapter.get(keys[1]!)).not.toBeNull();
+  });
+
   it('rejects path-traversal and invalid keys', async () => {
     const data = new TextEncoder().encode('evil');
     await expect(adapter.put('../evil.txt', data)).rejects.toThrow();

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { SlashContext } from '../../shared/slash';
+import { projectApiPath } from '../lib/workspaceRoutes';
 
 export interface SuggestionDialogState {
   type: 'notepad' | 'task' | 'template' | 'board' | null;
@@ -129,6 +130,7 @@ export function getCustomSlashItems(
  */
 export async function getAtMenuSuggestions(
   query: string,
+  workspaceId: string,
   projectId: string,
   editor: BlockNoteEditor<any, any, any>,
 ): Promise<DefaultReactSuggestionItem[]> {
@@ -184,7 +186,9 @@ export async function getAtMenuSuggestions(
 
   // 2. Fetch People
   try {
-    const userRes = await fetch(`/api/suggest?type=user&q=${encodeURIComponent(cleanQ)}`);
+    const userRes = await fetch(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=user&q=${encodeURIComponent(cleanQ)}`,
+    );
     if (userRes.ok) {
       const users = (await userRes.json()) as Array<{
         id: string;
@@ -219,7 +223,7 @@ export async function getAtMenuSuggestions(
   // 3. Fetch Notepads
   try {
     const npRes = await fetch(
-      `/api/suggest?type=notepad&projectId=${projectId}&q=${encodeURIComponent(cleanQ)}`,
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=notepad&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(cleanQ)}`,
     );
     if (npRes.ok) {
       const notepads = (await npRes.json()) as Array<{
@@ -255,7 +259,7 @@ export async function getAtMenuSuggestions(
   // 4. Fetch Cards
   try {
     const cardRes = await fetch(
-      `/api/suggest?type=card&projectId=${projectId}&q=${encodeURIComponent(cleanQ)}`,
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=card&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(cleanQ)}`,
     );
     if (cardRes.ok) {
       const cards = (await cardRes.json()) as Array<{
@@ -296,6 +300,7 @@ export async function getAtMenuSuggestions(
  */
 export async function getHashMenuSuggestions(
   query: string,
+  workspaceId: string,
   projectId: string,
   _notepadId: string,
   editor: BlockNoteEditor<any, any, any>,
@@ -304,7 +309,7 @@ export async function getHashMenuSuggestions(
   const cleanQ = query.trim().replace(/^#/, '');
   try {
     const res = await fetch(
-      `/api/suggest?type=tag&projectId=${projectId}&q=${encodeURIComponent(cleanQ)}`,
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=tag&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(cleanQ)}`,
     );
     let tags: Array<{
       id: string;
@@ -348,7 +353,7 @@ export async function getHashMenuSuggestions(
         icon: <Plus className="w-4 h-4 text-emerald-500" />,
         onItemClick: async () => {
           try {
-            const createRes = await fetch(`/api/projects/${projectId}/tags`, {
+            const createRes = await fetch(projectApiPath(workspaceId, projectId, 'tags'), {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name: cleanQ }),

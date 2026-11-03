@@ -101,6 +101,16 @@ describe('LocalStorageAdapter', () => {
     expect(new TextDecoder().decode(await bodyToBytes(survivor.body))).toBe('c');
   });
 
+  it('lists stored keys in deterministic order without changing the store', async () => {
+    const keys = [`inventory/${randomUUID()}.png`, `inventory/${randomUUID()}.png`].sort();
+    await adapter.put(keys[1]!, new Uint8Array([2]));
+    await adapter.put(keys[0]!, new Uint8Array([1]));
+
+    expect(await adapter.listObjects()).toEqual(keys);
+    expect(await adapter.get(keys[0]!)).not.toBeNull();
+    expect(await adapter.get(keys[1]!)).not.toBeNull();
+  });
+
   it('rejects path-traversal keys', async () => {
     const data = new TextEncoder().encode('evil');
     await expect(adapter.put('../evil.txt', data)).rejects.toThrow();

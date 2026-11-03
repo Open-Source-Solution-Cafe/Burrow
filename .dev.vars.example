@@ -12,7 +12,8 @@ CLOUDFLARE_ACCOUNT_ID=
 #   BOOTSTRAP_TOKEN must be at least 16 characters.
 BETTER_AUTH_SECRET=dev-secret-change-me-32-bytes-minimum!!
 BETTER_AUTH_URL=http://localhost:3005
-BOOTSTRAP_TOKEN=dev-bootstrap-token
+BOOTSTRAP_TOKEN=
+# (Leave empty or omit to automatically generate a unique, cryptographically secure token)
 
 # Storage Configuration
 # Local disk storage (used when R2 / S3 bindings are absent):

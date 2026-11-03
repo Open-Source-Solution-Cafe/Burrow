@@ -1,12 +1,13 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
+import { createDb } from '../../src/core/adapters/db/d1/client';
 
 const app = createWorkerApp(env);
-import * as t from '../../src/worker/db/schema';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { eq } from 'drizzle-orm';
 import { expectInvariantsHold } from './helpers';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const db = createDb(env.DB);
 
@@ -14,6 +15,7 @@ describe('Phase 2: Projects Service and API', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let ownerCookie = '';
   let viewerCookie = '';
+  let workspaceId = '';
 
   it('sets up workspace with owner and viewer', async () => {
     // Register owner
@@ -33,10 +35,14 @@ describe('Phase 2: Projects Service and API', () => {
     );
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
+    const scope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: ownerCookie } }, env),
+    );
+    workspaceId = scope.workspaceId;
 
     // Create viewer invite
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {
@@ -76,7 +82,7 @@ describe('Phase 2: Projects Service and API', () => {
 
   it('lists existing projects and allows owner to create new projects', async () => {
     const listRes = await app.request(
-      'http://localhost/api/projects',
+      `http://localhost/api/workspaces/${workspaceId}/projects`,
       {
         headers: { Cookie: ownerCookie },
       },
@@ -88,7 +94,7 @@ describe('Phase 2: Projects Service and API', () => {
     project1Id = projects[0]!.id;
 
     const createRes = await app.request(
-      'http://localhost/api/projects',
+      `http://localhost/api/workspaces/${workspaceId}/projects`,
       {
         method: 'POST',
         headers: {
@@ -109,7 +115,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // Verify list contains both projects in order
     const listRes2 = await app.request(
-      'http://localhost/api/projects',
+      `http://localhost/api/workspaces/${workspaceId}/projects`,
       {
         headers: { Cookie: ownerCookie },
       },
@@ -125,7 +131,7 @@ describe('Phase 2: Projects Service and API', () => {
   it('updates and reorders projects', async () => {
     // Rename project
     const updateRes = await app.request(
-      `http://localhost/api/projects/${project2Id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}`,
       {
         method: 'PATCH',
         headers: {
@@ -143,7 +149,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // Move project 2 before project 1 (afterId = null)
     const moveRes = await app.request(
-      `http://localhost/api/projects/${project2Id}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}/move`,
       {
         method: 'POST',
         headers: {
@@ -158,7 +164,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // Verify project 2 is now first
     const listRes = await app.request(
-      'http://localhost/api/projects',
+      `http://localhost/api/workspaces/${workspaceId}/projects`,
       {
         headers: { Cookie: ownerCookie },
       },
@@ -172,7 +178,7 @@ describe('Phase 2: Projects Service and API', () => {
   it('archives and unarchives a project', async () => {
     // Archive
     const archRes = await app.request(
-      `http://localhost/api/projects/${project2Id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}`,
       {
         method: 'PATCH',
         headers: {
@@ -187,7 +193,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // List should now only show project 1
     const listRes = await app.request(
-      'http://localhost/api/projects',
+      `http://localhost/api/workspaces/${workspaceId}/projects`,
       {
         headers: { Cookie: ownerCookie },
       },
@@ -199,7 +205,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // Unarchive
     await app.request(
-      `http://localhost/api/projects/${project2Id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}`,
       {
         method: 'PATCH',
         headers: {
@@ -214,10 +220,10 @@ describe('Phase 2: Projects Service and API', () => {
 
   it('rejects mutating project endpoints for viewer with 403', async () => {
     const viewerCalls = [
-      { path: '/api/projects', method: 'POST', body: { name: 'Unauthorized' } },
-      { path: `/api/projects/${project2Id}`, method: 'PATCH', body: { name: 'Hacked' } },
-      { path: `/api/projects/${project2Id}/move`, method: 'POST', body: { afterId: null } },
-      { path: `/api/projects/${project2Id}?confirm=Renamed Project`, method: 'DELETE' },
+      { path: `/api/workspaces/${workspaceId}/projects`, method: 'POST', body: { name: 'Unauthorized' } },
+      { path: `/api/workspaces/${workspaceId}/projects/${project2Id}`, method: 'PATCH', body: { name: 'Hacked' } },
+      { path: `/api/workspaces/${workspaceId}/projects/${project2Id}/move`, method: 'POST', body: { afterId: null } },
+      { path: `/api/workspaces/${workspaceId}/projects/${project2Id}?confirm=Renamed Project`, method: 'DELETE' },
     ];
 
     for (const call of viewerCalls) {
@@ -242,7 +248,7 @@ describe('Phase 2: Projects Service and API', () => {
   it('permanent delete requires name confirmation and removes project', async () => {
     // Wrong name
     const failRes = await app.request(
-      `http://localhost/api/projects/${project2Id}?confirm=WrongName`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}?confirm=WrongName`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -255,7 +261,7 @@ describe('Phase 2: Projects Service and API', () => {
 
     // Correct name
     const successRes = await app.request(
-      `http://localhost/api/projects/${project2Id}?confirm=Renamed Project`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${project2Id}?confirm=Renamed Project`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },

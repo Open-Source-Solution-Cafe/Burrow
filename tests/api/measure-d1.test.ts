@@ -2,6 +2,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
+import { getAccountWorkspaceScope } from './account-scope';
 
 interface LoggedQuery {
   id: number;
@@ -143,14 +144,14 @@ describe('Detailed D1 Query Measurement', () => {
       : [signUpRes.headers.get('set-cookie')!];
     const cookie = setCookieHeaders.map((c) => c.split(';')[0]).join('; ');
 
-    const meRes = await app.request('http://localhost/api/me', { headers: { Cookie: cookie } }, env);
-    const meData = (await meRes.json()) as any;
-    const projectId = meData.lastProjectId;
-    const userId = meData.user.id;
+    const scope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: cookie } }, env),
+    );
+    const { workspaceId, projectId, userId } = scope;
 
     // Create a notepad for testing
     const createRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -187,15 +188,15 @@ describe('Detailed D1 Query Measurement', () => {
     }
 
     // Scenario F: Opening a notepad (read path)
-    startCapture('F: Opening a notepad (read path: GET /notepad/:id + GET /projects/:pid/notepads)');
+    startCapture('F: Opening a notepad (scoped detail + workspace project tree)');
     const openRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       { headers: { Cookie: cookie } },
       env,
     );
     expect(openRes.status).toBe(200);
     const treeRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -203,9 +204,9 @@ describe('Detailed D1 Query Measurement', () => {
     const reportF = stopCapture();
 
     // Scenario E: One lock heartbeat
-    startCapture('E: One lock heartbeat (POST /api/notepads/:id/lock)');
+    startCapture('E: One lock heartbeat (scoped notepad lock)');
     const lockRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -217,9 +218,9 @@ describe('Detailed D1 Query Measurement', () => {
     const reportE = stopCapture();
 
     // Scenario A: Change title only
-    startCapture('A: Change title only (PATCH /notepad/:id + tree invalidation GET /projects/:pid/notepads)');
+    startCapture('A: Change title only (scoped note patch + tree refresh)');
     const patchTitleRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -229,7 +230,7 @@ describe('Detailed D1 Query Measurement', () => {
     );
     expect(patchTitleRes.status).toBe(200);
     const refreshTreeRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       { headers: { Cookie: cookie } },
       env,
     );
@@ -248,7 +249,7 @@ describe('Detailed D1 Query Measurement', () => {
       },
     ]);
     const saveContentRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -275,7 +276,7 @@ describe('Detailed D1 Query Measurement', () => {
       },
     ]);
     await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -284,12 +285,12 @@ describe('Detailed D1 Query Measurement', () => {
       env,
     );
     await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       { headers: { Cookie: cookie } },
       env,
     );
     await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -315,7 +316,7 @@ describe('Detailed D1 Query Measurement', () => {
       },
     ]);
     await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -324,7 +325,7 @@ describe('Detailed D1 Query Measurement', () => {
       env,
     );
     await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -337,7 +338,7 @@ describe('Detailed D1 Query Measurement', () => {
       env,
     );
     await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -348,10 +349,10 @@ describe('Detailed D1 Query Measurement', () => {
     const reportD = stopCapture();
 
     // Scenario G: Mention / Slash / Linked Record handling
-    startCapture('G: @ mention typing (/api/suggest x 3)');
-    await app.request(`http://localhost/api/suggest?type=user&q=test`, { headers: { Cookie: cookie } }, env);
-    await app.request(`http://localhost/api/suggest?type=notepad&projectId=${projectId}&q=test`, { headers: { Cookie: cookie } }, env);
-    await app.request(`http://localhost/api/suggest?type=card&projectId=${projectId}&q=test`, { headers: { Cookie: cookie } }, env);
+    startCapture('G: @ mention typing (workspace scoped suggestions x 3)');
+    await app.request(`http://localhost/api/workspaces/${workspaceId}/suggest?type=user&q=test`, { headers: { Cookie: cookie } }, env);
+    await app.request(`http://localhost/api/workspaces/${workspaceId}/suggest?type=notepad&projectId=${projectId}&q=test`, { headers: { Cookie: cookie } }, env);
+    await app.request(`http://localhost/api/workspaces/${workspaceId}/suggest?type=card&projectId=${projectId}&q=test`, { headers: { Cookie: cookie } }, env);
     const reportG = stopCapture();
 
     // Scenario H: Saving content with mentions and links
@@ -368,7 +369,7 @@ describe('Detailed D1 Query Measurement', () => {
       },
     ]);
     await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },

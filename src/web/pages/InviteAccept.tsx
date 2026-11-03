@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Copy, Check, KeyRound, AlertCircle, UserPlus, LogIn, ArrowRight } from 'lucide-react';
-import { useMe, useInviteInfo } from '../lib/queries';
+import { useAccount, useInviteInfo } from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
@@ -12,7 +12,7 @@ export function InviteAccept() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: me, isLoading: meLoading } = useMe();
+  const { data: account, isLoading: accountLoading } = useAccount();
   const { data: inviteInfo, isLoading: inviteLoading, error: inviteError } = useInviteInfo(token);
 
   const [mode, setMode] = useState<'signup' | 'signin'>('signup');
@@ -155,7 +155,7 @@ export function InviteAccept() {
     }
   };
 
-  if (meLoading || inviteLoading) {
+  if (accountLoading || inviteLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
         <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
@@ -202,11 +202,11 @@ export function InviteAccept() {
   }
 
   // User already authenticated
-  if (me) {
+  if (account) {
     const isEmailMismatch = Boolean(
-      me.user?.email &&
+      account.user?.email &&
         inviteInfo.email &&
-        me.user.email.trim().toLowerCase() !== inviteInfo.email.trim().toLowerCase(),
+        account.user.email.trim().toLowerCase() !== inviteInfo.email.trim().toLowerCase(),
     );
 
     return (
@@ -228,7 +228,7 @@ export function InviteAccept() {
           <div className="p-4 bg-[var(--surface2)] border border-[var(--line)] space-y-2 text-xs">
             <div className="flex items-center justify-between text-[var(--muted)]">
               <span>Signed in as:</span>
-              <span className="font-semibold text-[var(--text)]">{me.user?.email}</span>
+              <span className="font-semibold text-[var(--text)]">{account.user?.email}</span>
             </div>
             <div className="flex items-center justify-between text-[var(--muted)]">
               <span>Invited email:</span>
@@ -244,7 +244,7 @@ export function InviteAccept() {
             <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)] space-y-1">
               <div className="font-semibold text-[var(--danger)]">Account Mismatch</div>
               <p className="text-[var(--muted)]">
-                You are signed in as <strong className="text-[var(--text)]">{me.user?.email}</strong>, but this invitation was sent to <strong className="text-[var(--text)]">{inviteInfo.email}</strong>.
+                You are signed in as <strong className="text-[var(--text)]">{account.user?.email}</strong>, but this invitation was sent to <strong className="text-[var(--text)]">{inviteInfo.email}</strong>.
               </p>
               <p className="text-[var(--muted)]">
                 Please sign out below to accept this invitation using the invited account.

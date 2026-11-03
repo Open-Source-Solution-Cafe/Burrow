@@ -7,8 +7,11 @@ import type {
   BoardWithDetails,
   CreateColumnData,
   UpdateColumnData,
+  BoardMutationScope,
+  ProjectScope,
 } from '../../../../infrastructure/types';
 import { eq, and, isNotNull, isNull, desc, inArray, sql } from 'drizzle-orm';
+import { boardInProjectScope } from '../../board-source';
 import type { PostgresDb } from '../index';
 import {
   boards,
@@ -16,176 +19,302 @@ import {
   cards,
   notepads,
   cardAssignees,
+  members,
   user,
   notepadTags,
+  notepadLinks,
   tags,
   cardSubtasks,
+  projects,
+  workspaces,
 } from '../schema';
+
+const validCardBodyForBoard = (boardId: string) => sql`exists (
+  select 1
+  from cards c
+  join boards b on b.id = c.board_id
+  join projects p on p.id = b.project_id
+  join board_columns bc on bc.id = c.column_id and bc.board_id = c.board_id
+  where c.notepad_id = ${notepads.id}
+    and c.board_id = ${boardId}
+    and notepads.project_id = p.id
+    and notepads.workspace_id = p.workspace_id
+    and b.workspace_id = p.workspace_id
+    and notepads.kind = 'card'
+)`;
 
 export class PostgresBoardRepository implements IBoardRepository {
   constructor(private db: PostgresDb) {}
+  private readonly sourceProjectMatches = sql`exists (select 1 from projects where projects.id = ${boards.projectId} and projects.workspace_id = ${boards.workspaceId})`;
 
-  async listByProject(projectId: string): Promise<Board[]> {
+  private async withWorkspaceWrite<T>(scope: BoardMutationScope, mutate: (tx: any) => Promise<T>): Promise<T | null> {
+    return this.db.transaction(async (tx) => {
+      await tx.select({ id: workspaces.id }).from(workspaces)
+        .where(eq(workspaces.id, scope.workspaceId)).for('update');
+      const [member] = await tx.select({ role: members.role }).from(members)
+        .where(and(eq(members.workspaceId, scope.workspaceId), eq(members.userId, scope.actorUserId)));
+      if (!member || (scope.minimumRole === 'owner' ? member.role !== 'owner' : member.role === 'viewer')) {
+        return null;
+      }
+      return mutate(tx);
+    });
+  }
+
+  async listByProject(scope: ProjectScope): Promise<Board[]> {
     return this.db
       .select()
       .from(boards)
-      .where(and(eq(boards.projectId, projectId), isNull(boards.deletedAt)))
+      .where(
+        and(
+          eq(boards.projectId, scope.projectId),
+          eq(boards.workspaceId, scope.workspaceId),
+          isNull(boards.deletedAt),
+          this.sourceProjectMatches,
+        ),
+      )
       .orderBy(boards.position);
   }
 
-  async listDeletedByProject(projectId: string): Promise<Board[]> {
+  async findByIdInScope(scope: ProjectScope, id: string): Promise<Board | null> {
+    const result = await this.db.select().from(boards)
+      .where(and(eq(boards.id, id), boardInProjectScope(scope, id))).limit(1);
+    return result[0] ?? null;
+  }
+
+  async listDeletedByProject(scope: ProjectScope): Promise<Board[]> {
     return this.db
       .select()
       .from(boards)
-      .where(and(eq(boards.projectId, projectId), isNotNull(boards.deletedAt)))
+      .where(
+        and(
+          eq(boards.projectId, scope.projectId),
+          eq(boards.workspaceId, scope.workspaceId),
+          isNotNull(boards.deletedAt),
+          this.sourceProjectMatches,
+        ),
+      )
       .orderBy(desc(boards.deletedAt));
   }
 
-  async findById(id: string): Promise<Board | null> {
-    const result = await this.db.select().from(boards).where(eq(boards.id, id)).limit(1);
-    return result[0] ?? null;
-  }
-
-  async findByIdAndWorkspace(id: string, workspaceId: string): Promise<Board | null> {
-    const result = await this.db
-      .select()
-      .from(boards)
-      .where(and(eq(boards.id, id), eq(boards.workspaceId, workspaceId)))
-      .limit(1);
-    return result[0] ?? null;
-  }
-
-  async create(data: CreateBoardData): Promise<Board> {
-    const result = await this.db.insert(boards).values(data).returning();
-    if (!result[0]) throw new Error('Failed to create board');
-    return result[0];
-  }
-
-  async update(id: string, data: UpdateBoardData): Promise<void> {
-    await this.db.update(boards).set(data).where(eq(boards.id, id));
-  }
-
-  async softDelete(id: string, deletedAt: number): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const cardRows = await tx
-        .select({ notepadId: cards.notepadId })
-        .from(cards)
-        .where(eq(cards.boardId, id));
-
-      const notepadIds = cardRows.map((r) => r.notepadId);
-      if (notepadIds.length > 0) {
-        await tx
-          .update(notepads)
-          .set({ deletedAt, updatedAt: deletedAt })
-          .where(inArray(notepads.id, notepadIds));
-      }
-
-      await tx.update(boards).set({ deletedAt, updatedAt: deletedAt }).where(eq(boards.id, id));
+  async createWithColumns(data: CreateBoardData, columns: CreateColumnData[], scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      if (data.workspaceId !== scope.workspaceId) return false;
+      const [project] = await tx.select({ id: projects.id }).from(projects)
+        .where(and(eq(projects.id, data.projectId), eq(projects.workspaceId, scope.workspaceId)));
+      if (!project) return false;
+      await tx.insert(boards).values(data);
+      if (columns.length > 0) await tx.insert(boardColumns).values(columns);
+      return true;
     });
+    return result === true;
   }
 
-  async restore(id: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
+  async updateGuarded(id: string, data: UpdateBoardData, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const rows = await tx.update(boards).set(data).where(and(
+        eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), isNull(boards.deletedAt),
+        this.sourceProjectMatches,
+      )).returning({ id: boards.id });
+      return rows.length === 1;
+    });
+    return result === true;
+  }
+
+  async softDeleteGuarded(id: string, deletedAt: number, scope: BoardMutationScope): Promise<boolean> {
+    const deletionOperationId = crypto.randomUUID();
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
       const [board] = await tx
         .select({ deletedAt: boards.deletedAt })
         .from(boards)
-        .where(eq(boards.id, id));
-      const deleteTimestamp = board?.deletedAt;
-      const now = Date.now();
+        .where(and(eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), this.sourceProjectMatches))
+        .for('update');
+      if (!board || board.deletedAt !== null) return false;
 
-      if (deleteTimestamp !== null && deleteTimestamp !== undefined) {
-        const cardRows = await tx
-          .select({ id: notepads.id })
-          .from(cards)
-          .innerJoin(notepads, eq(notepads.id, cards.notepadId))
-          .where(and(eq(cards.boardId, id), eq(notepads.deletedAt, deleteTimestamp)));
+      await tx
+        .update(notepads)
+        .set({ deletedAt, deletionOperationId, updatedAt: deletedAt })
+        .where(and(validCardBodyForBoard(id), isNull(notepads.deletedAt)));
 
-        const notepadIds = cardRows.map((r) => r.id);
-        if (notepadIds.length > 0) {
-          await tx
-            .update(notepads)
-            .set({ deletedAt: null, updatedAt: now })
-            .where(inArray(notepads.id, notepadIds));
-        }
-      }
-
-      await tx.update(boards).set({ deletedAt: null, updatedAt: now }).where(eq(boards.id, id));
+      await tx
+        .update(boards)
+        .set({ deletedAt, deletionOperationId, updatedAt: deletedAt })
+        .where(and(eq(boards.id, id), isNull(boards.deletedAt), this.sourceProjectMatches));
+      return true;
     });
+    return result === true;
   }
 
-  async hardDelete(id: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const cardRows = await tx
-        .select({ notepadId: cards.notepadId })
-        .from(cards)
-        .where(eq(cards.boardId, id));
+  async restoreGuarded(id: string, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const [board] = await tx
+        .select({ deletedAt: boards.deletedAt, deletionOperationId: boards.deletionOperationId })
+        .from(boards)
+      .where(and(eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), this.sourceProjectMatches))
+      .for('update');
+      const deleteTimestamp = board?.deletedAt;
+      const deletionOperationId = board?.deletionOperationId;
+      if (deleteTimestamp === null || deleteTimestamp === undefined) return false;
+      const now = Date.now();
 
-      const notepadIds = cardRows.map((r) => r.notepadId);
-      if (notepadIds.length > 0) {
-        await tx.delete(notepads).where(inArray(notepads.id, notepadIds));
+      if (!deletionOperationId) {
+        const legacyBodies = await tx
+          .select({ id: notepads.id })
+          .from(notepads)
+          .where(and(validCardBodyForBoard(id), eq(notepads.deletedAt, deleteTimestamp)));
+        if (legacyBodies.length > 0) throw new Error('ambiguous_delete_group');
+      } else {
+        await tx
+          .update(notepads)
+          .set({ deletedAt: null, deletionOperationId: null, updatedAt: now })
+          .where(and(validCardBodyForBoard(id), eq(notepads.deletionOperationId, deletionOperationId)));
       }
-      await tx.delete(boards).where(eq(boards.id, id));
+
+      await tx
+        .update(boards)
+        .set({ deletedAt: null, deletionOperationId: null, updatedAt: now })
+        .where(and(eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), eq(boards.deletedAt, deleteTimestamp)))
+        .returning({ id: boards.id });
+      return true;
     });
+    return result === true;
+  }
+
+  async hardDeleteGuarded(id: string, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const [board] = await tx.select({ id: boards.id }).from(boards).where(and(
+        eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), isNotNull(boards.deletedAt), this.sourceProjectMatches,
+      )).for('update');
+      if (!board) return false;
+      const cardRows = await tx
+        .select({ notepadId: notepads.id, projectId: notepads.projectId })
+        .from(notepads)
+        .where(validCardBodyForBoard(id));
+
+      for (const { notepadId, projectId } of cardRows) {
+        await tx
+          .delete(notepadLinks)
+          .where(
+            and(
+              eq(notepadLinks.targetId, notepadId),
+              sql`${notepadLinks.sourceId} in (select id from notepads where project_id = ${projectId})`,
+            ),
+          );
+        await tx.delete(notepads).where(and(eq(notepads.id, notepadId), validCardBodyForBoard(id)));
+      }
+      const deleted = await tx.delete(boards).where(and(
+        eq(boards.id, id), eq(boards.workspaceId, scope.workspaceId), isNotNull(boards.deletedAt),
+      )).returning({ id: boards.id });
+      return deleted.length === 1;
+    });
+    return result === true;
   }
 
   // Columns
-  async listColumns(boardId: string): Promise<BoardColumn[]> {
+  async listColumns(scope: ProjectScope, boardId: string): Promise<BoardColumn[]> {
     return this.db
       .select()
       .from(boardColumns)
-      .where(eq(boardColumns.boardId, boardId))
+      .where(and(eq(boardColumns.boardId, boardId), boardInProjectScope(scope, boardId)))
       .orderBy(boardColumns.position);
   }
 
-  async findColumnById(id: string): Promise<BoardColumn | null> {
+  async findColumnByIdInScope(scope: ProjectScope, columnId: string): Promise<BoardColumn | null> {
     const result = await this.db
-      .select()
-      .from(boardColumns)
-      .where(eq(boardColumns.id, id))
-      .limit(1);
-    return result[0] ?? null;
-  }
-
-  async findColumnByIdAndWorkspace(
-    columnId: string,
-    workspaceId: string,
-  ): Promise<BoardColumn | null> {
-    const result = await this.db
-      .select()
+      .select({ column: boardColumns })
       .from(boardColumns)
       .innerJoin(boards, eq(boardColumns.boardId, boards.id))
-      .where(and(eq(boardColumns.id, columnId), eq(boards.workspaceId, workspaceId)))
+      .where(and(
+        eq(boardColumns.id, columnId),
+        isNull(boards.deletedAt),
+        this.sourceProjectMatches,
+        eq(boards.workspaceId, scope.workspaceId),
+        eq(boards.projectId, scope.projectId),
+      ))
       .limit(1);
-    return result[0]?.board_columns ?? null;
+    return result[0]?.column ?? null;
   }
 
-  async createColumn(data: CreateColumnData): Promise<BoardColumn> {
-    const result = await this.db.insert(boardColumns).values(data).returning();
-    if (!result[0]) throw new Error('Failed to create column');
-    return result[0];
+  async createColumnGuarded(data: CreateColumnData, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const [board] = await tx.select({ id: boards.id }).from(boards).where(and(
+        eq(boards.id, data.boardId), eq(boards.workspaceId, scope.workspaceId),
+        isNull(boards.deletedAt), this.sourceProjectMatches,
+      ));
+      if (!board) return false;
+      const rows = await tx.insert(boardColumns).values(data).returning({ id: boardColumns.id });
+      return rows.length === 1;
+    });
+    return result === true;
   }
 
-  async updateColumn(id: string, data: UpdateColumnData): Promise<void> {
-    await this.db.update(boardColumns).set(data).where(eq(boardColumns.id, id));
+  async updateColumnGuarded(id: string, data: UpdateColumnData, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const rows = await tx.update(boardColumns).set(data).where(and(
+        eq(boardColumns.id, id), sql`exists (select 1 from boards b where b.id = ${boardColumns.boardId}
+          and b.workspace_id = ${scope.workspaceId} and b.deleted_at is null
+          and exists (select 1 from projects p where p.id = b.project_id and p.workspace_id = b.workspace_id))`,
+      )).returning({ id: boardColumns.id });
+      return rows.length === 1;
+    });
+    return result === true;
   }
 
-  async moveColumn(id: string, position: string): Promise<void> {
-    await this.db.update(boardColumns).set({ position }).where(eq(boardColumns.id, id));
+  async moveColumnGuarded(id: string, position: string, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const rows = await tx.update(boardColumns).set({ position }).where(and(
+        eq(boardColumns.id, id), sql`exists (select 1 from boards b where b.id = ${boardColumns.boardId}
+          and b.workspace_id = ${scope.workspaceId} and b.deleted_at is null
+          and exists (select 1 from projects p where p.id = b.project_id and p.workspace_id = b.workspace_id))`,
+      )).returning({ id: boardColumns.id });
+      return rows.length === 1;
+    });
+    return result === true;
   }
 
-  async deleteColumn(id: string): Promise<void> {
-    await this.db.delete(boardColumns).where(eq(boardColumns.id, id));
+  async deleteColumnGuarded(id: string, moveToColumnId: string | null, scope: BoardMutationScope): Promise<boolean> {
+    const result = await this.withWorkspaceWrite(scope, async (tx) => {
+      const [source] = await tx.select({ boardId: boardColumns.boardId }).from(boardColumns).innerJoin(
+        boards, eq(boards.id, boardColumns.boardId),
+      ).where(and(
+        eq(boardColumns.id, id), eq(boards.workspaceId, scope.workspaceId), isNull(boards.deletedAt), this.sourceProjectMatches,
+      ));
+      if (!source) return false;
+      if (moveToColumnId) {
+        const [destination] = await tx.select({ id: boardColumns.id }).from(boardColumns).where(and(
+          eq(boardColumns.id, moveToColumnId), eq(boardColumns.boardId, source.boardId),
+        ));
+        if (!destination || destination.id === id) return false;
+        await tx.update(cards).set({ columnId: moveToColumnId }).where(and(
+          eq(cards.columnId, id), eq(cards.boardId, source.boardId),
+        ));
+      } else {
+        const [card] = await tx.select({ id: cards.id }).from(cards).where(eq(cards.columnId, id)).limit(1);
+        if (card) return false;
+      }
+      const deleted = await tx.delete(boardColumns).where(and(
+        eq(boardColumns.id, id), eq(boardColumns.boardId, source.boardId),
+        sql`not exists (select 1 from cards c where c.column_id = ${id})`,
+      )).returning({ id: boardColumns.id });
+      return deleted.length === 1;
+    });
+    return result === true;
   }
 
   async getBoardWithDetails(
+    scope: ProjectScope,
     boardId: string,
-    workspaceId: string,
   ): Promise<BoardWithDetails | null> {
     const boardResult = await this.db
       .select()
       .from(boards)
       .where(
-        and(eq(boards.id, boardId), eq(boards.workspaceId, workspaceId), isNull(boards.deletedAt)),
+        and(
+          eq(boards.id, boardId),
+          eq(boards.workspaceId, scope.workspaceId),
+          eq(boards.projectId, scope.projectId),
+          this.sourceProjectMatches,
+          isNull(boards.deletedAt),
+        ),
       )
       .limit(1);
 
@@ -212,7 +341,19 @@ export class PostgresBoardRepository implements IBoardRepository {
       })
       .from(cards)
       .innerJoin(notepads, eq(notepads.id, cards.notepadId))
-      .where(and(eq(cards.boardId, boardId), isNull(notepads.deletedAt)))
+      .innerJoin(
+        boardColumns,
+        and(eq(boardColumns.id, cards.columnId), eq(boardColumns.boardId, cards.boardId)),
+      )
+      .where(
+        and(
+          eq(cards.boardId, boardId),
+          eq(notepads.workspaceId, scope.workspaceId),
+          eq(notepads.projectId, scope.projectId),
+          eq(notepads.kind, 'card'),
+          isNull(notepads.deletedAt),
+        ),
+      )
       .orderBy(cards.position);
 
     const cardIds = cardsWithNotepads.map((c) => c.id);
@@ -227,6 +368,10 @@ export class PostgresBoardRepository implements IBoardRepository {
             })
             .from(cardAssignees)
             .innerJoin(user, eq(user.id, cardAssignees.userId))
+            .innerJoin(
+              members,
+              and(eq(members.userId, cardAssignees.userId), eq(members.workspaceId, scope.workspaceId)),
+            )
             .where(inArray(cardAssignees.cardId, cardIds))
         : [];
 
@@ -252,7 +397,9 @@ export class PostgresBoardRepository implements IBoardRepository {
             })
             .from(notepadTags)
             .innerJoin(tags, eq(tags.id, notepadTags.tagId))
-            .where(inArray(notepadTags.notepadId, notepadIds))
+            .where(
+              and(inArray(notepadTags.notepadId, notepadIds), eq(tags.projectId, board.projectId)),
+            )
         : [];
 
     const tagsByNotepad = new Map<

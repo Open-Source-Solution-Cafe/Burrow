@@ -20,6 +20,8 @@ import { priorityDiamondColor } from '../../ui/status';
 import { type CardItem, type ColumnItem } from './types';
 
 interface CalendarViewProps {
+  workspaceId: string;
+  projectId: string;
   boardId: string;
   columns: ColumnItem[];
   onCardClick: (cardId: string) => void;
@@ -115,7 +117,7 @@ function DayCell({
  * Monthly grid placing cards by `dueDate` (FEATURE_PLAN 2.2).
  * Drag a chip (scheduled or from the Unscheduled tray) onto a day to reschedule.
  */
-export function CalendarView({ boardId, columns, onCardClick }: CalendarViewProps) {
+export function CalendarView({ workspaceId, projectId, boardId, columns, onCardClick }: CalendarViewProps) {
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -199,7 +201,7 @@ export function CalendarView({ boardId, columns, onCardClick }: CalendarViewProp
       src ? src.getSeconds() : 0,
       src ? src.getMilliseconds() : 0,
     );
-    updateCard.mutate({ cardId, boardId, dueDate: next.getTime() });
+    updateCard.mutate({ workspaceId, projectId, cardId, boardId, dueDate: next.getTime() });
   };
 
   const monthLabel = monthCursor.toLocaleDateString(undefined, {

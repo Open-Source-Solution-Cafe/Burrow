@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { nanoid } from 'nanoid';
 import { eq } from 'drizzle-orm';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
-import * as t from '../../src/worker/db/schema';
+import { createDb } from '../../src/core/adapters/db/d1/client';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { loadConfig } from '../../src/server/config';
 
 const app = createWorkerApp(env);
@@ -76,7 +76,7 @@ describe('Security Contract Suite', () => {
 
     // 1. Create an invite from WS1 to register ws2 owner with better-auth
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${ws1Id}/invites`,
       {
         method: 'POST',
         headers: {
@@ -175,9 +175,9 @@ describe('Security Contract Suite', () => {
   });
 
   describe('IDOR Protection on Project Routes', () => {
-    it('user in Workspace 1 requesting GET /api/projects/:pid/notepads for Workspace 2 receives 404', async () => {
+    it('user in Workspace 1 requesting GET /api/workspaces/:wid/projects/:pid/notepads for Workspace 2 receives 404', async () => {
       const res = await app.request(
-        `http://localhost/api/projects/${ws2ProjectId}/notepads`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws2ProjectId}/notepads`,
         {
           headers: { Cookie: ws1OwnerCookie },
         },
@@ -186,9 +186,9 @@ describe('Security Contract Suite', () => {
       expect(res.status).toBe(404);
     });
 
-    it('user in Workspace 1 requesting GET /api/projects/:pid/recent for Workspace 2 receives 404', async () => {
+    it('user in Workspace 1 requesting GET /api/workspaces/:wid/projects/:pid/recent for Workspace 2 receives 404', async () => {
       const res = await app.request(
-        `http://localhost/api/projects/${ws2ProjectId}/recent`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws2ProjectId}/recent`,
         {
           headers: { Cookie: ws1OwnerCookie },
         },
@@ -197,9 +197,9 @@ describe('Security Contract Suite', () => {
       expect(res.status).toBe(404);
     });
 
-    it('user in Workspace 1 requesting GET /api/projects/:pid/boards for Workspace 2 receives 404', async () => {
+    it('user in Workspace 1 requesting GET /api/workspaces/:wid/projects/:pid/boards for Workspace 2 receives 404', async () => {
       const res = await app.request(
-        `http://localhost/api/projects/${ws2ProjectId}/boards`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws2ProjectId}/boards`,
         {
           headers: { Cookie: ws1OwnerCookie },
         },
@@ -208,9 +208,9 @@ describe('Security Contract Suite', () => {
       expect(res.status).toBe(404);
     });
 
-    it('user in Workspace 1 requesting POST /api/projects/:pid/notepads for Workspace 2 receives 404', async () => {
+    it('user in Workspace 1 requesting POST /api/workspaces/:wid/projects/:pid/notepads for Workspace 2 receives 404', async () => {
       const res = await app.request(
-        `http://localhost/api/projects/${ws2ProjectId}/notepads`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws2ProjectId}/notepads`,
         {
           method: 'POST',
           headers: {
@@ -226,9 +226,9 @@ describe('Security Contract Suite', () => {
       expect(res.status).toBe(404);
     });
 
-    it('user in Workspace 1 requesting POST /api/projects/:pid/boards for Workspace 2 receives 404', async () => {
+    it('user in Workspace 1 requesting POST /api/workspaces/:wid/projects/:pid/boards for Workspace 2 receives 404', async () => {
       const res = await app.request(
-        `http://localhost/api/projects/${ws2ProjectId}/boards`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws2ProjectId}/boards`,
         {
           method: 'POST',
           headers: {
@@ -244,9 +244,9 @@ describe('Security Contract Suite', () => {
       expect(res.status).toBe(404);
     });
 
-    it('user in Workspace 1 requesting GET /api/suggest?projectId=:pid for Workspace 2 returns empty []', async () => {
+    it('user in Workspace 1 requesting GET /api/workspaces/:wid/suggest?projectId=:pid for Workspace 2 returns empty []', async () => {
       const res = await app.request(
-        `http://localhost/api/suggest?projectId=${ws2ProjectId}&type=notepad&q=Confidential`,
+        `http://localhost/api/workspaces/${ws1Id}/suggest?projectId=${ws2ProjectId}&type=notepad&q=Confidential`,
         {
           headers: { Cookie: ws1OwnerCookie },
         },
@@ -262,7 +262,7 @@ describe('Security Contract Suite', () => {
     it('prevents cross-workspace backlinks leakage (WS1 mention does not appear in WS2 backlinks)', async () => {
       // Create notepad in WS1
       const ws1NoteRes = await app.request(
-        `http://localhost/api/projects/${ws1ProjectId}/notepads`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads`,
         {
           method: 'POST',
           headers: {
@@ -296,7 +296,7 @@ describe('Security Contract Suite', () => {
       ]);
 
       const saveRes = await app.request(
-        `http://localhost/api/notepads/${ws1NoteId}/content`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads/${ws1NoteId}/content`,
         {
           method: 'PUT',
           headers: {
@@ -312,9 +312,9 @@ describe('Security Contract Suite', () => {
       );
       expect(saveRes.status).toBe(200);
 
-      // Fetch WS2 notepad via GET /api/notepads/:id in WS2 session
+      // Fetch WS2 notepad through its explicit project route
       const ws2GetRes = await app.request(
-        `http://localhost/api/notepads/${ws2NotepadId}`,
+        `http://localhost/api/workspaces/${ws2Id}/projects/${ws2ProjectId}/notepads/${ws2NotepadId}`,
         {
           headers: { Cookie: ws2OwnerCookie },
         },
@@ -327,9 +327,9 @@ describe('Security Contract Suite', () => {
     });
 
     it('rejects cross-workspace parentId on notepad creation (404/400)', async () => {
-      // Attempt POST /api/projects/:pid/notepads in WS1 with parentId belonging to WS2
+      // Attempt a scoped POST in WS1 with parentId belonging to WS2
       const crossParentRes = await app.request(
-        `http://localhost/api/projects/${ws1ProjectId}/notepads`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads`,
         {
           method: 'POST',
           headers: {
@@ -352,7 +352,7 @@ describe('Security Contract Suite', () => {
 
     it('creates and soft-deletes (trashes) a notepad', async () => {
       const createRes = await app.request(
-        `http://localhost/api/projects/${ws1ProjectId}/notepads`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads`,
         {
           method: 'POST',
           headers: {
@@ -371,7 +371,7 @@ describe('Security Contract Suite', () => {
 
       // Soft delete it
       const deleteRes = await app.request(
-        `http://localhost/api/notepads/${trashedNotepadId}`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads/${trashedNotepadId}`,
         {
           method: 'DELETE',
           headers: { Cookie: ws1OwnerCookie },
@@ -381,9 +381,9 @@ describe('Security Contract Suite', () => {
       expect(deleteRes.status).toBe(200);
     });
 
-    it('rejects PATCH /api/notepads/:id with 400 notepad_deleted', async () => {
+    it('rejects scoped note PATCH with 400 notepad_deleted', async () => {
       const res = await app.request(
-        `http://localhost/api/notepads/${trashedNotepadId}`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads/${trashedNotepadId}`,
         {
           method: 'PATCH',
           headers: {
@@ -401,9 +401,9 @@ describe('Security Contract Suite', () => {
       expect(data.error).toBe('notepad_deleted');
     });
 
-    it('rejects PUT /api/notepads/:id/content with 400 notepad_deleted', async () => {
+    it('rejects scoped note content PUT with 400 notepad_deleted', async () => {
       const res = await app.request(
-        `http://localhost/api/notepads/${trashedNotepadId}/content`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads/${trashedNotepadId}/content`,
         {
           method: 'PUT',
           headers: {
@@ -422,9 +422,9 @@ describe('Security Contract Suite', () => {
       expect(data.error).toBe('notepad_deleted');
     });
 
-    it('rejects PUT /api/notepads/:id/tags with 400 notepad_deleted', async () => {
+    it('rejects scoped note tags PUT with 400 notepad_deleted', async () => {
       const res = await app.request(
-        `http://localhost/api/notepads/${trashedNotepadId}/tags`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/notepads/${trashedNotepadId}/tags`,
         {
           method: 'PUT',
           headers: {
@@ -451,7 +451,7 @@ describe('Security Contract Suite', () => {
 
     it('creates board, columns, card and soft-deletes the card', async () => {
       const boardRes = await app.request(
-        `http://localhost/api/projects/${ws1ProjectId}/boards`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/boards`,
         {
           method: 'POST',
           headers: {
@@ -467,7 +467,7 @@ describe('Security Contract Suite', () => {
       boardId = boardData.id;
 
       const col1Res = await app.request(
-        `http://localhost/api/boards/${boardId}/columns`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/boards/${boardId}/columns`,
         {
           method: 'POST',
           headers: {
@@ -483,7 +483,7 @@ describe('Security Contract Suite', () => {
       colId1 = col1Data.id;
 
       const col2Res = await app.request(
-        `http://localhost/api/boards/${boardId}/columns`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/boards/${boardId}/columns`,
         {
           method: 'POST',
           headers: {
@@ -499,7 +499,7 @@ describe('Security Contract Suite', () => {
       colId2 = col2Data.id;
 
       const cardRes = await app.request(
-        `http://localhost/api/columns/${colId1}/cards`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/columns/${colId1}/cards`,
         {
           method: 'POST',
           headers: {
@@ -517,7 +517,7 @@ describe('Security Contract Suite', () => {
       trashedCardId = cardData.cardId;
 
       const delRes = await app.request(
-        `http://localhost/api/cards/${trashedCardId}`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/cards/${trashedCardId}`,
         {
           method: 'DELETE',
           headers: { Cookie: ws1OwnerCookie },
@@ -527,9 +527,9 @@ describe('Security Contract Suite', () => {
       expect(delRes.status).toBe(200);
     });
 
-    it('rejects attempting to PATCH /api/cards/:id on a soft-deleted card with 400 card_deleted', async () => {
+    it('rejects attempting to scoped PATCH on a soft-deleted card with 400 card_deleted', async () => {
       const res = await app.request(
-        `http://localhost/api/cards/${trashedCardId}`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/cards/${trashedCardId}`,
         {
           method: 'PATCH',
           headers: {
@@ -550,7 +550,7 @@ describe('Security Contract Suite', () => {
 
     it('rejects attempting to move a soft-deleted card with 400 card_deleted', async () => {
       const res = await app.request(
-        `http://localhost/api/cards/${trashedCardId}/move`,
+        `http://localhost/api/workspaces/${ws1Id}/projects/${ws1ProjectId}/cards/${trashedCardId}/move`,
         {
           method: 'POST',
           headers: {
@@ -574,9 +574,9 @@ describe('Security Contract Suite', () => {
     let inviteToken = '';
     const inviteEmail = 'contract-invitee@example.com';
 
-    it('creates an invite and verifies GET /api/invites does not leak tokenHash', async () => {
+    it('creates an invite and verifies GET /api/workspaces/:wid/invites does not leak tokenHash', async () => {
       const createRes = await app.request(
-        'http://localhost/api/invites',
+        `http://localhost/api/workspaces/${ws1Id}/invites`,
         {
           method: 'POST',
           headers: {
@@ -596,7 +596,7 @@ describe('Security Contract Suite', () => {
       expect(inviteToken).toBeTruthy();
 
       const listRes = await app.request(
-        'http://localhost/api/invites',
+        `http://localhost/api/workspaces/${ws1Id}/invites`,
         {
           headers: { Cookie: ws1OwnerCookie },
         },
@@ -689,7 +689,7 @@ describe('Security Contract Suite', () => {
     it('enforces atomic single-use: invite token cannot be accepted multiple times or with different emails', async () => {
       // Create fresh invite
       const createRes = await app.request(
-        'http://localhost/api/invites',
+        `http://localhost/api/workspaces/${ws1Id}/invites`,
         {
           method: 'POST',
           headers: {
@@ -822,6 +822,32 @@ describe('Security Contract Suite', () => {
           BOOTSTRAP_TOKEN: 'dev-bootstrap-token',
         }),
       ).toThrow(/BOOTSTRAP_TOKEN/);
+
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'test-bootstrap-token',
+        }),
+      ).toThrow(/BOOTSTRAP_TOKEN/);
+    });
+
+    it('generates a unique random key when BOOTSTRAP_TOKEN is omitted or a default placeholder in development', () => {
+      const config1 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: undefined });
+      const config2 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: undefined });
+      const config3 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'dev-bootstrap-token' });
+      const config4 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'test-bootstrap-token' });
+
+      expect(config1.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
+      expect(config2.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
+      expect(config3.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
+      expect(config4.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
+      expect(config1.BOOTSTRAP_TOKEN).not.toBe('dev-bootstrap-token');
+      expect(config3.BOOTSTRAP_TOKEN).not.toBe('dev-bootstrap-token');
+      expect(config4.BOOTSTRAP_TOKEN).not.toBe('test-bootstrap-token');
+      // Each generated token should be unique
+      expect(config1.BOOTSTRAP_TOKEN).not.toBe(config2.BOOTSTRAP_TOKEN);
+      expect(config1.BOOTSTRAP_TOKEN).not.toBe(config3.BOOTSTRAP_TOKEN);
     });
   });
 });

@@ -72,7 +72,7 @@ Real-time collaboration, comments, public sharing, database/table views, offline
 | Auth            | **Better Auth** with the Drizzle/D1 adapter                                                                                                      |
 | Files           | **R2** (images, covers)                                                                                                                          |
 | Validation      | `zod` + `@hono/zod-validator`; share types with the client via Hono RPC (`hc`)                                                                   |
-| Tests           | Vitest + `@cloudflare/vitest-pool-workers` (API), Playwright (e2e)                                                                               |
+| Tests           | Vitest + `@cloudflare/vitest-plugin` (API), Playwright (e2e)                                                                                     |
 | Tooling         | pnpm, ESLint, Prettier, Wrangler CLI (deploys run from your machine; no CI/CD pipeline)                                                          |
 
 ---
@@ -220,7 +220,8 @@ Flags: `--dry-run` (print every command without running it), `--domain notes.exa
 | `setup`                                  | First-time provision and deploy (above)                                                |
 | `deploy`                                 | Release (above)                                                                        |
 | `check`                                  | Typecheck, lint and API tests (the local replacement for CI)                           |
-| `check:data`                             | Run the invariant queries (section 6.1) against local D1, or `--remote` for production |
+| `check:data`                             | Run the invariant queries (section 6.1) against local SQLite/D1, or `--remote` for production |
+| `check:data:postgres`                    | Run the PostgreSQL-specific read-only I1–I13 audit against `DATABASE_URL`                 |
 | `db:generate`                            | `drizzle-kit generate`                                                                 |
 | `db:migrate:local` / `db:migrate:remote` | Apply migrations to local / remote D1                                                  |
 | `seed:local`                             | Demo data                                                                              |
@@ -243,11 +244,12 @@ CREATE TABLE workspaces (
 
 CREATE TABLE members (
   workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  user_id TEXT NOT NULL UNIQUE,                 -- one workspace per user in v1
+  user_id TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
   joined_at INTEGER NOT NULL,
   PRIMARY KEY (workspace_id, user_id)
 );
+CREATE INDEX members_user ON members(user_id);
 
 CREATE TABLE invites (
   id TEXT PRIMARY KEY,

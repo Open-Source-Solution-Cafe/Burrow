@@ -44,6 +44,16 @@ export function conflict(code: string, message: string): HttpError {
   return new HttpError(409, code, message);
 }
 
+export function rethrowAmbiguousDeleteGroup(error: unknown): never {
+  if (error instanceof Error && error.message === 'ambiguous_delete_group') {
+    throw conflict(
+      'ambiguous_delete_group',
+      'This legacy deletion contains rows from multiple operations and needs operator repair',
+    );
+  }
+  throw error;
+}
+
 export function payloadTooLarge(code: string, message: string): HttpError {
   return new HttpError(413, code, message);
 }

@@ -6,12 +6,15 @@ import type {
   Board,
   BoardColumn,
   BoardWithDetails,
+  BoardMutationScope,
+  ProjectScope,
 } from '../infrastructure/types';
-import { notFound, badRequest } from './errors';
+import { notFound, badRequest, forbidden, rethrowAmbiguousDeleteGroup } from './errors';
 import { positionAfterLast, positionBetween } from './utils/ordering';
 
 export interface CreateBoardArgs {
   workspaceId: string;
+  actorUserId: string;
   projectId: string;
   name: string;
   icon?: string | null;
@@ -26,12 +29,12 @@ export class BoardService {
     },
   ) {}
 
-  async listBoards(workspaceId: string, projectId: string): Promise<Board[]> {
+  async listBoards(scope: ProjectScope): Promise<Board[]> {
     if (this.repos.projects) {
-      const proj = await this.repos.projects.findByIdAndWorkspace(projectId, workspaceId);
+      const proj = await this.repos.projects.findByIdAndWorkspace(scope.projectId, scope.workspaceId);
       if (!proj) throw notFound('not_found', 'Project not found');
     }
-    return this.repos.boards.listByProject(projectId);
+    return this.repos.boards.listByProject(scope);
   }
 
   async createBoard(args: CreateBoardArgs): Promise<{ id: string; position: string }> {
@@ -39,7 +42,10 @@ export class BoardService {
       const proj = await this.repos.projects.findByIdAndWorkspace(args.projectId, args.workspaceId);
       if (!proj) throw notFound('not_found', 'Project not found');
     }
-    const boards = await this.repos.boards.listByProject(args.projectId);
+    const boards = await this.repos.boards.listByProject({
+      workspaceId: args.workspaceId,
+      projectId: args.projectId,
+    });
     const boardPosition = positionAfterLast(boards[boards.length - 1]?.position ?? null);
     const boardId = nanoid();
     const now = Date.now();
@@ -51,146 +57,177 @@ export class BoardService {
       { id: nanoid(), name: 'Done', color: '#10b981', position: 'a2', wipLimit: null },
     ];
 
-    await this.repos.boards.create({
-      id: boardId,
-      workspaceId: args.workspaceId,
-      projectId: args.projectId,
-      name: args.name.trim() || 'Untitled Board',
-      icon: args.icon ?? null,
-      position: boardPosition,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    for (const col of defaultColumns) {
-      await this.repos.boards.createColumn({
+    const created = await this.repos.boards.createWithColumns(
+      {
+        id: boardId,
+        workspaceId: args.workspaceId,
+        projectId: args.projectId,
+        name: args.name.trim() || 'Untitled Board',
+        icon: args.icon ?? null,
+        position: boardPosition,
+        createdAt: now,
+        updatedAt: now,
+      },
+      defaultColumns.map((col) => ({
         id: col.id,
         boardId,
         name: col.name,
         color: col.color,
         position: col.position,
         wipLimit: col.wipLimit,
-      });
-    }
+      })),
+      mutationScope(args.workspaceId, args.actorUserId, 'editor'),
+    );
+    assertWrite(created, 'editor');
 
     return { id: boardId, position: boardPosition };
   }
 
   async getBoard(
-    workspaceId: string,
+    scope: ProjectScope,
     boardId: string,
   ): Promise<BoardWithDetails | (Board & { columns: (BoardColumn & { cards: any[] })[] })> {
+    const scopedBoard = await this.repos.boards.findByIdInScope(scope, boardId);
+    if (!scopedBoard) throw notFound('not_found', 'Board not found');
     if (this.repos.boards.getBoardWithDetails) {
-      const board = await this.repos.boards.getBoardWithDetails(boardId, workspaceId);
+      const board = await this.repos.boards.getBoardWithDetails(scope, boardId);
       if (!board) throw notFound('not_found', 'Board not found');
       return board;
     }
 
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, workspaceId);
-    if (!board) throw notFound('not_found', 'Board not found');
-
-    const columns = await this.repos.boards.listColumns(boardId);
+    const columns = await this.repos.boards.listColumns(
+      scope,
+      boardId,
+    );
     return {
-      ...board,
+      ...scopedBoard,
       columns: columns.map((col) => ({ ...col, cards: [] })),
     };
   }
 
   async updateBoard(
-    _workspaceId: string,
+    scope: ProjectScope,
+    actorUserId: string,
     boardId: string,
     updates: { name?: string; icon?: string | null },
   ): Promise<void> {
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, _workspaceId);
-    if (!board) throw notFound('not_found', 'Board not found');
+    const board = await this.repos.boards.findByIdInScope(scope, boardId);
+    if (!board || board.deletedAt !== null) throw notFound('not_found', 'Board not found');
 
-    await this.repos.boards.update(boardId, {
+    const updated = await this.repos.boards.updateGuarded(boardId, {
       name: updates.name ? updates.name.trim() : undefined,
       icon: updates.icon !== undefined ? updates.icon : undefined,
       updatedAt: Date.now(),
-    });
+    }, mutationScope(scope.workspaceId, actorUserId, 'editor'));
+    assertWrite(updated, 'editor');
   }
 
-  async softDeleteBoard(_workspaceId: string, boardId: string): Promise<void> {
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, _workspaceId);
-    if (!board) throw notFound('not_found', 'Board not found');
+  async softDeleteBoard(scope: ProjectScope, actorUserId: string, boardId: string): Promise<void> {
+    const board = await this.repos.boards.findByIdInScope(scope, boardId);
+    if (!board || board.deletedAt !== null) throw notFound('not_found', 'Board not found');
 
     const now = Date.now();
     // Soft-deletes board and its card notepads, removing FTS entries
-    await this.repos.boards.softDelete(boardId, now);
+    const deleted = await this.repos.boards.softDeleteGuarded(
+      boardId, now, mutationScope(scope.workspaceId, actorUserId, 'editor'),
+    );
+    assertWrite(deleted, 'editor');
   }
 
-  async restoreBoard(_workspaceId: string, boardId: string): Promise<void> {
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, _workspaceId);
+  async restoreBoard(scope: ProjectScope, actorUserId: string, boardId: string): Promise<void> {
+    const board = await this.repos.boards.findByIdInScope(scope, boardId);
     if (!board || board.deletedAt === null) {
       throw notFound('not_found', 'Deleted board not found');
     }
 
-    await this.repos.boards.restore(boardId);
+    try {
+      const restored = await this.repos.boards.restoreGuarded(
+        boardId, mutationScope(scope.workspaceId, actorUserId, 'editor'),
+      );
+      assertWrite(restored, 'editor');
+    } catch (error) {
+      rethrowAmbiguousDeleteGroup(error);
+    }
   }
 
-  async permanentDeleteBoard(_workspaceId: string, boardId: string): Promise<void> {
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, _workspaceId);
+  async permanentDeleteBoard(scope: ProjectScope, actorUserId: string, boardId: string): Promise<void> {
+    const board = await this.repos.boards.findByIdInScope(scope, boardId);
     if (!board || board.deletedAt === null) {
       throw notFound('not_found', 'Deleted board not found in trash');
     }
 
-    await this.repos.boards.hardDelete(boardId);
+    const deleted = await this.repos.boards.hardDeleteGuarded(
+      boardId, mutationScope(scope.workspaceId, actorUserId, 'owner'),
+    );
+    assertWrite(deleted, 'owner');
   }
 
   // ---------------------------------------------------------------------------
   // Columns
   // ---------------------------------------------------------------------------
   async createColumn(
-    _workspaceId: string,
+    scope: ProjectScope,
+    actorUserId: string,
     boardId: string,
     name: string,
     color?: string | null,
   ): Promise<{ id: string; position: string }> {
-    const board = await this.repos.boards.findByIdAndWorkspace(boardId, _workspaceId);
+    const board = await this.repos.boards.findByIdInScope(scope, boardId);
     if (!board) throw notFound('not_found', 'Board not found');
 
-    const columns = await this.repos.boards.listColumns(boardId);
+    const columns = await this.repos.boards.listColumns(
+      scope,
+      boardId,
+    );
     const position = positionAfterLast(columns[columns.length - 1]?.position ?? null);
     const id = nanoid();
 
-    await this.repos.boards.createColumn({
+    const created = await this.repos.boards.createColumnGuarded({
       id,
       boardId,
       name: name.trim() || 'Untitled Column',
       color: color ?? null,
       position,
       wipLimit: null,
-    });
+    }, mutationScope(scope.workspaceId, actorUserId, 'editor'));
+    assertWrite(created, 'editor');
 
     return { id, position };
   }
 
   async updateColumn(
-    _workspaceId: string,
+    scope: ProjectScope,
+    actorUserId: string,
     columnId: string,
     updates: { name?: string; color?: string | null; wipLimit?: number | null },
   ): Promise<void> {
     // Verify column belongs to a board in the workspace
-    const column = await this.findColumnInWorkspace(columnId, _workspaceId);
+    const column = await this.repos.boards.findColumnByIdInScope(scope, columnId);
     if (!column) throw notFound('not_found', 'Column not found');
 
-    await this.repos.boards.updateColumn(columnId, {
+    const updated = await this.repos.boards.updateColumnGuarded(columnId, {
       name: updates.name ? updates.name.trim() : undefined,
       color: updates.color !== undefined ? updates.color : undefined,
       wipLimit: updates.wipLimit !== undefined ? updates.wipLimit : undefined,
-    });
+    }, mutationScope(scope.workspaceId, actorUserId, 'editor'));
+    assertWrite(updated, 'editor');
   }
 
   async moveColumn(
-    _workspaceId: string,
+    scope: ProjectScope,
+    actorUserId: string,
     columnId: string,
     afterId?: string | null,
   ): Promise<{ position: string }> {
-    const column = await this.findColumnInWorkspace(columnId, _workspaceId);
+    const column = await this.repos.boards.findColumnByIdInScope(scope, columnId);
     if (!column) throw notFound('not_found', 'Column not found');
 
-    const columns = await this.repos.boards.listColumns(column.boardId);
+    const board = await this.repos.boards.findByIdInScope(scope, column.boardId);
+    if (!board) throw notFound('not_found', 'Board not found');
+    const columns = await this.repos.boards.listColumns(
+      scope,
+      column.boardId,
+    );
     const others = columns.filter((c) => c.id !== columnId);
 
     let newPosition: string;
@@ -205,20 +242,30 @@ export class BoardService {
       newPosition = positionBetween(prev, next);
     }
 
-    await this.repos.boards.moveColumn(columnId, newPosition);
+    const moved = await this.repos.boards.moveColumnGuarded(
+      columnId, newPosition, mutationScope(scope.workspaceId, actorUserId, 'editor'),
+    );
+    assertWrite(moved, 'editor');
     return { position: newPosition };
   }
 
   async deleteColumn(
-    _workspaceId: string,
+    scope: ProjectScope,
+    actorUserId: string,
     columnId: string,
     moveToColumnId?: string | null,
   ): Promise<void> {
-    const column = await this.findColumnInWorkspace(columnId, _workspaceId);
+    const column = await this.repos.boards.findColumnByIdInScope(scope, columnId);
     if (!column) throw notFound('not_found', 'Column not found');
 
+    const board = await this.repos.boards.findByIdInScope(scope, column.boardId);
+    if (!board) throw notFound('not_found', 'Board not found');
+
     if (this.repos.cards) {
-      const columnCards = await this.repos.cards.listByColumn(columnId);
+      const columnCards = await this.repos.cards.listByColumn(
+        scope,
+        columnId,
+      );
       if (columnCards.length > 0) {
         if (!moveToColumnId) {
           throw badRequest(
@@ -227,26 +274,37 @@ export class BoardService {
           );
         }
 
-        const dest = await this.findColumnInWorkspace(moveToColumnId, _workspaceId);
+        const dest = await this.repos.boards.findColumnByIdInScope(scope, moveToColumnId);
         if (!dest || dest.boardId !== column.boardId) {
           throw badRequest('invalid_destination', 'Destination column not found on this board');
         }
 
-        for (const card of columnCards) {
-          await this.repos.cards.move(card.id, moveToColumnId, card.position);
-        }
       }
     }
 
-    await this.repos.boards.deleteColumn(columnId);
+    const deleted = await this.repos.boards.deleteColumnGuarded(
+      columnId,
+      moveToColumnId ?? null,
+      mutationScope(scope.workspaceId, actorUserId, 'editor'),
+    );
+    assertWrite(deleted, 'editor');
   }
 
-  private async findColumnInWorkspace(
-    columnId: string,
-    _workspaceId: string,
-  ): Promise<BoardColumn | null> {
-    // This would need a repository method to find column by ID and verify workspace
-    // For now, we'll add a helper to the board repository
-    return this.repos.boards.findColumnByIdAndWorkspace(columnId, _workspaceId);
+}
+
+function mutationScope(
+  workspaceId: string,
+  actorUserId: string,
+  minimumRole: BoardMutationScope['minimumRole'],
+): BoardMutationScope {
+  return { workspaceId, actorUserId, minimumRole };
+}
+
+function assertWrite(succeeded: boolean, minimumRole: BoardMutationScope['minimumRole']): void {
+  if (!succeeded) {
+    throw forbidden(
+      'forbidden',
+      minimumRole === 'owner' ? 'Workspace owner access changed' : 'Workspace editor access changed',
+    );
   }
 }

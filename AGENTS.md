@@ -1,5 +1,17 @@
 # Agent Rules & Guidelines
 
+## Current media-support workstream
+
+- Scope this work to the SQLite development/runtime implementation. Do not
+  implement or verify PostgreSQL or D1 deployment changes as part of this media
+  upgrade. SQLite's shared canonical schema/repositories live under `db/d1`;
+  edits there are permitted for the Node SQLite runtime. Use `pnpm check:sqlite`
+  as this workstream's required gate; PostgreSQL suites are deferred.
+- Preserve existing files and legacy implementations; do not delete files for
+  this workstream. Additive SQLite migrations and code are acceptable.
+- Track cross-session decisions and checklist progress in
+  `docs/MEDIA_SUPPORT_PLAN.md`.
+
 ## UI Testing Instruction
 
 - **Do NOT run browser/UI tests** (including browser subagents, Playwright tests, Puppeteer, or any other browser/UI test automation) unless explicitly requested by the user.
@@ -31,6 +43,14 @@
 - **Eliminate divergent behavior and delete old code.** Never leave legacy or redundant implementations in place when unifying. All entry points (`pnpm dev`, `pnpm start`, `pnpm dev:worker`, CLI scripts, tests) must consume the exact same canonical code.
 
 ## Parallel Subagent Instruction
+
+- **Ongoing multi-workspace work:** Read and update `docs/MULTI_WORKSPACE_PROGRESS.md`
+  when resuming or handing off this work. It records settled product decisions,
+  verified progress, remaining migration work, and the mandatory code-economy review.
+- **Minimal, live code:** Prefer small pure functions and composition. Every new
+  production abstraction needs a current caller. Delete replaced implementations;
+  do not leave speculative extension points, unused scaffolding, or TODO fallbacks.
+  Favor readable, efficient code over compressed syntax or line-count targets.
 
 - **Always parallelize large tasks.** If a task touches 3+ files, spans multiple independent areas/components, or has separable workstreams (e.g. foundation + feature areas, independent files, research + implementation), split it into parallel `subagent` workers instead of doing it sequentially.
 - **Split by disjoint file sets.** Give each subagent an explicit ONLY-these-files scope so edits never overlap. Shared contracts (new APIs, token names, types) must be specified identically in every prompt, or built first by one agent before the others consume them.

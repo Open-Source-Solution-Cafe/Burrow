@@ -30,10 +30,11 @@ work from this summary alone.
 | `scripts/clean.mjs`            | Deprecation shim → `reset.mjs --local`                                                                                             |
 | `scripts/teardown.mjs`         | Delete Worker + D1 + R2 (`--force`)                                                                                                |
 | `scripts/seed.mjs`             | Load `scripts/seed.sql` into local D1, then verify invariants                                                                      |
-| `scripts/check-data.mjs`       | Run `scripts/check-invariants.sql` against D1, fail on any row                                                                     |
+| `scripts/check-data.mjs`       | Run SQLite/D1 invariant SQL, or PostgreSQL I1–I13 in a read-only transaction with `--postgres`                                   |
 | `scripts/check-basalt.mjs`     | Design-system regex guard over the web source                                                                                      |
 | `scripts/seed.sql`             | Demo data (new project only — see Step 5)                                                                                          |
-| `scripts/check-invariants.sql` | One query per invariant (new project only — see Step 5)                                                                            |
+| `scripts/check-invariants.sql` | One query per invariant for SQLite/D1 (new project only — see Step 5)                                                              |
+| `scripts/check-invariants.postgres.sql` | PostgreSQL equivalents for I1–I13, including generated search-vector validation                                     |
 | `.dev.vars.example`            | Env template; `dev.mjs` copies it to git-ignored `.dev.vars`                                                                       |
 
 **Also in scope — edit these:**

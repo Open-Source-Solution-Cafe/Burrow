@@ -1,91 +1,53 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { DB } from '../client';
 import * as t from '../schema';
-import { chunkInList } from './chunk';
+import type { ProjectScope } from '../../../../infrastructure/types';
+import { chunkInList } from '../../../../services/utils/chunk';
+import { getDescendantIds as descendants, type TreeNode } from '../../../../shared/tree';
 
-/**
- * Collect all descendant notepad IDs for a given root notepad.
- */
-export async function getDescendantIds(db: DB, rootId: string): Promise<string[]> {
-  const descendants: string[] = [];
-  let currentParentIds = [rootId];
-
-  while (currentParentIds.length > 0) {
-    const children: { id: string }[] = [];
-    for (const chunk of chunkInList(currentParentIds)) {
-      const rows = await db
-        .select({ id: t.notepads.id })
-        .from(t.notepads)
-        .where(inArray(t.notepads.parentId, chunk));
-      children.push(...rows);
-    }
-
-    if (children.length === 0) break;
-    const childIds = children.map((c) => c.id);
-    descendants.push(...childIds);
-    currentParentIds = childIds;
-  }
-
-  return descendants;
-}
-
-/**
- * Calculate the depth of a notepad from the root (root = 1).
- */
-export async function getNotepadDepth(db: DB, notepadId: string): Promise<number> {
-  let depth = 1;
-  let currentId: string | null = notepadId;
-
-  while (currentId && depth <= 20) {
-    const [row] = await db
-      .select({ parentId: t.notepads.parentId })
-      .from(t.notepads)
-      .where(eq(t.notepads.id, currentId));
-
-    if (!row || !row.parentId) break;
-    depth++;
-    currentId = row.parentId;
-  }
-
-  return depth;
-}
-
-/**
- * Calculate the height of the subtree rooted at rootId (a leaf has height 1).
- */
-export async function getSubtreeHeight(db: DB, rootId: string): Promise<number> {
-  let height = 1;
-  let currentParentIds = [rootId];
-
-  while (currentParentIds.length > 0) {
-    const children: { id: string }[] = [];
-    for (const chunk of chunkInList(currentParentIds)) {
-      const rows = await db
-        .select({ id: t.notepads.id })
-        .from(t.notepads)
-        .where(inArray(t.notepads.parentId, chunk));
-      children.push(...rows);
-    }
-
-    if (children.length === 0) break;
-    height++;
-    currentParentIds = children.map((c) => c.id);
-  }
-
-  return height;
-}
-
-/**
- * Returns true if moving source under targetParentId would cause a cycle.
- */
-export async function wouldCauseCycle(
+/** Scope both child rows and requested parents; lifecycle traversal may include trash. */
+export async function getNotepadChildren(
   db: DB,
-  sourceId: string,
-  targetParentId: string | null,
-): Promise<boolean> {
-  if (!targetParentId) return false;
-  if (sourceId === targetParentId) return true;
+  scope: ProjectScope,
+  parentIds: string[],
+  visibility: 'live' | 'all',
+): Promise<TreeNode[]> {
+  const children: TreeNode[] = [];
+  for (const chunk of chunkInList(parentIds, 4)) {
+    children.push(
+      ...(await db
+        .select({ id: t.notepads.id, parentId: t.notepads.parentId })
+        .from(t.notepads)
+        .where(
+          and(
+            eq(t.notepads.workspaceId, scope.workspaceId),
+            eq(t.notepads.projectId, scope.projectId),
+            visibility === 'live' ? isNull(t.notepads.deletedAt) : undefined,
+            inArray(
+              t.notepads.parentId,
+              db
+                .select({ id: t.notepads.id })
+                .from(t.notepads)
+                .where(
+                  and(
+                    eq(t.notepads.workspaceId, scope.workspaceId),
+                    eq(t.notepads.projectId, scope.projectId),
+                    inArray(t.notepads.id, chunk),
+                  ),
+                ),
+            ),
+          ),
+        )),
+    );
+  }
+  return children;
+}
 
-  const descendants = await getDescendantIds(db, sourceId);
-  return descendants.includes(targetParentId);
+/** Lifecycle descendants include trash, but never leave the root's project/workspace. */
+export async function getDescendantIds(db: DB, rootId: string): Promise<string[]> {
+  const [scope] = await db
+    .select({ workspaceId: t.notepads.workspaceId, projectId: t.notepads.projectId })
+    .from(t.notepads)
+    .where(eq(t.notepads.id, rootId));
+  return scope ? descendants((ids) => getNotepadChildren(db, scope, ids, 'all'), rootId) : [];
 }

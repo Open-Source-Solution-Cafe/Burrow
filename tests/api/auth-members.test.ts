@@ -1,10 +1,10 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
+import { createDb } from '../../src/core/adapters/db/d1/client';
 
 const app = createWorkerApp(env);
-import * as t from '../../src/worker/db/schema';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { eq } from 'drizzle-orm';
 import { expectInvariantsHold } from './helpers';
 
@@ -57,6 +57,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
   let ownerCookie = '';
   let ownerUserId = '';
   let workspaceId = '';
+  const workspacePath = (path: string) => `/api/workspaces/${workspaceId}${path}`;
 
   it('succeeds initial signup with bootstrap token and creates workspace + project + welcome notepad', async () => {
     const res = await app.request(
@@ -127,7 +128,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
 
   it('owner can generate and list invites', async () => {
     const createRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         method: 'POST',
         headers: {
@@ -154,7 +155,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     expect(inviteData.role).toBe('editor');
 
     const listRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         headers: { Cookie: ownerCookie },
       },
@@ -172,7 +173,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
   it('invited user can sign up with invite token and joins as editor', async () => {
     // Generate viewer invite first, then editor invite
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         method: 'POST',
         headers: {
@@ -206,22 +207,25 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     expect(signupRes.status).toBe(200);
     editorCookie = signupRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
+    const accountRes = await app.request(
+      'http://localhost/api/account',
       {
         headers: { Cookie: editorCookie },
       },
       env,
     );
-    expect(meRes.status).toBe(200);
-    const meData = (await meRes.json()) as {
-      user: { id: string };
-      workspace: { id: string };
-      role: string;
-    };
-    expect(meData.role).toBe('editor');
-    expect(meData.workspace.id).toBe(workspaceId);
-    editorUserId = meData.user.id;
+    expect(accountRes.status).toBe(200);
+    const accountData = (await accountRes.json()) as { user: { id: string } };
+    const contextRes = await app.request(
+      `http://localhost${workspacePath('')}`,
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(contextRes.status).toBe(200);
+    const contextData = (await contextRes.json()) as { workspace: { id: string }; role: string };
+    expect(contextData.role).toBe('editor');
+    expect(contextData.workspace.id).toBe(workspaceId);
+    editorUserId = accountData.user.id;
   });
 
   it('re-using accepted invite token is rejected', async () => {
@@ -255,7 +259,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
   it('can preview invite info via public info endpoint', async () => {
     // Generate a fresh invite
     const createRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         method: 'POST',
         headers: {
@@ -304,7 +308,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
 
   it('registers viewer user and tests role enforcement', async () => {
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         method: 'POST',
         headers: {
@@ -339,9 +343,9 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
 
     // Viewer hits mutating routes and gets 403
     const mutatingEndpoints = [
-      { path: '/api/invites', method: 'POST', body: { email: 'x@y.com', role: 'viewer' } },
-      { path: '/api/members/' + editorUserId, method: 'PATCH', body: { role: 'viewer' } },
-      { path: '/api/members/' + editorUserId, method: 'DELETE', body: undefined },
+      { path: workspacePath('/invites'), method: 'POST', body: { email: 'x@y.com', role: 'viewer' } },
+      { path: workspacePath(`/members/${editorUserId}`), method: 'PATCH', body: { role: 'viewer' } },
+      { path: workspacePath(`/members/${editorUserId}`), method: 'DELETE', body: undefined },
     ];
 
     for (const ep of mutatingEndpoints) {
@@ -366,7 +370,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
   it('prevent removing or demoting the last owner', async () => {
     // Try to demote owner as owner
     const demoteRes = await app.request(
-      `http://localhost/api/members/${ownerUserId}`,
+      `http://localhost${workspacePath(`/members/${ownerUserId}`)}`,
       {
         method: 'PATCH',
         headers: {
@@ -383,7 +387,7 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
 
     // Try to remove owner
     const removeRes = await app.request(
-      `http://localhost/api/members/${ownerUserId}`,
+      `http://localhost${workspacePath(`/members/${ownerUserId}`)}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -395,10 +399,68 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     expect(removeErr.error.code).toBe('cannot_remove_last_owner');
   });
 
+  it('maps commit-time actor revocation to forbidden without changing the target role', async () => {
+    const racingDb = new Proxy(env.DB, {
+      get(target, property, receiver) {
+        if (property === 'batch')
+          return async (statements: D1PreparedStatement[]) => {
+            await env.DB.prepare(
+              "UPDATE members SET role = 'viewer' WHERE workspace_id = ? AND user_id = ?",
+            )
+              .bind(workspaceId, ownerUserId)
+              .run();
+            return target.batch(statements);
+          };
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      const response = await createWorkerApp({ ...env, DB: racingDb }).request(
+        `http://localhost${workspacePath(`/members/${editorUserId}`)}`,
+        {
+          method: 'PATCH',
+          headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'viewer' }),
+        },
+        env,
+      );
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: 'forbidden' } });
+      expect(
+        await env.DB.prepare('SELECT role FROM members WHERE workspace_id = ? AND user_id = ?')
+          .bind(workspaceId, editorUserId)
+          .first(),
+      ).toEqual({ role: 'editor' });
+    } finally {
+      await env.DB.prepare(
+        "UPDATE members SET role = 'owner' WHERE workspace_id = ? AND user_id = ?",
+      )
+        .bind(workspaceId, ownerUserId)
+        .run();
+    }
+  });
+
+  it('returns not found when an owner targets a missing member', async () => {
+    for (const method of ['PATCH', 'DELETE']) {
+      const response = await app.request(
+        `http://localhost${workspacePath(`/members/${crypto.randomUUID()}`)}`,
+        {
+          method,
+          headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+          ...(method === 'PATCH' ? { body: JSON.stringify({ role: 'viewer' }) } : {}),
+        },
+        env,
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ error: { code: 'not_found' } });
+    }
+  });
+
   it('rejects oversized request bodies with 413', async () => {
     const largeBody = 'x'.repeat(2_500_000);
     const res = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost${workspacePath('/invites')}`,
       {
         method: 'POST',
         headers: {
@@ -416,16 +478,121 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     expect(err.error.code).toBe('payload_too_large');
   });
 
-  it('signs out an authenticated user and invalidates session for /api/me', async () => {
-    const meBefore = await app.request(
-      'http://localhost/api/me',
+  it('applies role changes immediately and revokes membership without destroying account sessions', async () => {
+    const active = await app.request(
+      `http://localhost${workspacePath('')}`,
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(active.status).toBe(200);
+    const demoted = await app.request(
+      `http://localhost${workspacePath(`/members/${editorUserId}`)}`,
+      {
+        method: 'PATCH',
+        headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'viewer' }),
+      },
+      env,
+    );
+    expect(demoted.status).toBe(200);
+    const write = await app.request(
+      `http://localhost${workspacePath('/projects')}`,
+      {
+        method: 'POST',
+        headers: { Cookie: editorCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'No longer allowed' }),
+      },
+      env,
+    );
+    expect(write.status).toBe(403);
+
+    const sessionsBefore = await db
+      .select({ id: t.session.id })
+      .from(t.session)
+      .where(eq(t.session.userId, editorUserId));
+    expect(sessionsBefore.length).toBeGreaterThan(0);
+    const removed = await app.request(
+      `http://localhost${workspacePath(`/members/${editorUserId}`)}`,
+      {
+        method: 'DELETE',
+        headers: { Cookie: ownerCookie },
+      },
+      env,
+    );
+    expect(removed.status).toBe(200);
+    const revoked = await app.request(
+      'http://localhost/api/account',
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(revoked.status).toBe(200);
+    const revokedWorkspace = await app.request(`http://localhost${workspacePath('')}`, { headers: { Cookie: editorCookie } }, env);
+    expect(revokedWorkspace.status).toBe(404);
+    const revokedProjects = await app.request(
+      `http://localhost${workspacePath('/projects')}`,
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(revokedProjects.status).toBe(404);
+    expect(
+      await db
+        .select({ id: t.session.id })
+        .from(t.session)
+        .where(eq(t.session.userId, editorUserId)),
+    ).toEqual(sessionsBefore);
+
+    // The account session remains usable for an invitation, even without a workspace.
+    const invite = await app.request(
+      `http://localhost${workspacePath('/invites')}`,
+      {
+        method: 'POST',
+        headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'teammate@example.com', role: 'viewer' }),
+      },
+      env,
+    );
+    expect(invite.status).toBe(200);
+    const { token } = (await invite.json()) as { token: string };
+    const anonymous = await app.request(
+      'http://localhost/api/invites/accept',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      },
+      env,
+    );
+    expect(anonymous.status).toBe(401);
+    const accept = () =>
+      app.request(
+        'http://localhost/api/invites/accept',
+        {
+          method: 'POST',
+          headers: { Cookie: editorCookie, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        },
+        env,
+      );
+    expect((await accept()).status).toBe(200);
+    expect((await accept()).status).toBe(400);
+    const restored = await app.request(
+      'http://localhost/api/account',
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(restored.status).toBe(200);
+  });
+
+  it('signs out an authenticated user and invalidates the account session', async () => {
+    const accountBefore = await app.request(
+      'http://localhost/api/account',
       {
         method: 'GET',
         headers: { Cookie: viewerCookie },
       },
       env,
     );
-    expect(meBefore.status).toBe(200);
+    expect(accountBefore.status).toBe(200);
 
     const signOutRes = await app.request(
       'http://localhost/api/auth/sign-out',
@@ -441,15 +608,15 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     );
     expect(signOutRes.status).toBe(200);
 
-    const meAfter = await app.request(
-      'http://localhost/api/me',
+    const accountAfter = await app.request(
+      'http://localhost/api/account',
       {
         method: 'GET',
         headers: { Cookie: viewerCookie },
       },
       env,
     );
-    expect(meAfter.status).toBe(401);
+    expect(accountAfter.status).toBe(401);
   });
 
   it('invariants hold after all tests', async () => {

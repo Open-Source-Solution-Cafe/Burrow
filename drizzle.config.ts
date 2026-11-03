@@ -2,7 +2,7 @@ import { defineConfig } from 'drizzle-kit';
 
 export default defineConfig({
   dialect: 'sqlite',
-  schema: 'src/worker/db/schema.ts',
+  schema: 'src/core/adapters/db/d1/schema.ts',
   out: 'migrations',
   // FTS5 virtual tables are hand-managed (raw sql) and must never be touched by
   // generated migrations. See PLAN.md section 3.

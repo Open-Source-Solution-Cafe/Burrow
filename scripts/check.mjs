@@ -1,5 +1,7 @@
 import { bin, run } from './lib.mjs';
 
+if (process.argv.includes('--sqlite')) process.env.BURROW_TEST_SQLITE_ONLY = '1';
+
 /** Local replacement for CI: typecheck, lint, API tests. Aborts on first failure. */
 console.log('check: typecheck');
 run(bin('typescript', 'tsc'), ['-b']);

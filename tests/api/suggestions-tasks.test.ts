@@ -1,11 +1,12 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
+import { createDb } from '../../src/core/adapters/db/d1/client';
 
 const app = createWorkerApp(env);
-import * as t from '../../src/worker/db/schema';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { expectInvariantsHold } from './helpers';
+import { getAccountWorkspaceScope } from './account-scope';
 import { getSlashCommandsForContext } from '../../src/shared/slash';
 
 const db = createDb(env.DB);
@@ -41,25 +42,20 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
+    const ownerScope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: ownerCookie } },
       env,
-    );
-    const meData = (await meRes.json()) as {
-      user: { id: string };
-      workspace: { id: string };
-      lastProjectId: string;
-    };
-    ownerUserId = meData.user.id;
-    workspaceId = meData.workspace.id;
-    projectId = meData.lastProjectId;
+    ));
+    ownerUserId = ownerScope.userId;
+    workspaceId = ownerScope.workspaceId;
+    projectId = ownerScope.projectId;
     expect(ownerUserId).toBeDefined();
     expect(workspaceId).toBeDefined();
 
     // 2. Editor of Workspace A
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -84,17 +80,17 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
       env,
     );
     editorCookie = editorSignup.headers.get('set-cookie')!;
-    const editorMeRes = await app.request(
-      'http://localhost/api/me',
+    const editorScope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: editorCookie } },
       env,
-    );
-    editorUserId = ((await editorMeRes.json()) as { user: { id: string } }).user.id;
+    ));
+    editorUserId = editorScope.userId;
     expect(editorUserId).toBeDefined();
 
     // 3. Create board and column in Workspace A
     const bRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -106,7 +102,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
     boardId = bData.id;
 
     const bDetailRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${boardId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -152,10 +148,10 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
     expect(quickaddCommands.some((c) => c.id === 'move')).toBe(false);
   });
 
-  it('returns strictly scoped suggestions from GET /api/suggest', async () => {
+  it('returns strictly scoped suggestions from the explicit workspace route', async () => {
     // 1. Suggest users: returns Suggest Owner & Suggest Editor
     const userRes = await app.request(
-      'http://localhost/api/suggest?type=user&q=Suggest',
+      `http://localhost/api/workspaces/${workspaceId}/suggest?type=user&q=Suggest`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -167,7 +163,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
 
     // 2. Suggest notepads: returns welcome notepad or project notepads
     const npRes = await app.request(
-      `http://localhost/api/suggest?type=notepad&projectId=${projectId}&q=`,
+      `http://localhost/api/workspaces/${workspaceId}/suggest?type=notepad&projectId=${projectId}&q=`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -178,7 +174,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
 
     // 3. Suggest tags: returns 'frontend'
     const tagSuggestRes = await app.request(
-      `http://localhost/api/suggest?type=tag&projectId=${projectId}&q=front`,
+      `http://localhost/api/workspaces/${workspaceId}/suggest?type=tag&projectId=${projectId}&q=front`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -190,7 +186,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
 
   it('quick-add with /notepad atomically creates card, linked notepad and card body link block', async () => {
     const res = await app.request(
-      `http://localhost/api/columns/${columnId}/cards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/columns/${columnId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -213,7 +209,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
 
     // Verify card notepad body contains the notepadLink block pointing to linkedNotepadId
     const cardDetail = await app.request(
-      `http://localhost/api/cards/${data.cardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/cards/${data.cardId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -224,7 +220,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
 
     // Verify linked notepad exists in project
     const linkedNotepadRes = await app.request(
-      `http://localhost/api/notepads/${data.linkedNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${data.linkedNotepadId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -238,7 +234,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
   it('updates card metadata from card body context', async () => {
     // Create card
     const cRes = await app.request(
-      `http://localhost/api/columns/${columnId}/cards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/columns/${columnId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -248,10 +244,10 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
     );
     const cData = (await cRes.json()) as { cardId: string };
 
-    // Update due date and priority via PATCH /api/cards/:id
+    // Update due date and priority through the scoped card route
     const dueTime = Date.now() + 172800000;
     const patchRes = await app.request(
-      `http://localhost/api/cards/${cData.cardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/cards/${cData.cardId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -267,7 +263,7 @@ describe('Phase 5A & 5B: Suggestions, Slash Menus & Task Commands', () => {
     expect(patchRes.status).toBe(200);
 
     const updated = await app.request(
-      `http://localhost/api/cards/${cData.cardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/cards/${cData.cardId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );

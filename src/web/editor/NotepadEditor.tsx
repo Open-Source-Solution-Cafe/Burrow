@@ -3,10 +3,12 @@ import {
   getDefaultReactSlashMenuItems,
   SuggestionMenuController,
   useCreateBlockNote,
+  FilePanelController,
+  type FilePanelProps,
 } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import '@blocknote/shadcn/style.css';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { nanoid } from 'nanoid';
 import {
   AlertTriangle,
@@ -29,6 +31,9 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { schema } from './schema';
+import { MediaPicker } from './MediaPicker';
+import { EditorFilePanel } from './EditorFilePanel';
+import { createMediaUploader } from './mediaUpload';
 import {
   getAtMenuSuggestions,
   getCustomSlashItems,
@@ -42,8 +47,11 @@ import { BasaltSuggestionMenu } from './BasaltSuggestionMenu';
 import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import { useMe, useProjectTags } from '../lib/queries';
+import { useAccount, useProjectTags } from '../lib/queries';
+import { projectPath, projectTarget, projectApiPath } from '../lib/workspaceRoutes';
+import { SaveConflictError, SaveLockController, type EditorScope } from './saveLockController';
 import { useTheme } from '../lib/theme';
+import { ReferenceScopeProvider } from './referenceScope';
 
 function getTabClientId(): string {
   if (typeof window === 'undefined') return nanoid();
@@ -60,13 +68,16 @@ function getTabClientId(): string {
 }
 
 export interface NotepadEditorProps {
+  workspaceId: string;
   notepadId: string;
+  projectId: string;
   hideTitle?: boolean;
   hideFavorite?: boolean;
 }
 
 interface NotepadData {
   id: string;
+  workspaceId: string;
   projectId: string;
   kind: 'notepad' | 'card';
   title: string;
@@ -78,12 +89,20 @@ interface NotepadData {
   tags: Array<{ id: string; name: string; color?: string | null }>;
   backlinks: Array<{ id: string; title: string; icon?: string | null }>;
   lock: {
-    userId: string;
-    clientId: string;
+    userId?: string;
+    clientId?: string;
     name: string;
     expiresAt: number;
     isMe?: boolean;
   } | null;
+}
+
+function sameNotepadScope(left: NotepadData, right: NotepadData): boolean {
+  return (
+    left.workspaceId === right.workspaceId &&
+    left.projectId === right.projectId &&
+    left.id === right.id
+  );
 }
 
 interface LockBannerState {
@@ -94,9 +113,11 @@ interface LockBannerState {
 
 interface NotepadEditorInnerProps {
   initialData: NotepadData;
+  pendingData?: NotepadData;
   hideTitle?: boolean;
   hideFavorite?: boolean;
   onReload: () => void;
+  onScopeSwitchComplete: (data: NotepadData) => void;
 }
 
 function isBlankDocument(doc: any[]): boolean {
@@ -111,14 +132,16 @@ function isBlankDocument(doc: any[]): boolean {
 
 function NotepadEditorInner({
   initialData,
+  pendingData,
   hideTitle = false,
   hideFavorite = false,
   onReload,
+  onScopeSwitchComplete,
 }: NotepadEditorInnerProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isModern, isDark } = useTheme();
-  const { data: me } = useMe();
+  const { data: account } = useAccount();
   const [data, setData] = useState<NotepadData>(initialData);
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved');
   const [availableBanner, setAvailableBanner] = useState(false);
@@ -129,8 +152,9 @@ function NotepadEditorInner({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
 
-  const { data: projectTags = [] } = useProjectTags(data.projectId);
+  const { data: projectTags = [] } = useProjectTags(data.workspaceId, data.projectId);
   const [showTagMenu, setShowTagMenu] = useState(false);
   const [tagSearch, setTagSearch] = useState('');
   const tagMenuRef = useRef<HTMLDivElement>(null);
@@ -170,15 +194,15 @@ function NotepadEditorInner({
 
   const isFocusedRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const currentVersionRef = useRef<number>(initialData.version);
-  const isSavingRef = useRef(false);
-  const queuedContentRef = useRef<string | null>(null);
-  const saveTimeoutRef = useRef<number | null>(null);
   const titleTimeoutRef = useRef<number | null>(null);
-  const retryTimeoutRef = useRef<number | null>(null);
   const heartbeatIntervalRef = useRef<number | null>(null);
   const titleTextareaRef = useRef<HTMLTextAreaElement>(null);
   const skipUnmountSideEffectsRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const pendingDataRef = useRef(pendingData);
+  const onScopeSwitchCompleteRef = useRef(onScopeSwitchComplete);
+  pendingDataRef.current = pendingData;
+  onScopeSwitchCompleteRef.current = onScopeSwitchComplete;
 
   // Auto-resize title textarea to fit content height without vertical scrollbars
   useEffect(() => {
@@ -204,18 +228,122 @@ function NotepadEditorInner({
   }, [initialData.content]);
 
   // Instantiate BlockNote editor with preloaded content
-  const isEditable = !lockBanner && !availableBanner;
+  const membership = account?.workspaces.find((workspace) => workspace.id === data.workspaceId);
+  const isEditable =
+    Boolean(membership && membership.role !== 'viewer') && !lockBanner && !availableBanner;
   const editor = useCreateBlockNote(
     {
       schema,
       initialContent,
+      uploadFile: createMediaUploader(initialData, (message) => toast.error(message)),
     },
-    [initialData.id],
+    [initialData.workspaceId, initialData.projectId, initialData.id],
   );
 
-  const lastSavedContentRef = useRef<string>(
-    initialContent ? initialData.content : JSON.stringify(editor.document),
-  );
+  const controllerRef = useRef<SaveLockController | null>(null);
+  if (!controllerRef.current) {
+    const scope: EditorScope = {
+      workspaceId: initialData.workspaceId,
+      projectId: initialData.projectId,
+      notepadId: initialData.id,
+      clientId: clientIdRef.current,
+    };
+    controllerRef.current = new SaveLockController({
+      scope,
+      savedContent: initialContent ? initialData.content : JSON.stringify(editor.document),
+      version: initialData.version,
+      save: async (capturedScope, content, version, keepalive) => {
+        const body = JSON.stringify({
+          content,
+          baseVersion: version,
+          clientId: capturedScope.clientId,
+        });
+        const response = await fetch(
+          projectApiPath(
+            capturedScope.workspaceId,
+            capturedScope.projectId,
+            `notepads/${capturedScope.notepadId}/content`,
+          ),
+          {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: Boolean(keepalive && body.length < 60_000),
+            body,
+          },
+        );
+        if (response.status === 409) {
+          const conflict = (await response.json()) as {
+            error?: { code?: string; holder?: { name?: string; isMe?: boolean } };
+          };
+          if (conflict.error?.code === 'locked') {
+            hasLockRef.current = false;
+            stopHeartbeat();
+            setLockBanner({
+              holderName: conflict.error.holder?.name || 'Someone',
+              isMe: !!conflict.error.holder?.isMe,
+            });
+            setAvailableBanner(false);
+            throw new SaveConflictError('Edit lock was lost');
+          }
+          setConflictBanner(true);
+          throw new SaveConflictError();
+        }
+        if (!response.ok) {
+          const failure = (await response.json().catch(() => ({}))) as {
+            error?: { message?: string };
+            message?: string;
+          };
+          throw new Error(failure.error?.message || failure.message || 'Save failed');
+        }
+        const result = (await response.json()) as { version: number };
+        setConflictBanner(false);
+        return result;
+      },
+      release: async (capturedScope, keepalive) => {
+        if (!hasLockRef.current) return;
+        const response = await fetch(
+          projectApiPath(
+            capturedScope.workspaceId,
+            capturedScope.projectId,
+            `notepads/${capturedScope.notepadId}/lock`,
+          ),
+          {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clientId: capturedScope.clientId }),
+            keepalive,
+          },
+        );
+        if (!response.ok && response.status !== 404) throw new Error('Failed to release edit lock');
+        hasLockRef.current = false;
+      },
+      onStateChange: (state) => {
+        if (isMountedRef.current) setSaveStatus(state.status);
+      },
+      onScopeSwitched: (nextScope) => {
+        const nextData = pendingDataRef.current;
+        if (
+          nextData &&
+          nextData.workspaceId === nextScope.workspaceId &&
+          nextData.projectId === nextScope.projectId &&
+          nextData.id === nextScope.notepadId
+        ) {
+          onScopeSwitchCompleteRef.current(nextData);
+        }
+      },
+    });
+  }
+  const saveController = controllerRef.current;
+
+  useEffect(() => {
+    if (!pendingData) return;
+    void saveController.switchScope({
+      workspaceId: pendingData.workspaceId,
+      projectId: pendingData.projectId,
+      notepadId: pendingData.id,
+      clientId: clientIdRef.current,
+    });
+  }, [pendingData, saveController]);
 
   // Track blankness for the "Start with a template" banner.
   useEffect(() => {
@@ -249,7 +377,13 @@ function NotepadEditorInner({
     if (!lockBanner) return;
     const pollInterval = window.setInterval(async () => {
       try {
-        const res = await fetch(`/api/notepads/${initialData.id}`);
+        const res = await fetch(
+          projectApiPath(
+            initialData.workspaceId,
+            initialData.projectId,
+            `notepads/${initialData.id}`,
+          ),
+        );
         if (!res.ok) return;
         const json = (await res.json()) as NotepadData;
         if (json.lock && json.lock.expiresAt > Date.now()) {
@@ -296,14 +430,21 @@ function NotepadEditorInner({
       const seq = ++claimSeqRef.current;
       const promise = (async () => {
         try {
-          const res = await fetch(`/api/notepads/${initialData.id}/lock`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              clientId: clientIdRef.current,
-              takeover,
-            }),
-          });
+          const res = await fetch(
+            projectApiPath(
+              initialData.workspaceId,
+              initialData.projectId,
+              `notepads/${initialData.id}/lock`,
+            ),
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                clientId: clientIdRef.current,
+                takeover,
+              }),
+            },
+          );
 
           // If a newer claim request was started while this was in flight, ignore this response
           if (seq !== claimSeqRef.current) {
@@ -331,6 +472,7 @@ function NotepadEditorInner({
           }
         } catch (err) {
           console.warn('Lock claim error', err);
+          toast.error(err instanceof Error ? err.message : 'Failed to claim edit lock');
         } finally {
           if (claimInFlightRef.current?.seq === seq) {
             claimInFlightRef.current = null;
@@ -342,19 +484,16 @@ function NotepadEditorInner({
       claimInFlightRef.current = { seq, promise };
       return promise;
     },
-    [initialData.id, stopHeartbeat],
+    [initialData.workspaceId, initialData.projectId, initialData.id, stopHeartbeat],
   );
 
   const releaseLock = useCallback(() => {
-    hasLockRef.current = false;
     stopHeartbeat();
-    fetch(`/api/notepads/${initialData.id}/lock`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ clientId: clientIdRef.current }),
-      keepalive: true,
-    }).catch(() => {});
-  }, [initialData.id, stopHeartbeat]);
+    void saveController.releaseCurrent().then((released) => {
+      if (!released && isMountedRef.current)
+        toast.error('Could not save and release the edit lock');
+    });
+  }, [saveController, stopHeartbeat]);
 
   const startHeartbeat = useCallback(() => {
     if (heartbeatIntervalRef.current) return;
@@ -371,105 +510,32 @@ function NotepadEditorInner({
     }
   }, [startHeartbeat]);
 
-  // Save function (single-flight, queued)
   const executeSave = useCallback(
-    async (contentToSave: string, options?: { isUnload?: boolean }) => {
-      if (contentToSave === lastSavedContentRef.current) {
-        setSaveStatus('saved');
-        return;
-      }
-
-      if (isSavingRef.current) {
-        queuedContentRef.current = contentToSave;
-        return;
-      }
-
-      isSavingRef.current = true;
-      setSaveStatus('saving');
-
-      try {
-        const bodyStr = JSON.stringify({
-          content: contentToSave,
-          baseVersion: currentVersionRef.current,
-          clientId: clientIdRef.current,
-        });
-
-        // Browsers strictly limit keepalive requests to 64KB across all active requests.
-        // Never use keepalive for normal saves; only use keepalive on page unload if safely under 60KB.
-        const useKeepalive = Boolean(options?.isUnload && bodyStr.length < 60_000);
-
-        const res = await fetch(`/api/notepads/${initialData.id}/content`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: useKeepalive,
-          body: bodyStr,
-        });
-
-        if (res.status === 409) {
-          const err = (await res.json()) as {
-            error?: { code?: string; holder?: { name?: string; isMe?: boolean } };
-          };
-          if (err.error?.code === 'locked') {
-            hasLockRef.current = false;
-            setLockBanner({
-              holderName: err.error.holder?.name || 'Someone',
-              isMe: !!err.error.holder?.isMe,
-            });
-          } else {
-            setConflictBanner(true);
-            setSaveStatus('conflict');
-          }
-          return;
-        }
-
-        if (!res.ok) {
-          throw new Error('Save failed');
-        }
-
-        const result = (await res.json()) as { version: number };
-        currentVersionRef.current = result.version;
-        lastSavedContentRef.current = contentToSave;
-        setSaveStatus('saved');
-        setConflictBanner(false);
-        if (retryTimeoutRef.current) {
-          window.clearTimeout(retryTimeoutRef.current);
-          retryTimeoutRef.current = null;
-        }
-      } catch (err) {
-        console.error('Save error', err);
-        setSaveStatus('error');
-        // Automatically retry saving after 3 seconds
-        if (retryTimeoutRef.current) window.clearTimeout(retryTimeoutRef.current);
-        retryTimeoutRef.current = window.setTimeout(() => {
-          if (editor) {
-            const currentDoc = JSON.stringify(editor.document);
-            if (currentDoc !== lastSavedContentRef.current) {
-              executeSave(currentDoc);
-            }
-          }
-        }, 3000);
-      } finally {
-        isSavingRef.current = false;
-        if (queuedContentRef.current !== null) {
-          const next = queuedContentRef.current;
-          queuedContentRef.current = null;
-          executeSave(next);
-        }
-      }
-    },
-    [initialData.id, editor],
+    (content: string, options?: { isUnload?: boolean }) =>
+      saveController.saveNow(content, Boolean(options?.isUnload)),
+    [saveController],
   );
 
   const scheduleSave = useCallback(
-    (content: string) => {
-      setSaveStatus('saving');
-      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = window.setTimeout(() => {
-        executeSave(content);
-      }, 800);
-    },
-    [executeSave],
+    (content: string) => saveController.schedule(content),
+    [saveController],
   );
+
+  const handleDiscardSave = () => {
+    const savedContent = saveController.discard();
+    setConflictBanner(false);
+    if (!editor) return;
+    try {
+      const blocks = JSON.parse(savedContent);
+      if (Array.isArray(blocks) && blocks.length > 0) {
+        editor.replaceBlocks(editor.document, blocks as any[]);
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not restore the last saved document',
+      );
+    }
+  };
 
   // Listen to editor changes
   useEffect(() => {
@@ -504,17 +570,11 @@ function NotepadEditorInner({
       }
       isFocusedRef.current = false;
       stopHeartbeat();
-      if (saveTimeoutRef.current) {
-        window.clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
       if (editor) {
         const docJson = JSON.stringify(editor.document);
-        if (docJson !== lastSavedContentRef.current) {
-          executeSave(docJson).then(() => {
-            if (hasLockRef.current && !isFocusedRef.current) {
-              releaseLock();
-            }
+        if (saveController.isDirty || docJson !== saveController.getState().savedContent) {
+          void executeSave(docJson).then((saved) => {
+            if (saved && hasLockRef.current && !isFocusedRef.current) releaseLock();
           });
           return;
         }
@@ -523,20 +583,19 @@ function NotepadEditorInner({
         releaseLock();
       }
     },
-    [editor, executeSave, releaseLock, stopHeartbeat],
+    [editor, executeSave, releaseLock, saveController, stopHeartbeat],
   );
 
   // Page unload & unmount lock release
   useEffect(() => {
+    isMountedRef.current = true;
     const handlePageHide = () => {
       if (hasLockRef.current) {
-        if (editor) {
-          const docJson = JSON.stringify(editor.document);
-          if (docJson !== lastSavedContentRef.current) {
-            executeSave(docJson, { isUnload: true });
-          }
-        }
-        releaseLock();
+        if (editor) saveController.schedule(JSON.stringify(editor.document));
+        void saveController.releaseCurrent(true).then((released) => {
+          if (!released && isMountedRef.current)
+            toast.error('Could not save and release the edit lock');
+        });
       }
     };
 
@@ -546,44 +605,50 @@ function NotepadEditorInner({
     return () => {
       window.removeEventListener('pagehide', handlePageHide);
       window.removeEventListener('beforeunload', handlePageHide);
+      isMountedRef.current = false;
       stopHeartbeat();
-      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
       if (titleTimeoutRef.current) window.clearTimeout(titleTimeoutRef.current);
-      if (retryTimeoutRef.current) window.clearTimeout(retryTimeoutRef.current);
       if (hasLockRef.current && !skipUnmountSideEffectsRef.current) {
-        if (editor) {
-          const docJson = JSON.stringify(editor.document);
-          if (docJson !== lastSavedContentRef.current) {
-            executeSave(docJson, { isUnload: true });
-          }
-        }
-        releaseLock();
+        if (editor) saveController.schedule(JSON.stringify(editor.document));
+        void saveController.releaseCurrent(true);
       }
+      saveController.dispose();
     };
-  }, [editor, executeSave, releaseLock, stopHeartbeat]);
+  }, [editor, releaseLock, saveController, stopHeartbeat]);
 
   const toggleFavorite = async () => {
     const next = !data.isFavorite;
     setData((prev) => ({ ...prev, isFavorite: next }));
     queryClient.setQueryData<Array<{ id: string; isFavorite: boolean }>>(
-      ['notepads', initialData.projectId],
+      ['notepads', initialData.workspaceId, initialData.projectId],
       (old) =>
         old ? old.map((n) => (n.id === initialData.id ? { ...n, isFavorite: next } : n)) : old,
     );
     try {
-      const res = await fetch(`/api/notepads/${initialData.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isFavorite: next }),
-      });
+      const res = await fetch(
+        projectApiPath(
+          initialData.workspaceId,
+          initialData.projectId,
+          `notepads/${initialData.id}`,
+        ),
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isFavorite: next }),
+        },
+      );
       if (!res.ok) {
         const err = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(err?.error?.message || 'Failed to update favorite');
       }
-      queryClient.invalidateQueries({ queryKey: ['notepads', initialData.projectId] });
+      queryClient.invalidateQueries({
+        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
+      });
     } catch (err) {
       setData((prev) => ({ ...prev, isFavorite: !next }));
-      queryClient.invalidateQueries({ queryKey: ['notepads', initialData.projectId] });
+      queryClient.invalidateQueries({
+        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
+      });
       const msg = err instanceof Error ? err.message : 'Failed to update favorite';
       console.error(msg, err);
       toast.error(msg);
@@ -595,11 +660,18 @@ function NotepadEditorInner({
     if (titleTimeoutRef.current) window.clearTimeout(titleTimeoutRef.current);
     titleTimeoutRef.current = window.setTimeout(async () => {
       try {
-        const res = await fetch(`/api/notepads/${initialData.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: newTitle }),
-        });
+        const res = await fetch(
+          projectApiPath(
+            initialData.workspaceId,
+            initialData.projectId,
+            `notepads/${initialData.id}`,
+          ),
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle }),
+          },
+        );
         if (!res.ok) {
           const err = (await res.json().catch(() => null)) as {
             error?: { message?: string };
@@ -607,13 +679,11 @@ function NotepadEditorInner({
           throw new Error(err?.error?.message || 'Failed to save title');
         }
         queryClient.setQueryData<Array<{ id: string; title: string } & Record<string, unknown>>>(
-          ['notepads', initialData.projectId],
+          ['notepads', account?.user.id, initialData.workspaceId, initialData.projectId],
           (old) =>
             old
               ? old.map((n) =>
-                  n.id === initialData.id
-                    ? { ...n, title: newTitle.trim() || 'Untitled' }
-                    : n,
+                  n.id === initialData.id ? { ...n, title: newTitle.trim() || 'Untitled' } : n,
                 )
               : old,
         );
@@ -629,7 +699,14 @@ function NotepadEditorInner({
     if (isDeleting) return;
     setIsDeleting(true);
     try {
-      const res = await fetch(`/api/notepads/${initialData.id}`, { method: 'DELETE' });
+      const res = await fetch(
+        projectApiPath(
+          initialData.workspaceId,
+          initialData.projectId,
+          `notepads/${initialData.id}`,
+        ),
+        { method: 'DELETE' },
+      );
       if (res.status === 404) {
         // Already deleted — treat as success, same as the sidebar tree.
       } else if (!res.ok) {
@@ -637,8 +714,10 @@ function NotepadEditorInner({
         throw new Error(err?.error?.message || 'Failed to delete notepad');
       }
       setConfirmDeleteOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['notepads', initialData.projectId] });
-      navigate({ to: '/p/$projectId', params: { projectId: initialData.projectId } });
+      queryClient.invalidateQueries({
+        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
+      });
+      navigate(projectTarget(initialData.workspaceId, initialData.projectId));
     } catch (err) {
       setConfirmDeleteOpen(false);
       setIsDeleting(false);
@@ -755,13 +834,19 @@ function NotepadEditorInner({
               onClick={async () => {
                 if (!editor) return;
                 try {
-                  const res = await fetch(`/api/notepads/${initialData.id}`);
+                  const res = await fetch(
+                    projectApiPath(
+                      initialData.workspaceId,
+                      initialData.projectId,
+                      `notepads/${initialData.id}`,
+                    ),
+                  );
                   if (res.ok) {
                     const latest = (await res.json()) as { version: number };
-                    currentVersionRef.current = latest.version;
+                    saveController.setVersion(latest.version);
                   }
-                  lastSavedContentRef.current = '';
-                  executeSave(JSON.stringify(editor.document));
+                  setConflictBanner(false);
+                  await saveController.retry();
                 } catch (err: any) {
                   toast.error(err?.message || 'Failed to fetch latest notepad version');
                 }
@@ -778,11 +863,18 @@ function NotepadEditorInner({
 
   const updateNotepadTags = async (newTagIds: string[]) => {
     try {
-      const putRes = await fetch(`/api/notepads/${initialData.id}/tags`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tagIds: newTagIds }),
-      });
+      const putRes = await fetch(
+        projectApiPath(
+          initialData.workspaceId,
+          initialData.projectId,
+          `notepads/${initialData.id}/tags`,
+        ),
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tagIds: newTagIds }),
+        },
+      );
       if (!putRes.ok) {
         const errJson = (await putRes.json().catch(() => ({}))) as {
           error?: { message?: string };
@@ -790,7 +882,13 @@ function NotepadEditorInner({
         };
         throw new Error(errJson.error?.message || errJson.message || 'Failed to update tags');
       }
-      const res = await fetch(`/api/notepads/${initialData.id}`);
+      const res = await fetch(
+        projectApiPath(
+          initialData.workspaceId,
+          initialData.projectId,
+          `notepads/${initialData.id}`,
+        ),
+      );
       if (res.ok) {
         const json = (await res.json()) as NotepadData;
         setData(json);
@@ -823,7 +921,7 @@ function NotepadEditorInner({
       return;
     }
     try {
-      const res = await fetch(`/api/projects/${data.projectId}/tags`, {
+      const res = await fetch(projectApiPath(data.workspaceId, data.projectId, 'tags'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed }),
@@ -836,8 +934,7 @@ function NotepadEditorInner({
         throw new Error(errJson.error?.message || errJson.message || 'Failed to create tag');
       }
       const newTag = (await res.json()) as { id: string; name: string };
-      await queryClient.invalidateQueries({ queryKey: ['projects', data.projectId, 'tags'] });
-      await queryClient.invalidateQueries({ queryKey: ['tags', data.projectId] });
+      await queryClient.invalidateQueries({ queryKey: ['tags', data.workspaceId, data.projectId] });
       toast.success(`Tag #${newTag.name} created`);
       await addTag(newTag.id);
       setShowTagMenu(false);
@@ -1028,27 +1125,50 @@ function NotepadEditorInner({
     </div>
   );
 
+  const renderFilePanel = useCallback(
+    (props: FilePanelProps) => (
+      <EditorFilePanel {...props} workspaceId={data.workspaceId} projectId={data.projectId} />
+    ),
+    [data.workspaceId, data.projectId],
+  );
+
   const blockNoteViewNode = editor && (
     <BlockNoteView
       editor={editor}
       editable={isEditable}
       slashMenu={false}
+      filePanel={false}
       theme={isDark ? 'dark' : 'light'}
       className={hideTitle ? 'w-full bn-embedded' : 'w-full'}
     >
+      <FilePanelController
+        filePanel={renderFilePanel}
+        portalElement={typeof document === 'undefined' ? undefined : document.body}
+        floatingUIOptions={{ useFloatingOptions: { strategy: 'fixed' } }}
+      />
       {/* Custom Slash Menu */}
       <SuggestionMenuController
         triggerCharacter="/"
         suggestionMenuComponent={BasaltSuggestionMenu}
         getItems={async (query) => {
-          const defaultItems = getDefaultReactSlashMenuItems(editor);
+          const mediaItem = {
+            title: 'Media',
+            subtext: 'Upload an image, reuse project media, or link a video',
+            aliases: ['image', 'picture', 'video', 'youtube', 'upload', 'library'],
+            group: 'Media',
+            icon: <FileText className="w-4 h-4" />,
+            onItemClick: () => setMediaOpen(true),
+          };
+          const defaultItems = getDefaultReactSlashMenuItems(editor).filter(
+            (item) => !['Image', 'Video'].includes(item.title),
+          );
           const customItems = getCustomSlashItems(
             editor,
             data.kind === 'card' ? 'card' : 'notepad',
             data.projectId || '',
             setDialogState,
           );
-          const all = [...customItems, ...defaultItems];
+          const all = [mediaItem, ...customItems, ...defaultItems];
           const q = query.toLowerCase();
           return all.filter(
             (item) =>
@@ -1063,7 +1183,7 @@ function NotepadEditorInner({
         triggerCharacter="@"
         suggestionMenuComponent={BasaltSuggestionMenu}
         getItems={async (query) => {
-          return getAtMenuSuggestions(query, data.projectId || '', editor);
+          return getAtMenuSuggestions(query, data.workspaceId, data.projectId || '', editor);
         }}
       />
 
@@ -1074,6 +1194,7 @@ function NotepadEditorInner({
         getItems={async (query) => {
           return getHashMenuSuggestions(
             query,
+            data.workspaceId,
             data.projectId || '',
             initialData.id,
             editor,
@@ -1105,7 +1226,7 @@ function NotepadEditorInner({
           {data.backlinks.map((link) => (
             <a
               key={link.id}
-              href={`/p/${data.projectId}/notepads/${link.id}`}
+              href={`${projectPath(data.workspaceId, data.projectId)}/notepads/${encodeURIComponent(link.id)}`}
               className="p-2.5 border border-[var(--line)] hover:bg-[var(--hi)] flex items-center gap-2 text-xs transition"
             >
               {link.icon ? (
@@ -1123,6 +1244,42 @@ function NotepadEditorInner({
 
   const dialogsNode = (
     <>
+      {mediaOpen && isEditable && (
+        <MediaPicker
+          key={`${data.workspaceId}/${data.projectId}`}
+          workspaceId={data.workspaceId}
+          projectId={data.projectId}
+          onClose={() => setMediaOpen(false)}
+          onSelect={(selection) => {
+            if (!isEditable) return;
+            const current = editor.getTextCursorPosition().block;
+            if (selection.kind === 'link') {
+              editor.insertBlocks(
+                [
+                  {
+                    type: 'paragraph',
+                    content: [{ type: 'link', href: selection.url, content: selection.url }],
+                  },
+                ],
+                current,
+                'after',
+              );
+            } else if (selection.kind === 'youtube') {
+              editor.insertBlocks(
+                [{ type: 'youtube', props: { videoId: selection.videoId } }],
+                current,
+                'after',
+              );
+            } else {
+              editor.insertBlocks(
+                [{ type: selection.kind, props: { url: selection.url, name: selection.name || '' } }],
+                current,
+                'after',
+              );
+            }
+          }}
+        />
+      )}
       {/* Template dialog: /template slash command, header menu, blank-doc banner */}
       {dialogState.type === 'template' && (
         <TemplatePickerModal editor={editor} onClose={() => setDialogState({ type: null })} />
@@ -1145,6 +1302,7 @@ function NotepadEditorInner({
       {/* Reference Dialogs: /notepad, /task, and /board */}
       {dialogState.type === 'notepad' && data.projectId && (
         <NotepadPickerModal
+          workspaceId={data.workspaceId}
           projectId={data.projectId}
           onClose={() => setDialogState({ type: null })}
           onSelectNotepad={(selectedId) => {
@@ -1162,6 +1320,7 @@ function NotepadEditorInner({
 
       {dialogState.type === 'task' && data.projectId && (
         <TaskPickerModal
+          workspaceId={data.workspaceId}
           projectId={data.projectId}
           onClose={() => setDialogState({ type: null })}
           onCardCreated={(createdCardId) => {
@@ -1179,6 +1338,7 @@ function NotepadEditorInner({
 
       {dialogState.type === 'board' && data.projectId && (
         <BoardPickerModal
+          workspaceId={data.workspaceId}
           projectId={data.projectId}
           onClose={() => setDialogState({ type: null })}
           onSelectBoard={(selectedBoardId) => {
@@ -1227,19 +1387,23 @@ function NotepadEditorInner({
               {saveStatus === 'saving' && 'Saving…'}
               {saveStatus === 'saved' && 'Saved'}
               {saveStatus === 'conflict' && 'Conflict'}
-              {saveStatus === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (editor) {
-                      executeSave(JSON.stringify(editor.document));
-                    }
-                  }}
-                  className="text-rose-500 hover:text-[var(--danger)] underline font-medium cursor-pointer"
-                  title="Click to retry saving"
-                >
-                  Offline, retrying… (click to retry)
-                </button>
+              {(saveStatus === 'error' || saveStatus === 'conflict') && (
+                <span className="inline-flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void saveController.retry()}
+                    className="text-rose-500 hover:text-[var(--danger)] underline font-medium cursor-pointer"
+                  >
+                    Retry save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardSave}
+                    className="text-[var(--muted)] hover:text-[var(--text)] underline cursor-pointer"
+                  >
+                    Discard
+                  </button>
+                </span>
               )}
             </span>
 
@@ -1320,14 +1484,23 @@ function NotepadEditorInner({
               {saveStatus === 'saving' && 'Saving…'}
               {saveStatus === 'saved' && 'Saved'}
               {saveStatus === 'conflict' && 'Conflict'}
-              {saveStatus === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => editor && executeSave(JSON.stringify(editor.document))}
-                  className="text-[var(--danger)] underline cursor-pointer"
-                >
-                  Retry save
-                </button>
+              {(saveStatus === 'error' || saveStatus === 'conflict') && (
+                <span className="inline-flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void saveController.retry()}
+                    className="text-[var(--danger)] underline cursor-pointer"
+                  >
+                    Retry save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDiscardSave}
+                    className="text-[var(--muted)] underline cursor-pointer"
+                  >
+                    Discard
+                  </button>
+                </span>
               )}
             </span>
 
@@ -1404,20 +1577,29 @@ function NotepadEditorInner({
             {saveStatus === 'saving' && 'Saving…'}
             {saveStatus === 'saved' && 'Saved'}
             {saveStatus === 'conflict' && 'Conflict'}
-            {saveStatus === 'error' && (
-              <button
-                type="button"
-                onClick={() => editor && executeSave(JSON.stringify(editor.document))}
-                className="text-[var(--danger)] underline cursor-pointer"
-              >
-                Retry save
-              </button>
+            {(saveStatus === 'error' || saveStatus === 'conflict') && (
+              <span className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void saveController.retry()}
+                  className="text-[var(--danger)] underline cursor-pointer"
+                >
+                  Retry save
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDiscardSave}
+                  className="text-[var(--muted)] underline cursor-pointer"
+                >
+                  Discard
+                </button>
+              </span>
             )}
           </span>
 
           <div className="hidden sm:flex items-center">
             <Avatar
-              name={me?.user?.name || 'TM'}
+              name={account?.user?.name || 'TM'}
               size="sm"
               className="w-[30px] h-[30px] text-[10px] font-extrabold"
             />
@@ -1501,40 +1683,55 @@ function NotepadEditorInner({
 }
 
 export function NotepadEditor({
+  workspaceId,
   notepadId,
+  projectId,
   hideTitle = false,
   hideFavorite = false,
 }: NotepadEditorProps) {
-  const [data, setData] = useState<NotepadData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: account } = useAccount();
   const [reloadKey, setReloadKey] = useState(0);
-
-  const loadNotepad = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await fetch(`/api/notepads/${notepadId}`);
-      if (res.status === 404) {
-        setError('This notepad was not found or has been moved to trash.');
-        return;
+  const [displayedData, setDisplayedData] = useState<NotepadData | null>(null);
+  const {
+    data,
+    isPending: loading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['notepad', account?.user.id, workspaceId, projectId, notepadId],
+    enabled: Boolean(account?.user.id),
+    refetchOnWindowFocus: false,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const response = await fetch(
+        projectApiPath(workspaceId, projectId, `notepads/${notepadId}`),
+        {
+          signal,
+        },
+      );
+      if (!response.ok) throw new Error('This notepad is unavailable in this project.');
+      const note = (await response.json()) as NotepadData;
+      if (
+        note.id !== notepadId ||
+        note.projectId !== projectId ||
+        note.workspaceId !== workspaceId
+      ) {
+        throw new Error('This notepad is unavailable in this project.');
       }
-      if (!res.ok) throw new Error('Failed to load notepad');
-      const json = (await res.json()) as NotepadData;
-      setData(json);
-    } catch (err) {
-      console.error('Failed to load notepad', err);
-      setError('Unable to load notepad.');
-    } finally {
-      setLoading(false);
-    }
-  }, [notepadId]);
+      return note;
+    },
+  });
 
   useEffect(() => {
-    setLoading(true);
-    loadNotepad();
-  }, [loadNotepad]);
+    if (data && (!displayedData || sameNotepadScope(data, displayedData))) {
+      setDisplayedData(data);
+    }
+  }, [data, displayedData]);
 
-  if (loading) {
+  const activeData = displayedData ?? data ?? null;
+  const pendingData = data && activeData && !sameNotepadScope(data, activeData) ? data : undefined;
+
+  if (!activeData && loading) {
     return (
       <div
         className={
@@ -1547,37 +1744,36 @@ export function NotepadEditor({
     );
   }
 
-  if (error || !data) {
+  if (!activeData) {
     return (
       <div className="w-full p-12 max-w-xl mx-auto text-center space-y-4">
         <div className="text-4xl">📄</div>
         <h2 className="text-lg font-semibold text-[var(--text)]">Notepad Unavailable</h2>
         <p className="text-xs text-[var(--muted)]">
-          {error || 'This notepad is no longer available.'}
+          {error?.message || 'This notepad is no longer available.'}
         </p>
       </div>
     );
   }
 
   return (
-    <NotepadEditorInner
-      key={`${notepadId}-${reloadKey}`}
-      initialData={data}
-      hideTitle={hideTitle}
-      hideFavorite={hideFavorite}
-      onReload={async () => {
-        try {
-          const res = await fetch(`/api/notepads/${notepadId}`);
-          if (res.ok) {
-            const json = (await res.json()) as NotepadData;
-            setData(json);
-            setReloadKey((k) => k + 1);
-          }
-        } catch (err) {
-          console.error('Failed to reload notepad', err);
-        }
-      }}
-    />
+    <ReferenceScopeProvider
+      value={{ workspaceId: activeData.workspaceId, projectId: activeData.projectId }}
+    >
+      <NotepadEditorInner
+        key={`${activeData.workspaceId}-${activeData.projectId}-${activeData.id}-${reloadKey}`}
+        initialData={activeData}
+        pendingData={pendingData}
+        hideTitle={hideTitle}
+        hideFavorite={hideFavorite}
+        onScopeSwitchComplete={setDisplayedData}
+        onReload={async () => {
+          const result = await refetch();
+          if (result.error) toast.error(result.error.message);
+          else setReloadKey((key) => key + 1);
+        }}
+      />
+    </ReferenceScopeProvider>
   );
 }
 

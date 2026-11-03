@@ -1,7 +1,6 @@
 export interface LockAcquireResult {
   acquired: boolean;
   holderUserId?: string;
-  holderName?: string;
   expiresAt?: number;
 }
 

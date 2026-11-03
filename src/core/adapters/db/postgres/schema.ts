@@ -2,17 +2,22 @@ import {
   pgTable,
   text,
   integer,
+  bigint,
   boolean,
+  timestamp,
+  customType,
   primaryKey,
   index,
   uniqueIndex,
   pgEnum,
+  check,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 /**
  * Burrow Drizzle schema for PostgreSQL (pg-core).
- * Timestamps are integer Unix milliseconds. IDs are text (nanoid).
- * FTS: notepads has `search_vector` generated column + GIN index.
+ * Domain timestamps are bigint Unix milliseconds; auth timestamps map to Date.
+ * IDs are text (nanoid). Search uses a generated tsvector and GIN index.
  */
 
 // ---------------------------------------------------------------------------
@@ -36,18 +41,18 @@ export const user = pgTable('user', {
   email: text('email').notNull().unique(),
   emailVerified: boolean('email_verified').notNull().default(false),
   image: text('image'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3 }).notNull(),
 });
 
 export const session = pgTable(
   'session',
   {
     id: text('id').primaryKey(),
-    expiresAt: integer('expires_at').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
     token: text('token').notNull().unique(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3 }).notNull(),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
     userId: text('user_id')
@@ -69,12 +74,18 @@ export const account = pgTable(
     accessToken: text('access_token'),
     refreshToken: text('refresh_token'),
     idToken: text('id_token'),
-    accessTokenExpiresAt: integer('access_token_expires_at'),
-    refreshTokenExpiresAt: integer('refresh_token_expires_at'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', {
+      withTimezone: true,
+      precision: 3,
+    }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', {
+      withTimezone: true,
+      precision: 3,
+    }),
     scope: text('scope'),
     password: text('password'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3 }).notNull(),
   },
   (t) => [index('account_user_idx').on(t.userId)],
 );
@@ -83,20 +94,40 @@ export const verification = pgTable('verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true, precision: 3 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true, precision: 3 }).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, precision: 3 }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
 // Workspace / members / invites
 // ---------------------------------------------------------------------------
 
+export const bootstrapState = pgTable(
+  'bootstrap_state',
+  {
+    id: integer('id').primaryKey(),
+    status: text('status', { enum: ['empty', 'claimed', 'complete'] }).notNull(),
+    claimEmail: text('claim_email'),
+    userId: text('user_id'),
+    workspaceId: text('workspace_id'),
+  },
+  (t) => [
+    check('bootstrap_singleton', sql`${t.id} = 1`),
+    check(
+      'bootstrap_state_valid',
+      sql`(${t.status} = 'empty' AND ${t.claimEmail} IS NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
+        OR (${t.status} = 'claimed' AND ${t.claimEmail} IS NOT NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
+        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL AND ${t.userId} IS NOT NULL AND ${t.workspaceId} IS NOT NULL)))`,
+    ),
+  ],
+);
+
 export const workspaces = pgTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   createdBy: text('created_by').notNull(),
-  createdAt: integer('created_at').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
 export const members = pgTable(
@@ -107,9 +138,9 @@ export const members = pgTable(
       .references(() => workspaces.id, { onDelete: 'cascade' }),
     userId: text('user_id').notNull(),
     role: roleEnum('role').notNull(),
-    joinedAt: integer('joined_at').notNull(),
+    joinedAt: bigint('joined_at', { mode: 'number' }).notNull(),
   },
-  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] })],
+  (t) => [primaryKey({ columns: [t.workspaceId, t.userId] }), index('members_user').on(t.userId)],
 );
 
 export const invites = pgTable(
@@ -123,9 +154,9 @@ export const invites = pgTable(
     role: inviteRoleEnum('role').notNull(),
     tokenHash: text('token_hash').notNull().unique(),
     invitedBy: text('invited_by').notNull(),
-    expiresAt: integer('expires_at').notNull(),
-    acceptedAt: integer('accepted_at'),
-    createdAt: integer('created_at').notNull(),
+    expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+    acceptedAt: bigint('accepted_at', { mode: 'number' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [uniqueIndex('invites_token_hash_uq').on(t.tokenHash)],
 );
@@ -145,16 +176,35 @@ export const projects = pgTable(
     icon: text('icon'),
     color: text('color'),
     position: text('position').notNull(),
-    archivedAt: integer('archived_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    archivedAt: bigint('archived_at', { mode: 'number' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('projects_ws').on(t.workspaceId, t.position)],
 );
 
+export const projectFiles = pgTable(
+  'project_files',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    storageKey: text('storage_key').notNull(),
+    contentType: text('content_type').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.projectId, t.storageKey] }),
+    index('project_files_storage_key_idx').on(t.storageKey),
+  ],
+);
+
 // ---------------------------------------------------------------------------
-// Notepads (defined first without generated column, then altered)
+// Notepads
 // ---------------------------------------------------------------------------
+
+const tsvector = customType<{ data: string }>({ dataType: () => 'tsvector' });
 
 export const notepads = pgTable(
   'notepads',
@@ -173,18 +223,22 @@ export const notepads = pgTable(
     version: integer('version').notNull().default(1),
     position: text('position').notNull(),
     isFavorite: boolean('is_favorite').notNull().default(false),
-    deletedAt: integer('deleted_at'),
+    deletedAt: bigint('deleted_at', { mode: 'number' }),
+    deletionOperationId: text('deletion_operation_id'),
     createdBy: text('created_by').notNull(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     // Plain text extracted from content JSON for FTS
     plainText: text('plain_text'),
-    // Generated tsvector column for full-text search (added via migration)
-    searchVector: text('search_vector'),
+    searchVector: tsvector('search_vector').generatedAlwaysAs(
+      sql`to_tsvector('english'::regconfig, title || ' ' || coalesce(plain_text, ''))`,
+    ),
   },
   (t) => [
     index('notepads_tree').on(t.projectId, t.parentId, t.position),
     index('notepads_deleted_idx').on(t.projectId, t.deletedAt),
+    index('notepads_project_deleted_position_idx').on(t.projectId, t.deletedAt, t.position),
+    index('notepads_deletion_operation_idx').on(t.deletionOperationId),
     index('notepads_fts_idx').using('gin', t.searchVector),
   ],
 );
@@ -204,9 +258,10 @@ export const boards = pgTable(
     name: text('name').notNull(),
     icon: text('icon'),
     position: text('position').notNull(),
-    deletedAt: integer('deleted_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    deletedAt: bigint('deleted_at', { mode: 'number' }),
+    deletionOperationId: text('deletion_operation_id'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('boards_project').on(t.projectId, t.position)],
 );
@@ -242,8 +297,8 @@ export const cards = pgTable(
       .references(() => notepads.id, { onDelete: 'cascade' }),
     position: text('position').notNull(),
     priority: cardPriorityEnum('priority'),
-    dueDate: integer('due_date'),
-    createdAt: integer('created_at').notNull(),
+    dueDate: bigint('due_date', { mode: 'number' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('cards_column').on(t.columnId, t.position)],
 );
@@ -269,7 +324,7 @@ export const cardSubtasks = pgTable(
     title: text('title').notNull(),
     completed: boolean('completed').notNull().default(false),
     position: text('position').notNull(),
-    createdAt: integer('created_at').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('subtasks_card').on(t.cardId, t.position)],
 );
@@ -289,8 +344,8 @@ export const cardComments = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     content: text('content').notNull(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('comments_card').on(t.cardId, t.createdAt)],
 );
@@ -358,8 +413,8 @@ export const notifications = pgTable(
     actorId: text('actor_id').notNull(),
     notepadId: text('notepad_id').references(() => notepads.id, { onDelete: 'cascade' }),
     cardId: text('card_id').references(() => cards.id, { onDelete: 'cascade' }),
-    readAt: integer('read_at'),
-    createdAt: integer('created_at').notNull(),
+    readAt: bigint('read_at', { mode: 'number' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('notifications_user').on(t.userId, t.readAt, t.createdAt)],
 );
@@ -374,7 +429,7 @@ export const editLocks = pgTable('edit_locks', {
     .references(() => notepads.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull(),
   clientId: text('client_id').notNull(),
-  expiresAt: integer('expires_at').notNull(),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
 });
 
 // ---------------------------------------------------------------------------
@@ -390,6 +445,7 @@ export const schema = {
   members,
   invites,
   projects,
+  projectFiles,
   notepads,
   boards,
   boardColumns,

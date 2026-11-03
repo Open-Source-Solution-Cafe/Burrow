@@ -7,19 +7,46 @@ import { useBoards, useCreateBoard, useProjects, useRecentNotepads } from '../li
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PromptDialog } from '../components/ui/PromptDialog';
+import {
+  boardTarget,
+  notepadTarget,
+  projectApiPath,
+  projectLibraryTarget,
+} from '../lib/workspaceRoutes';
 
 export function ProjectHome() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { projectId } = useParams({ strict: false }) as { projectId?: string };
-  const { data: projects = [] } = useProjects();
-  const project = projects.find((p) => p.id === projectId) || projects[0];
+  const { workspaceId, projectId } = useParams({ strict: false }) as {
+    workspaceId?: string;
+    projectId?: string;
+  };
+  const {
+    data: projects = [],
+    isLoading: projectsLoading,
+    isError: projectsError,
+  } = useProjects(workspaceId);
+  const project = projectId === undefined ? projects[0] : projects.find((p) => p.id === projectId);
   const currentProjectId = project?.id;
-  const { data: boards = [] } = useBoards(currentProjectId);
-  const { data: recentNotepads = [] } = useRecentNotepads(currentProjectId);
+  const { data: boards = [] } = useBoards(workspaceId, currentProjectId);
+  const { data: recentNotepads = [] } = useRecentNotepads(workspaceId, currentProjectId);
   const createBoardMutation = useCreateBoard();
   const [createBoardOpen, setCreateBoardOpen] = useState(false);
   const [createNotepadPending, setCreateNotepadPending] = useState(false);
+
+  if (projectsLoading || projectsError || !project) {
+    return (
+      <div className="flex-1 p-8 text-sm text-[var(--muted)]" role="status">
+        {projectsLoading
+          ? 'Loading project…'
+          : projectsError
+            ? 'Unable to load projects. Please try again.'
+            : projectId !== undefined
+              ? 'Project not found or no longer available. Select a project from the sidebar.'
+              : 'No projects available. Create a project from the sidebar.'}
+      </div>
+    );
+  }
 
   const handleCreateBoard = () => {
     if (!currentProjectId) return;
@@ -27,10 +54,10 @@ export function ProjectHome() {
   };
 
   const handleCreateNotepad = async () => {
-    if (!currentProjectId || createNotepadPending) return;
+    if (!currentProjectId || !workspaceId || createNotepadPending) return;
     setCreateNotepadPending(true);
     try {
-      const res = await fetch(`/api/projects/${currentProjectId}/notepads`, {
+      const res = await fetch(projectApiPath(workspaceId, currentProjectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'Untitled' }),
@@ -39,16 +66,12 @@ export function ProjectHome() {
         throw new Error('Failed to create notepad');
       }
       const data = (await res.json()) as { id: string };
-      queryClient.invalidateQueries({ queryKey: ['notepads', currentProjectId] });
-      queryClient.invalidateQueries({ queryKey: ['recent-notepads', currentProjectId] });
-      toast.success('Notepad created');
-      navigate({
-        to: '/p/$projectId/notepads/$notepadId',
-        params: {
-          projectId: currentProjectId,
-          notepadId: data.id,
-        },
+      queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, currentProjectId] });
+      queryClient.invalidateQueries({
+        queryKey: ['recent-notepads', workspaceId, currentProjectId],
       });
+      toast.success('Notepad created');
+      navigate(notepadTarget(workspaceId, currentProjectId, data.id));
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create notepad');
     } finally {
@@ -68,6 +91,12 @@ export function ProjectHome() {
           <p className="text-sm text-[var(--muted)]">
             Manage notepads, cards, and boards scoped to this project.
           </p>
+          <Link
+            {...projectLibraryTarget(workspaceId!, project.id)}
+            className="inline-flex min-h-11 items-center text-sm text-[var(--accent)] underline"
+          >
+            Open project library
+          </Link>
         </div>
 
         {/* Quick Action Grid */}
@@ -100,11 +129,7 @@ export function ProjectHome() {
                 recentNotepads.slice(0, 5).map((np) => (
                   <Link
                     key={np.id}
-                    to="/p/$projectId/notepads/$notepadId"
-                    params={{
-                      projectId: currentProjectId!,
-                      notepadId: np.id,
-                    }}
+                    {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
                     className="flex items-center gap-2 text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition min-h-[44px] sm:min-h-0"
                   >
                     <span>{np.icon || '📄'}</span>
@@ -142,11 +167,7 @@ export function ProjectHome() {
                 boards.map((b) => (
                   <Link
                     key={b.id}
-                    to="/p/$projectId/boards/$boardId"
-                    params={{
-                      projectId: currentProjectId!,
-                      boardId: b.id,
-                    }}
+                    {...boardTarget(workspaceId!, currentProjectId!, b.id)}
                     className="block text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition min-h-[44px] sm:min-h-0"
                   >
                     {b.icon || '📋'} {b.name}
@@ -167,20 +188,15 @@ export function ProjectHome() {
         confirmLabel="Create"
         busy={createBoardMutation.isPending}
         onConfirm={async (name) => {
-          if (!currentProjectId) return;
+          if (!currentProjectId || !workspaceId) return;
           try {
             const res = await createBoardMutation.mutateAsync({
+              workspaceId,
               projectId: currentProjectId,
               name,
             });
             setCreateBoardOpen(false);
-            navigate({
-              to: '/p/$projectId/boards/$boardId',
-              params: {
-                projectId: currentProjectId,
-                boardId: res.id,
-              },
-            });
+            navigate(boardTarget(workspaceId, currentProjectId, res.id));
           } catch (err: any) {
             toast.error(err?.message || 'Failed to create board');
           }

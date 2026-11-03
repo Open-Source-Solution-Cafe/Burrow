@@ -1,12 +1,27 @@
-import type { ExtractedLink } from './extract';
-import type { LinkTargetType } from './blocks';
-
-export interface StoredLink {
-  targetType: LinkTargetType;
-  targetId: string;
-}
-
+import type { ExtractedLink as StoredLink } from '../../shared/extract';
 const linkKey = (l: { targetType: string; targetId: string }) => `${l.targetType}:${l.targetId}`;
+
+/** Resolve each target kind in bulk, preserving first-reference order without duplicates. */
+export async function resolveReferenceTargets(
+  links: StoredLink[],
+  lookup: (type: StoredLink['targetType'], ids: string[]) => Promise<string[]>,
+): Promise<StoredLink[]> {
+  const unique = [...new Map(links.map((link) => [linkKey(link), link])).values()];
+  const groups = new Map<StoredLink['targetType'], string[]>();
+  for (const { targetType, targetId } of unique) {
+    const ids = groups.get(targetType) ?? [];
+    ids.push(targetId);
+    groups.set(targetType, ids);
+  }
+  const valid = new Set<string>();
+  await Promise.all(
+    [...groups].map(async ([type, ids]) => {
+      for (const id of await lookup(type, ids))
+        valid.add(linkKey({ targetType: type, targetId: id }));
+    }),
+  );
+  return unique.filter((link) => valid.has(linkKey(link)));
+}
 
 /** Diff previous vs new references: added drives notifications, removed is a silent delete. */
 export function diffLinks(
@@ -18,19 +33,4 @@ export function diffLinks(
   const added = [...nextMap.entries()].filter(([k]) => !prevMap.has(k)).map(([, v]) => v);
   const removed = [...prevMap.entries()].filter(([k]) => !nextMap.has(k)).map(([, v]) => v);
   return { added, removed };
-}
-
-/**
- * Security rule: link rows are only ever written for targets in the caller's
- * workspace. Mentions of missing/foreign targets are dropped from the extraction
- * before diffing; they never produce links or notifications.
- *
- * This is a pure function that filters links based on a validation function.
- * The actual workspace validation is done by the repository implementation.
- */
-export function filterWorkspaceTargets(
-  links: ExtractedLink[] | StoredLink[],
-  isValid: (link: ExtractedLink | StoredLink) => boolean,
-): StoredLink[] {
-  return links.filter((l) => isValid(l));
 }

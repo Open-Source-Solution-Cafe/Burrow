@@ -4,6 +4,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useMarkNotificationsRead, useNotifications } from '../../lib/queries';
 import { Avatar } from '../ui/Avatar';
 import { StatusDiamond } from '../ui/StatusDiamond';
+import { boardTarget, notepadTarget, workspaceTasksTarget } from '../../lib/workspaceRoutes';
 
 interface NotificationItem {
   id: string;
@@ -21,13 +22,19 @@ interface NotificationItem {
   createdAt: number;
 }
 
-export function NotificationsBell({ projectId }: { projectId?: string }) {
+export function NotificationsBell({
+  workspaceId,
+  projectId,
+}: {
+  workspaceId?: string;
+  projectId?: string;
+}) {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { data: notifications = [] } = useNotifications();
-  const markReadMutation = useMarkNotificationsRead();
+  const { data: notifications = [] } = useNotifications(workspaceId);
+  const markReadMutation = useMarkNotificationsRead(workspaceId);
 
   const unreadCount = notifications.filter((n) => !n.readAt).length;
 
@@ -51,19 +58,13 @@ export function NotificationsBell({ projectId }: { projectId?: string }) {
     }
     setIsOpen(false);
 
-    if (notif.notepadId && projectId) {
-      navigate({
-        to: '/p/$projectId/notepads/$notepadId',
-        params: { projectId, notepadId: notif.notepadId },
-      });
+    if (notif.notepadId && workspaceId && projectId) {
+      navigate(notepadTarget(workspaceId, projectId, notif.notepadId));
     } else if (notif.cardId) {
-      if (notif.boardId && projectId) {
-        navigate({
-          to: '/p/$projectId/boards/$boardId',
-          params: { projectId, boardId: notif.boardId },
-        });
-      } else {
-        navigate({ to: '/my-tasks' });
+      if (notif.boardId && workspaceId && projectId) {
+        navigate(boardTarget(workspaceId, projectId, notif.boardId));
+      } else if (workspaceId) {
+        navigate(workspaceTasksTarget(workspaceId));
       }
     }
   };

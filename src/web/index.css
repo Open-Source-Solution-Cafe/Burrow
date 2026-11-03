@@ -579,3 +579,11 @@ div[role='tooltip'],
     border-color: #ccc !important;
   }
 }
+/* Media chrome stays available to touch and keyboard users without occupying
+   document space. Hover-capable pointers reveal it only while working on media. */
+@media (hover: hover) and (pointer: fine) {
+  .media-block:not(:hover):not(:focus-within) .media-block-actions:not(.media-block-actions-open) {
+    opacity: 0;
+    pointer-events: none;
+  }
+}

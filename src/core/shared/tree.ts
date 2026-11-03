@@ -1,87 +1,66 @@
-/**
- * Tree utilities for notepad hierarchy operations.
- * These are pure functions that work with repository interfaces.
- */
-
 export interface TreeNode {
   id: string;
   parentId: string | null;
 }
 
-/**
- * Collect all descendant IDs for a given root node.
- * Uses the repository's getChildren method.
- */
-export async function getDescendantIds(
-  getChildren: (parentIds: string[]) => Promise<TreeNode[]>,
-  rootId: string,
-): Promise<string[]> {
-  const descendants: string[] = [];
-  let currentParentIds = [rootId];
+type ChildLookup = (parentIds: string[]) => Promise<TreeNode[]>;
 
-  while (currentParentIds.length > 0) {
-    const children = await getChildren(currentParentIds);
-    if (children.length === 0) break;
-    const childIds = children.map((c) => c.id);
-    descendants.push(...childIds);
-    currentParentIds = childIds;
+/** One breadth-first traversal; revisiting an ID indicates a corrupt tree. */
+async function walkSubtree(getChildren: ChildLookup, rootId: string) {
+  const visited = new Set([rootId]);
+  let frontier = [rootId];
+  let height = 1;
+  while (frontier.length) {
+    const children = await getChildren(frontier);
+    if (!children.length) break;
+    frontier = children.map(({ id }) => {
+      if (visited.has(id)) throw new Error('tree_cycle_detected');
+      visited.add(id);
+      return id;
+    });
+    height++;
   }
-
-  return descendants;
+  return { visited, height };
 }
 
-/**
- * Calculate the depth of a node from the root (root = 1).
- * Uses the repository's getParent method.
- */
+/** Descendants in lookup/breadth-first order, excluding the implicit root. */
+export async function getDescendantIds(
+  getChildren: ChildLookup,
+  rootId: string,
+): Promise<string[]> {
+  return [...(await walkSubtree(getChildren, rootId)).visited].slice(1);
+}
+
+/** Ancestor depth, with an implicit/missing root at 1; corrupt cycles throw. */
 export async function getDepth(
   getParent: (id: string) => Promise<TreeNode | null>,
   nodeId: string,
 ): Promise<number> {
-  let depth = 1;
+  const visited = new Set<string>();
   let currentId: string | null = nodeId;
-
-  while (currentId && depth <= 20) {
-    const parent = await getParent(currentId);
-    if (!parent || !parent.parentId) break;
+  let depth = 1;
+  while (currentId) {
+    if (visited.has(currentId)) throw new Error('tree_cycle_detected');
+    visited.add(currentId);
+    const node = await getParent(currentId);
+    if (!node?.parentId) break;
     depth++;
-    currentId = parent.parentId;
+    currentId = node.parentId;
   }
-
   return depth;
 }
 
-/**
- * Calculate the height of the subtree rooted at rootId (a leaf has height 1).
- */
-export async function getSubtreeHeight(
-  getChildren: (parentIds: string[]) => Promise<TreeNode[]>,
-  rootId: string,
-): Promise<number> {
-  let height = 1;
-  let currentParentIds = [rootId];
-
-  while (currentParentIds.length > 0) {
-    const children = await getChildren(currentParentIds);
-    if (children.length === 0) break;
-    height++;
-    currentParentIds = children.map((c) => c.id);
-  }
-
-  return height;
+/** Height of the implicit root and its descendants; a leaf/missing root has height 1. */
+export async function getSubtreeHeight(getChildren: ChildLookup, rootId: string): Promise<number> {
+  return (await walkSubtree(getChildren, rootId)).height;
 }
 
-/**
- * Returns true if moving source under targetParentId would cause a cycle.
- */
+/** Whether moving source beneath target would place it inside its own subtree. */
 export async function wouldCauseCycle(
   getDescendants: (rootId: string) => Promise<string[]>,
   sourceId: string,
   targetParentId: string | null,
 ): Promise<boolean> {
   if (!targetParentId) return false;
-  if (sourceId === targetParentId) return true;
-
-  const descendants = await getDescendants(sourceId);
-  return descendants.includes(targetParentId);
+  return sourceId === targetParentId || (await getDescendants(sourceId)).includes(targetParentId);
 }

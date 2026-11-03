@@ -2,28 +2,67 @@ import type { DB } from '../client';
 import * as t from '../schema';
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { runBatch } from '../lib/batch';
-import type { IMemberRepository, Member, CreateMemberData } from '../../../../infrastructure/types';
-
-interface MemberCacheEntry {
-  member: Member | null;
-  expiresAt: number;
-}
-const memberCache = new Map<string, MemberCacheEntry>();
-const MEMBER_CACHE_TTL_MS = 45_000;
-
-export function clearMemberCache(userId?: string): void {
-  if (userId) {
-    memberCache.delete(userId);
-  } else {
-    memberCache.clear();
-  }
-}
+import { memberMutationError } from '../../member-mutation';
+import type {
+  IMemberRepository,
+  Member,
+  CreateMemberData,
+  ChangeRoleArgs,
+  RemoveMemberArgs,
+} from '../../../../infrastructure/types';
 
 export function createMemberRepository(db: DB): IMemberRepository {
+  const denial = async (args: ChangeRoleArgs | RemoveMemberArgs) =>
+    (await db.get<{ error: string | null }>(sql`SELECT ${memberMutationError(args)} AS error`))
+      ?.error;
+  const mutate = async (args: ChangeRoleArgs | RemoveMemberArgs) => {
+    const rejected = await denial(args);
+    if (rejected) throw new Error(rejected);
+    const { workspaceId, targetUserId } = args;
+    // NOT NULL rejects stale authorization/owner state before any cleanup runs.
+    const guard = db
+      .update(t.workspaces)
+      .set({
+        name: sql`CASE WHEN ${memberMutationError(args)} IS NULL THEN ${t.workspaces.name} END`,
+      })
+      .where(eq(t.workspaces.id, workspaceId));
+    try {
+      await runBatch(
+        db,
+        'newRole' in args
+          ? [
+              guard,
+              db
+                .update(t.members)
+                .set({ role: args.newRole })
+                .where(
+                  and(eq(t.members.workspaceId, workspaceId), eq(t.members.userId, targetUserId)),
+                ),
+            ]
+          : [
+              guard,
+              db.run(sql`DELETE FROM card_assignees WHERE user_id = ${targetUserId}
+          AND card_id IN (SELECT c.id FROM cards c INNER JOIN boards b ON b.id = c.board_id
+            WHERE b.workspace_id = ${workspaceId})`),
+              db.run(sql`DELETE FROM edit_locks WHERE user_id = ${targetUserId}
+          AND notepad_id IN (SELECT id FROM notepads WHERE workspace_id = ${workspaceId})`),
+              db
+                .delete(t.members)
+                .where(
+                  and(eq(t.members.workspaceId, workspaceId), eq(t.members.userId, targetUserId)),
+                ),
+            ],
+      );
+    } catch (error) {
+      for (let cause = error; cause instanceof Error; cause = cause.cause) {
+        if (cause.message.includes('NOT NULL constraint failed: workspaces.name')) {
+          throw new Error((await denial(args)) || 'forbidden', { cause: error });
+        }
+      }
+      throw error;
+    }
+  };
   return {
-    clearCache(userId?: string): void {
-      clearMemberCache(userId);
-    },
     async listByWorkspace(workspaceId: string): Promise<Member[]> {
       const rows = await db
         .select({
@@ -42,12 +81,6 @@ export function createMemberRepository(db: DB): IMemberRepository {
     },
 
     async findByUserId(workspaceId: string, userId: string): Promise<Member | null> {
-      const now = Date.now();
-      const cached = memberCache.get(userId);
-      if (cached && cached.expiresAt > now && cached.member?.workspaceId === workspaceId) {
-        return cached.member;
-      }
-
       const [row] = await db
         .select({
           workspaceId: t.members.workspaceId,
@@ -61,37 +94,7 @@ export function createMemberRepository(db: DB): IMemberRepository {
         .from(t.members)
         .leftJoin(t.user, eq(t.user.id, t.members.userId))
         .where(and(eq(t.members.workspaceId, workspaceId), eq(t.members.userId, userId)));
-      const member = row ? mapMember(row) : null;
-      if (member) {
-        memberCache.set(userId, { member, expiresAt: now + MEMBER_CACHE_TTL_MS });
-      }
-      return member;
-    },
-
-    async findByUserIdGlobal(userId: string): Promise<Member | null> {
-      const now = Date.now();
-      const cached = memberCache.get(userId);
-      if (cached && cached.expiresAt > now) {
-        return cached.member;
-      }
-
-      const [row] = await db
-        .select({
-          workspaceId: t.members.workspaceId,
-          userId: t.members.userId,
-          role: t.members.role,
-          joinedAt: t.members.joinedAt,
-          name: t.user.name,
-          email: t.user.email,
-          image: t.user.image,
-        })
-        .from(t.members)
-        .leftJoin(t.user, eq(t.user.id, t.members.userId))
-        .where(eq(t.members.userId, userId));
-
-      const member = row ? mapMember(row) : null;
-      memberCache.set(userId, { member, expiresAt: now + MEMBER_CACHE_TTL_MS });
-      return member;
+      return row ? mapMember(row) : null;
     },
 
     async findByUserIds(workspaceId: string, userIds: string[]): Promise<{ userId: string }[]> {
@@ -125,60 +128,12 @@ export function createMemberRepository(db: DB): IMemberRepository {
       return rows;
     },
 
-    async updateRole(
-      workspaceId: string,
-      userId: string,
-      role: 'owner' | 'editor' | 'viewer',
-    ): Promise<void> {
-      memberCache.delete(userId);
-      await db
-        .update(t.members)
-        .set({ role })
-        .where(and(eq(t.members.workspaceId, workspaceId), eq(t.members.userId, userId)));
-    },
-
-    async remove(workspaceId: string, userId: string): Promise<void> {
-      memberCache.delete(userId);
-      // Invariant I10: Removing a member deletes that member's card_assignees rows in the same batch
-      await runBatch(db, [
-        db.run(sql`
-          DELETE FROM card_assignees
-          WHERE user_id = ${userId}
-            AND card_id IN (
-              SELECT c.id FROM cards c
-              INNER JOIN boards b ON b.id = c.board_id
-              WHERE b.workspace_id = ${workspaceId}
-            )
-        `),
-        db
-          .delete(t.members)
-          .where(and(eq(t.members.workspaceId, workspaceId), eq(t.members.userId, userId))),
-        db.delete(t.session).where(eq(t.session.userId, userId)),
-      ]);
-    },
+    updateRole: mutate,
+    remove: mutate,
 
     async create(data: CreateMemberData): Promise<Member> {
-      memberCache.delete(data.userId);
       await db.insert(t.members).values(data);
       return data;
-    },
-
-    async deleteSessions(userId: string): Promise<void> {
-      memberCache.delete(userId);
-      await db.delete(t.session).where(eq(t.session.userId, userId));
-    },
-
-    async listOwners(workspaceId: string): Promise<Member[]> {
-      const rows = await db
-        .select({
-          workspaceId: t.members.workspaceId,
-          userId: t.members.userId,
-          role: t.members.role,
-          joinedAt: t.members.joinedAt,
-        })
-        .from(t.members)
-        .where(and(eq(t.members.workspaceId, workspaceId), eq(t.members.role, 'owner')));
-      return rows.map(mapMember);
     },
 
     async userExists(email: string): Promise<boolean> {

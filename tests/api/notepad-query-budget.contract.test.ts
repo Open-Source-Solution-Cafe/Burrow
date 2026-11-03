@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
+import { getAccountWorkspaceScope } from './account-scope';
 
 interface LoggedQuery {
   id: number;
@@ -35,15 +36,13 @@ export function createMeasuredWorkerApp(envBindings: any) {
     return 'external/drizzle';
   }
 
-  function wrapStmt(stmt: any, query: string, caller: string): any {
-    let boundParams: unknown[] = [];
+  function wrapStmt(stmt: any, query: string, caller: string, boundParams: unknown[] = []): any {
     return new Proxy(stmt, {
       get(stmtTarget, stmtProp) {
         if (stmtProp === 'bind') {
           return (...args: unknown[]) => {
-            boundParams = args;
             const bound = stmtTarget.bind(...args);
-            return wrapStmt(bound, query, caller);
+            return wrapStmt(bound, query, caller, args);
           };
         }
         if (
@@ -166,17 +165,49 @@ describe('D1 Query Budget Contract Tests', () => {
       : [signUpRes.headers.get('set-cookie')!];
     const cookie = setCookieHeaders.map((c) => c.split(';')[0]).join('; ');
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
-      { headers: { Cookie: cookie } },
-      env,
+    const scope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: cookie } }, env),
     );
-    const meData = (await meRes.json()) as any;
-    const projectId = meData.lastProjectId;
+    const { workspaceId, projectId } = scope;
+    // Only the explicit workspace middleware's exact membership lookup is
+    // authorization cost. Scoped holder/member validations stay in the domain budget.
+    const authorizationSql =
+      'select "members"."workspace_id", "members"."user_id", "members"."role", "members"."joined_at", "user"."name", "user"."email", "user"."image" from "members" left join "user" on "user"."id" = "members"."user_id" where "members"."workspace_id" = ? and "members"."user_id" = ?';
+    const authorizationReads = (capture: { queries: LoggedQuery[] }) =>
+      capture.queries.filter(
+        (query) =>
+          query.sql.replace(/\s+/g, ' ').replace(/[()]/g, '').trim() === authorizationSql &&
+          query.params.length === 2 &&
+          query.params[0] === workspaceId &&
+          query.params[1] === scope.userId,
+      );
+    const projectResolutionReads = (capture: { queries: LoggedQuery[] }) =>
+      capture.queries.filter(
+        (query) =>
+          query.caller.includes('repositories/project.ts') &&
+          query.sql.includes('from "projects" where') &&
+          query.params.length === 2 &&
+          query.params[0] === projectId &&
+          query.params[1] === workspaceId,
+      );
+    const expectBudget = (
+      capture: { count: number; queries: LoggedQuery[] },
+      domainBudget: number,
+      requests: number,
+    ) => {
+      const authorization = authorizationReads(capture);
+      const projectResolution = projectResolutionReads(capture);
+      expect(authorization, JSON.stringify(authorization.map(({ caller, params }) => ({ caller, params })))).toHaveLength(requests);
+      expect(projectResolution).toHaveLength(requests);
+      expect(
+        capture.count - authorization.length - projectResolution.length,
+        JSON.stringify(capture.queries.map(({ caller, sql, params }) => ({ caller, sql, params }))),
+      ).toBeLessThanOrEqual(domainBudget);
+    };
 
     // Create a notepad for testing
     const createRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -193,23 +224,31 @@ describe('D1 Query Budget Contract Tests', () => {
 
     // -------------------------------------------------------------------------
     // Scenario F: Opening a notepad (read path)
-    // Budget: <= 6 queries (GET notepad <= 4, GET tree <= 2)
+    // Domain budget: <= 6 queries, plus one live membership and project-scope
+    // resolution read per request.
     // -------------------------------------------------------------------------
     startCapture();
     const getRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       { headers: { Cookie: cookie } },
       env,
     );
     expect(getRes.status).toBe(200);
+    const capFGet = stopCapture();
+    startCapture();
     const treeRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       { headers: { Cookie: cookie } },
       env,
     );
     expect(treeRes.status).toBe(200);
     const capF = stopCapture();
-    expect(capF.count).toBeLessThanOrEqual(6);
+    expectBudget(capFGet, 6, 1);
+    expectBudget(capF, 6, 1);
+    expectBudget({
+      count: capFGet.count + capF.count,
+      queries: [...capFGet.queries, ...capF.queries],
+    }, 6, 2);
 
     // -------------------------------------------------------------------------
     // Scenario E: Lock heartbeat
@@ -217,7 +256,7 @@ describe('D1 Query Budget Contract Tests', () => {
     // -------------------------------------------------------------------------
     startCapture();
     const lockRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -227,7 +266,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(lockRes.status).toBe(200);
     const capE = stopCapture();
-    expect(capE.count).toBeLessThanOrEqual(2);
+    expectBudget(capE, 2, 1);
 
     // -------------------------------------------------------------------------
     // Scenario A: Change title only
@@ -235,7 +274,7 @@ describe('D1 Query Budget Contract Tests', () => {
     // -------------------------------------------------------------------------
     startCapture();
     const patchRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -245,7 +284,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(patchRes.status).toBe(200);
     const capA = stopCapture();
-    expect(capA.count).toBeLessThanOrEqual(2);
+    expectBudget(capA, 2, 1);
 
     // -------------------------------------------------------------------------
     // Scenario B: Type a few words in body (Content Save)
@@ -260,7 +299,7 @@ describe('D1 Query Budget Contract Tests', () => {
     ]);
     startCapture();
     const saveRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -270,7 +309,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(saveRes.status).toBe(200);
     const capB = stopCapture();
-    expect(capB.count).toBeLessThanOrEqual(4);
+    expectBudget(capB, 4, 1);
 
     // -------------------------------------------------------------------------
     // Scenario C: Title + Body together
@@ -278,7 +317,7 @@ describe('D1 Query Budget Contract Tests', () => {
     // -------------------------------------------------------------------------
     startCapture();
     const patchBothRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -288,7 +327,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(patchBothRes.status).toBe(200);
     const saveBothRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -298,7 +337,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(saveBothRes.status).toBe(200);
     const capC = stopCapture();
-    expect(capC.count).toBeLessThanOrEqual(6);
+    expectBudget(capC, 6, 2);
 
     // -------------------------------------------------------------------------
     // Scenario D: One full autosave cycle (focus / claim lock + save content + blur release)
@@ -306,7 +345,7 @@ describe('D1 Query Budget Contract Tests', () => {
     // -------------------------------------------------------------------------
     startCapture();
     const cycleLock = await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -316,7 +355,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(cycleLock.status).toBe(200);
     const cycleSave = await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -326,7 +365,7 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(cycleSave.status).toBe(200);
     const cycleRelease = await app.request(
-      `http://localhost/api/notepads/${notepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/lock`,
       {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -336,14 +375,14 @@ describe('D1 Query Budget Contract Tests', () => {
     );
     expect(cycleRelease.status).toBe(200);
     const capD = stopCapture();
-    expect(capD.count).toBeLessThanOrEqual(8);
+    expectBudget(capD, 8, 3);
 
     // -------------------------------------------------------------------------
     // Optimistic Version Conflict Verification
     // Stale baseVersion must fail with 409 conflict
     // -------------------------------------------------------------------------
     const conflictRes = await app.request(
-      `http://localhost/api/notepads/${notepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepadId}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
@@ -354,14 +393,13 @@ describe('D1 Query Budget Contract Tests', () => {
     expect(conflictRes.status).toBe(409);
 
     // -------------------------------------------------------------------------
-    // Member Cache Verification & Logout Invalidation
+    // Live Membership Authorization & Logout
     // -------------------------------------------------------------------------
-    // While logged in, isolate member cache prevents querying members table
+    // Repeated authenticated requests must still resolve current permissions.
     startCapture();
-    await app.request('http://localhost/api/me', { headers: { Cookie: cookie } }, env);
+    await app.request(`http://localhost/api/workspaces/${workspaceId}`, { headers: { Cookie: cookie } }, env);
     const warmCap = stopCapture();
-    const memberQueriesWarm = warmCap.queries.filter((q) => q.sql.includes('members'));
-    expect(memberQueriesWarm.length).toBe(0);
+    expect(authorizationReads(warmCap)).toHaveLength(1);
 
     // Logout
     const signOutRes = await app.request(
@@ -385,8 +423,7 @@ describe('D1 Query Budget Contract Tests', () => {
     expect(clearedCookies.some((c) => c.includes('Max-Age=0') || c.includes('1970'))).toBe(true);
 
     // Requests without cookie are 401 unauthorized
-    const meAfterLogout = await app.request('http://localhost/api/me', {}, env);
-    expect(meAfterLogout.status).toBe(401);
+    const accountAfterLogout = await app.request('http://localhost/api/account', {}, env);
+    expect(accountAfterLogout.status).toBe(401);
   });
 });
-

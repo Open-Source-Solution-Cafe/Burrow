@@ -56,6 +56,7 @@ import { COMPLETED_COLUMN_RE, PRIORITY_BADGES, type CardItem, type ColumnItem } 
 import { computeCardDropTarget, computeColumnDropTarget } from '../kanbanReorder';
 
 interface KanbanViewProps {
+  workspaceId: string;
   boardId: string;
   projectId: string;
   /** Unfiltered columns (drag math + menus keep working while filters hide cards). */
@@ -245,6 +246,7 @@ function CardTile({
 
 function ColumnComponent({
   column,
+  workspaceId,
   boardId,
   projectId,
   focusedCardId,
@@ -256,6 +258,7 @@ function ColumnComponent({
   onOpenWipDialog,
 }: {
   column: ColumnItem;
+  workspaceId: string;
   boardId: string;
   projectId: string;
   focusedCardId: string | null;
@@ -494,6 +497,7 @@ function ColumnComponent({
       <div className="mt-2.5 pt-2 border-t border-[var(--hair)]">
         {isAdding ? (
           <QuickAddCard
+            workspaceId={workspaceId}
             boardId={boardId}
             columnId={column.id}
             projectId={projectId}
@@ -515,6 +519,7 @@ function ColumnComponent({
 }
 
 export function KanbanView({
+  workspaceId,
   boardId,
   projectId,
   columns,
@@ -687,7 +692,7 @@ export function KanbanView({
         cardColumnMap,
       });
       if (target) {
-        moveColumnMutation.mutate({ boardId, columnId: target.columnId, afterId: target.afterId });
+        moveColumnMutation.mutate({ workspaceId, projectId, boardId, columnId: target.columnId, afterId: target.afterId });
       }
       return;
     }
@@ -712,6 +717,8 @@ export function KanbanView({
     if (!drop) return;
 
     moveCardMutation.mutate({
+      workspaceId,
+      projectId,
       cardId: drop.cardId,
       boardId,
       columnId: drop.columnId,
@@ -728,6 +735,8 @@ export function KanbanView({
   const handleRenameColumn = (columnId: string, currentName: string) => {
     if (currentName?.trim()) {
       updateColumnMutation.mutate({
+        workspaceId,
+        projectId,
         boardId,
         columnId,
         name: currentName.trim(),
@@ -736,7 +745,7 @@ export function KanbanView({
   };
 
   const handleSetWipLimit = (columnId: string, wipLimit: number | null) => {
-    updateColumnMutation.mutate({ boardId, columnId, wipLimit });
+    updateColumnMutation.mutate({ workspaceId, projectId, boardId, columnId, wipLimit });
   };
 
   const handleDeleteColumn = (columnId: string, cardCount: number) => {
@@ -757,6 +766,8 @@ export function KanbanView({
     if (!trimmed || createColumnMutation.isPending) return;
     try {
       await createColumnMutation.mutateAsync({
+        workspaceId,
+        projectId,
         boardId,
         name: trimmed,
       });
@@ -790,6 +801,7 @@ export function KanbanView({
               <ColumnComponent
                 key={column.id}
                 column={column}
+                workspaceId={workspaceId}
                 boardId={boardId}
                 projectId={projectId}
                 focusedCardId={focusedCardId}
@@ -920,6 +932,8 @@ export function KanbanView({
               onConfirm={() => {
                 deleteColumnMutation.mutate(
                   {
+                    workspaceId,
+                    projectId,
                     boardId,
                     columnId: columnToDelete.id,
                     moveTo: hasCards && moveToCol ? moveToCol.id : undefined,
@@ -958,6 +972,8 @@ export function KanbanView({
       {priorityCard && (
         <PriorityPickerModal
           card={priorityCard}
+          workspaceId={workspaceId}
+          projectId={projectId}
           boardId={boardId}
           onClose={() => setPriorityCardId(null)}
         />
@@ -965,6 +981,8 @@ export function KanbanView({
       {assignCard && (
         <AssignPickerModal
           card={assignCard}
+          workspaceId={workspaceId}
+          projectId={projectId}
           boardId={boardId}
           onClose={() => setAssignCardId(null)}
         />

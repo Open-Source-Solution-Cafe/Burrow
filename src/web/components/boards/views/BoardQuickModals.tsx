@@ -147,10 +147,14 @@ export function QuickPeekModal({
 /** P-key quick priority picker for the focused card. */
 export function PriorityPickerModal({
   card,
+  workspaceId,
+  projectId,
   boardId,
   onClose,
 }: {
   card: CardItem;
+  workspaceId: string;
+  projectId: string;
   boardId: string;
   onClose: () => void;
 }) {
@@ -158,7 +162,7 @@ export function PriorityPickerModal({
   const updateCard = useUpdateCard();
 
   const set = (priority: Priority | null) => {
-    updateCard.mutate({ cardId: card.id, boardId, priority });
+    updateCard.mutate({ workspaceId, projectId, cardId: card.id, boardId, priority });
     onClose();
   };
 
@@ -198,15 +202,19 @@ export function PriorityPickerModal({
 /** M-key member assign picker for the focused card (toggles assigneeIds). */
 export function AssignPickerModal({
   card,
+  workspaceId,
+  projectId,
   boardId,
   onClose,
 }: {
   card: CardItem;
+  workspaceId: string;
+  projectId: string;
   boardId: string;
   onClose: () => void;
 }) {
   useEscape(onClose);
-  const { data: members = [] } = useMembers();
+  const { data: members = [] } = useMembers(workspaceId);
   const updateCard = useUpdateCard();
   const [saving, setSaving] = useState(false);
 
@@ -219,7 +227,7 @@ export function AssignPickerModal({
       : [...currentIds, userId];
     setSaving(true);
     try {
-      await updateCard.mutateAsync({ cardId: card.id, boardId, assigneeIds: next });
+      await updateCard.mutateAsync({ workspaceId, projectId, cardId: card.id, boardId, assigneeIds: next });
       onClose();
     } catch {
       setSaving(false);

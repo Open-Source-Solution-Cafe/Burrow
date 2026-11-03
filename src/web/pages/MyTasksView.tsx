@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useParams } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { AlarmClock, Calendar, CheckCircle2, Circle, Inbox, ListTodo } from 'lucide-react';
 import {
@@ -11,7 +12,7 @@ import {
   type MyTaskItem,
 } from '../lib/queries';
 import { CardPanel } from '../components/boards/CardPanel';
-import { api } from '../lib/api';
+import { projectApiPath } from '../lib/workspaceRoutes';
 import { Badge } from '../components/ui/Badge';
 import { Select } from '../components/ui/Select';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
@@ -175,6 +176,7 @@ function SectionHeader({
 }
 
 export function MyTasksView() {
+  const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const [status, setStatus] = useState<StatusFilter>('open');
   const [projectId, setProjectId] = useState<string>('all');
   const [selected, setSelected] = useState<MyTaskItem | null>(null);
@@ -182,14 +184,14 @@ export function MyTasksView() {
   const { data: tasks = [], isLoading } = useMyTasks({
     status,
     projectId: projectId === 'all' ? undefined : projectId,
-  });
-  const { data: projects = [] } = useProjects();
+  }, workspaceId);
+  const { data: projects = [] } = useProjects(workspaceId);
   const moveCardMutation = useMoveCard();
   const updateCardMutation = useUpdateCard();
   const queryClient = useQueryClient();
 
   // Columns for the open CardPanel (needed for the status dropdown).
-  const { data: openBoard } = useBoard(selected?.boardId);
+  const { data: openBoard } = useBoard(workspaceId, selected?.projectId, selected?.boardId);
   const panelColumns = useMemo(
     () => (openBoard?.columns || []).map((c: any) => ({ id: c.id, name: c.name })),
     [openBoard],
@@ -238,7 +240,8 @@ export function MyTasksView() {
     if (task.isCompleted) {
       // Re-open: move back to the first non-done column on its board.
       try {
-        const res = await api.api.boards[':id'].$get({ param: { id: task.boardId } });
+        if (!workspaceId) throw new Error('Workspace is unavailable');
+        const res = await fetch(projectApiPath(workspaceId, task.projectId, `boards/${task.boardId}`));
         if (!res.ok) throw new Error('Failed to load board details');
         const board = (await res.json()) as { columns: Array<{ id: string; name: string }> };
         const openCol = board.columns.find((c) => !/done|completed|closed|shipped/i.test(c.name));
@@ -247,6 +250,8 @@ export function MyTasksView() {
           return;
         }
         await moveCardMutation.mutateAsync({
+          workspaceId,
+          projectId: task.projectId,
           cardId: task.id,
           boardId: task.boardId,
           columnId: openCol.id,
@@ -261,7 +266,8 @@ export function MyTasksView() {
 
     // Complete: move into the board's Done/Completed column.
     try {
-      const res = await api.api.boards[':id'].$get({ param: { id: task.boardId } });
+      if (!workspaceId) throw new Error('Workspace is unavailable');
+      const res = await fetch(projectApiPath(workspaceId, task.projectId, `boards/${task.boardId}`));
       if (!res.ok) throw new Error('Failed to load board details');
       const board = (await res.json()) as { columns: Array<{ id: string; name: string }> };
       const doneCol = board.columns.find((c) => /done|completed|closed|shipped/i.test(c.name));
@@ -270,6 +276,8 @@ export function MyTasksView() {
         return;
       }
       await moveCardMutation.mutateAsync({
+        workspaceId,
+        projectId: task.projectId,
         cardId: task.id,
         boardId: task.boardId,
         columnId: doneCol.id,
@@ -287,6 +295,8 @@ export function MyTasksView() {
     tomorrow.setHours(0, 0, 0, 0);
     try {
       await updateCardMutation.mutateAsync({
+        workspaceId: workspaceId!,
+        projectId: task.projectId,
         cardId: task.id,
         boardId: task.boardId,
         dueDate: tomorrow.getTime(),
@@ -436,6 +446,7 @@ export function MyTasksView() {
       {/* Card side panel */}
       {selected && (
         <CardPanel
+          workspaceId={workspaceId!}
           cardId={selected.id}
           boardId={selected.boardId}
           projectId={selected.projectId}

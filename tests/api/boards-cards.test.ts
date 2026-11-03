@@ -1,10 +1,11 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
+import { createDb } from '../../src/core/adapters/db/d1/client';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const app = createWorkerApp(env);
-import * as t from '../../src/worker/db/schema';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { expectInvariantsHold } from './helpers';
 
 const db = createDb(env.DB);
@@ -19,6 +20,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   let viewerUserId = '';
   let workspaceId = '';
   let projectId = '';
+  let projectPath = '';
 
   let boardId = '';
   let todoColId = '';
@@ -48,24 +50,20 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
+    const ownerScope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: ownerCookie } },
       env,
-    );
-    const meData = (await meRes.json()) as {
-      user: { id: string };
-      workspace: { id: string };
-      lastProjectId: string;
-    };
-    ownerUserId = meData.user.id;
-    workspaceId = meData.workspace.id;
-    projectId = meData.lastProjectId;
+    ));
+    ownerUserId = ownerScope.userId;
+    workspaceId = ownerScope.workspaceId;
+    projectId = ownerScope.projectId;
+    projectPath = `/api/workspaces/${workspaceId}/projects/${projectId}`;
     expect(workspaceId).toBeDefined();
 
     // 2. Invite editor
     const editorInviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -91,17 +89,16 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     );
     editorCookie = editorSignupRes.headers.get('set-cookie')!;
 
-    const editorMeRes = await app.request(
-      'http://localhost/api/me',
+    const editorScope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: editorCookie } },
       env,
-    );
-    const editorMe = (await editorMeRes.json()) as { user: { id: string } };
-    editorUserId = editorMe.user.id;
+    ));
+    editorUserId = editorScope.userId;
 
     // 3. Invite viewer
     const viewerInviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -127,13 +124,12 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     );
     viewerCookie = viewerSignupRes.headers.get('set-cookie')!;
 
-    const viewerMeRes = await app.request(
-      'http://localhost/api/me',
+    const viewerScope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: viewerCookie } },
       env,
-    );
-    const viewerMe = (await viewerMeRes.json()) as { user: { id: string } };
-    viewerUserId = viewerMe.user.id;
+    ));
+    viewerUserId = viewerScope.userId;
     expect(viewerUserId).toBeDefined();
 
     // Create a tag for this project
@@ -154,7 +150,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('creates board with default columns and denies viewer writes', async () => {
     // Viewer should be 403
     const viewerCreate = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost${projectPath}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: viewerCookie },
@@ -166,7 +162,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Editor creates board
     const createRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost${projectPath}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -181,7 +177,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Get board with columns
     const getRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost${projectPath}/boards/${boardId}`,
       { headers: { Cookie: viewerCookie } }, // Viewers can read!
       env,
     );
@@ -205,7 +201,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('creates cards with quick-add payload atomically', async () => {
     // Card 1: with priority, due date, assignee, tag
     const createCard1 = await app.request(
-      `http://localhost/api/columns/${todoColId}/cards`,
+      `http://localhost${projectPath}/columns/${todoColId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -226,7 +222,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Card 2: with linked notepad creation mode='new'
     const createCard2 = await app.request(
-      `http://localhost/api/columns/${todoColId}/cards`,
+      `http://localhost${projectPath}/columns/${todoColId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -253,7 +249,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Verify card detail
     const cardDetailRes = await app.request(
-      `http://localhost/api/cards/${cardId1}`,
+      `http://localhost${projectPath}/cards/${cardId1}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -274,7 +270,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('moves cards between columns and preserves ordering', async () => {
     // Move card 1 to inProgress
     const moveRes = await app.request(
-      `http://localhost/api/cards/${cardId1}/move`,
+      `http://localhost${projectPath}/cards/${cardId1}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -286,7 +282,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Move card 2 to inProgress after card 1
     const move2Res = await app.request(
-      `http://localhost/api/cards/${cardId2}/move`,
+      `http://localhost${projectPath}/cards/${cardId2}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -298,7 +294,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Verify inProgress column has both cards in order
     const boardRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost${projectPath}/boards/${boardId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -314,7 +310,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('requires destination column when deleting a non-empty column', async () => {
     // Attempt delete inProgress column without moveTo -> should fail 400
     const failDelete = await app.request(
-      `http://localhost/api/columns/${inProgressColId}`,
+      `http://localhost${projectPath}/columns/${inProgressColId}`,
       {
         method: 'DELETE',
         headers: { Cookie: editorCookie },
@@ -325,7 +321,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Delete inProgress column specifying moveTo=doneColId
     const successDelete = await app.request(
-      `http://localhost/api/columns/${inProgressColId}?moveTo=${doneColId}`,
+      `http://localhost${projectPath}/columns/${inProgressColId}?moveTo=${doneColId}`,
       {
         method: 'DELETE',
         headers: { Cookie: editorCookie },
@@ -336,7 +332,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Verify cards are now in doneColId
     const boardRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost${projectPath}/boards/${boardId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -352,7 +348,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('updates card properties and rejects invalid assignees or tags', async () => {
     // Reject non-member assignee
     const badAssigneeRes = await app.request(
-      `http://localhost/api/cards/${cardId1}`,
+      `http://localhost${projectPath}/cards/${cardId1}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -364,7 +360,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Reject tag from other project
     const badTagRes = await app.request(
-      `http://localhost/api/cards/${cardId1}`,
+      `http://localhost${projectPath}/cards/${cardId1}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -376,7 +372,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Valid update
     const validUpdate = await app.request(
-      `http://localhost/api/cards/${cardId1}`,
+      `http://localhost${projectPath}/cards/${cardId1}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Cookie: editorCookie },
@@ -391,7 +387,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     expect(validUpdate.status).toBe(200);
 
     const updated = await app.request(
-      `http://localhost/api/cards/${cardId1}`,
+      `http://localhost${projectPath}/cards/${cardId1}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -409,7 +405,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
   it('provides batched summaries for cardLink blocks', async () => {
     const summaryRes = await app.request(
-      `http://localhost/api/cards/summary?ids=${cardId1},${cardId2}`,
+      `http://localhost${projectPath}/cards/summary?ids=${cardId1},${cardId2}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -424,12 +420,21 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     const c1 = summaries.find((s) => s.id === cardId1)!;
     expect(c1.title).toBe('Renamed Auth Card');
     expect(c1.columnName).toBe('Done');
+
+    // The service caps submitted IDs once, before repository lookup.
+    const capped = await app.request(
+      `http://localhost${projectPath}/cards/summary?ids=${Array(500).fill('missing').join(',')},${cardId1}`,
+      { headers: { Cookie: editorCookie } },
+      env,
+    );
+    expect(capped.status).toBe(200);
+    expect(await capped.json()).toEqual([]);
   });
 
   it('handles card lifecycle: soft-delete, restore, and permanent delete', async () => {
     // 1. Soft-delete card 2
     const delRes = await app.request(
-      `http://localhost/api/cards/${cardId2}`,
+      `http://localhost${projectPath}/cards/${cardId2}`,
       { method: 'DELETE', headers: { Cookie: editorCookie } },
       env,
     );
@@ -440,7 +445,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // 2. Restore card 2
     const restRes = await app.request(
-      `http://localhost/api/cards/${cardId2}/restore`,
+      `http://localhost${projectPath}/cards/${cardId2}/restore`,
       { method: 'POST', headers: { Cookie: editorCookie } },
       env,
     );
@@ -453,7 +458,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('handles board lifecycle: soft-delete with cards, restore, and permanent delete', async () => {
     // 1. Soft delete board
     const delBoard = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost${projectPath}/boards/${boardId}`,
       { method: 'DELETE', headers: { Cookie: editorCookie } },
       env,
     );
@@ -464,7 +469,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // 2. Restore board
     const restBoard = await app.request(
-      `http://localhost/api/boards/${boardId}/restore`,
+      `http://localhost${projectPath}/boards/${boardId}/restore`,
       { method: 'POST', headers: { Cookie: editorCookie } },
       env,
     );
@@ -475,12 +480,12 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // 3. Delete again and permanently delete board
     await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost${projectPath}/boards/${boardId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
     const permDel = await app.request(
-      `http://localhost/api/boards/${boardId}/permanent`,
+      `http://localhost${projectPath}/boards/${boardId}/permanent`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -493,7 +498,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
   it('removes member card assignments when member is removed (I10)', async () => {
     // Create new board and card assigned to editor
     const bRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost${projectPath}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -504,7 +509,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     const b = (await bRes.json()) as { id: string };
 
     const colRes = await app.request(
-      `http://localhost/api/boards/${b.id}`,
+      `http://localhost${projectPath}/boards/${b.id}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -512,7 +517,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
     const colId = bDetail.columns[0]!.id;
 
     const cRes = await app.request(
-      `http://localhost/api/columns/${colId}/cards`,
+      `http://localhost${projectPath}/columns/${colId}/cards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -528,7 +533,7 @@ describe('Phase 4: Kanban Boards & Cards Lifecycle', () => {
 
     // Remove editor from workspace
     const removeRes = await app.request(
-      `http://localhost/api/members/${editorUserId}`,
+      `http://localhost/api/workspaces/${workspaceId}/members/${editorUserId}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },

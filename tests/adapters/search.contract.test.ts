@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { SqliteFtsSearchAdapter } from '../../src/worker/adapters/search/sqlite-fts';
-import { createDb } from '../../src/worker/db/client';
-import * as schema from '../../src/worker/db/schema';
+import { SqliteFtsSearchAdapter } from '../../src/core/adapters/db/d1/adapters/search/sqlite-fts';
+import { createDb } from '../../src/core/adapters/db/d1/client';
+import * as schema from '../../src/core/adapters/db/d1/schema';
 
 /** Unique FTS-safe token: lowercase hex run, matched via FTS5 prefix search. */
 function token(): string {

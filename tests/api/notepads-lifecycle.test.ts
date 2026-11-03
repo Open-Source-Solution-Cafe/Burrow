@@ -1,13 +1,13 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
-import { createDb } from '../../src/worker/db/client';
+import { createDb } from '../../src/core/adapters/db/d1/client';
 
 const app = createWorkerApp(env);
-import * as t from '../../src/worker/db/schema';
+import * as t from '../../src/core/adapters/db/d1/schema';
 import { eq } from 'drizzle-orm';
 import { expectInvariantsHold } from './helpers';
-import { createCard } from '../../src/worker/services/cards';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const db = createDb(env.DB);
 
@@ -37,23 +37,16 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
-      { headers: { Cookie: ownerCookie } },
-      env,
+    const ownerScope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: ownerCookie } }, env),
     );
-    const meData = (await meRes.json()) as {
-      user: { id: string };
-      workspace: { id: string };
-      lastProjectId: string;
-    };
-    ownerUserId = meData.user.id;
-    workspaceId = meData.workspace.id;
-    projectId = meData.lastProjectId;
+    ownerUserId = ownerScope.userId;
+    workspaceId = ownerScope.workspaceId;
+    projectId = ownerScope.projectId;
 
     // Invite editor
     const inviteRes = await app.request(
-      'http://localhost/api/invites',
+      `http://localhost/api/workspaces/${workspaceId}/invites`,
       {
         method: 'POST',
         headers: {
@@ -86,13 +79,10 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     expect(editorRes.status).toBe(200);
     editorCookie = editorRes.headers.get('set-cookie')!;
 
-    const edMeRes = await app.request(
-      'http://localhost/api/me',
-      { headers: { Cookie: editorCookie } },
-      env,
+    const editorScope = await getAccountWorkspaceScope((path) =>
+      app.request(`http://localhost${path}`, { headers: { Cookie: editorCookie } }, env),
     );
-    const edMeData = (await edMeRes.json()) as { user: { id: string } };
-    expect(edMeData.user.id).toBeDefined();
+    expect(editorScope.userId).toBeDefined();
   });
 
   let parentNotepadId = '';
@@ -101,7 +91,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('creates nested notepads and reloads them with content intact', async () => {
     // Create parent notepad
     const pRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: {
@@ -118,7 +108,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Create child notepad under parent
     const cRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: {
@@ -138,7 +128,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
       { type: 'paragraph', content: [{ type: 'text', text: 'Parent content body' }] },
     ]);
     const saveRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/content`,
       {
         method: 'PUT',
         headers: {
@@ -156,7 +146,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Read full notepad
     const readRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -174,7 +164,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     // Add levels 3 through 8
     for (let d = 3; d <= 8; d++) {
       const res = await app.request(
-        `http://localhost/api/projects/${projectId}/notepads`,
+        `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
         {
           method: 'POST',
           headers: {
@@ -192,7 +182,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Depth 9 must be rejected
     const rejectRes = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: {
@@ -210,7 +200,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
   it('rejects moving a notepad under its own descendant (cycle check)', async () => {
     const moveRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/move`,
       {
         method: 'POST',
         headers: {
@@ -229,7 +219,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('handles soft edit lock claiming, collision refusal, and release', async () => {
     // User A claims lock with clientId A
     const claimResA = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -246,7 +236,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User B tries to claim lock -> 409 locked
     const claimResB = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -266,7 +256,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User B cannot save content while User A holds lock
     const saveResB = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/content`,
       {
         method: 'PUT',
         headers: {
@@ -283,9 +273,9 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     );
     expect(saveResB.status).toBe(409);
 
-    // GET /api/notepads/:id returns lock info with clientId and isMe
+    // The scoped note detail returns lock info with clientId and isMe.
     const getResA = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -295,7 +285,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     expect(getJsonA.lock.isMe).toBe(true);
 
     const getResB = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { headers: { Cookie: editorCookie } },
       env,
     );
@@ -304,7 +294,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User A in a second tab (client-A2) tries to claim without takeover -> 409 with isMe: true
     const claimResA2 = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -323,7 +313,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User B tries to takeover User A's lock -> refused 409 (cannot take over another user's lock)
     const claimTakeoverB = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -338,7 +328,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User A takes over lock in client-A2 -> succeeds (200)
     const claimTakeoverA2 = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -353,7 +343,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User A releases lock from client-A2
     const releaseResA = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'DELETE',
         headers: {
@@ -368,7 +358,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Now User B can claim lock
     const claimResB2 = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -383,7 +373,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User A attempts to release User B's lock using client-B with ownerCookie -> lock must remain held by User B
     const unauthorizedRelease = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'DELETE',
         headers: {
@@ -398,7 +388,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Verify User B still holds the lock by attempting to acquire from client-A (rejected 409)
     const verifyStillHeld = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -413,7 +403,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User B releases
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/lock`,
       {
         method: 'DELETE',
         headers: {
@@ -429,7 +419,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('validates non-existent notepads, trash refusal, and lock cleanup on soft-delete', async () => {
     // Non-existent notepad returns 404 on lock endpoints
     const nonExistentLock = await app.request(
-      `http://localhost/api/notepads/non-existent-notepad-id/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/non-existent-notepad-id/lock`,
       {
         method: 'POST',
         headers: {
@@ -444,7 +434,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // User A claims lock on child notepad, then deleting it clears the edit lock
     const claimChild = await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -459,7 +449,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Soft delete child
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -469,7 +459,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Lock claim on deleted notepad in trash is refused with 404
     const lockTrash = await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -484,7 +474,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Restore child so matrix tests have their expected fixture
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/restore`,
       {
         method: 'POST',
         headers: { Cookie: ownerCookie },
@@ -494,7 +484,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // After restore, pre-delete lock is gone, so User B can claim it immediately
     const claimRestored = await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/lock`,
       {
         method: 'POST',
         headers: {
@@ -508,7 +498,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     expect(claimRestored.status).toBe(200);
 
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/lock`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/lock`,
       {
         method: 'DELETE',
         headers: {
@@ -528,7 +518,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('Restore Matrix 1: delete parent, restore parent', async () => {
     // Delete parent (and its tree)
     const delRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -543,7 +533,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Restore parent
     const restRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/restore`,
       {
         method: 'POST',
         headers: { Cookie: ownerCookie },
@@ -564,7 +554,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('Restore Matrix 2: delete child, then delete parent, restore parent (child stays in Trash), then restore child', async () => {
     // 1. Delete child
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -574,14 +564,14 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // 2. Delete parent
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
 
     // 3. Restore parent
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -592,7 +582,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // 4. Restore child -> returns under parent
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -609,7 +599,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('Restore Matrix 3: delete child, then delete parent, restore child first (parent still deleted, so child re-attaches at project root)', async () => {
     // 1. Delete child
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -618,14 +608,14 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // 2. Delete parent
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
 
     // 3. Restore child first
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -640,7 +630,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Restore parent to leave tree clean
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -651,7 +641,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('Restore Matrix 4: delete parent, permanently delete child from Trash, restore parent (no orphans, no errors)', async () => {
     // Re-parent child under parent
     await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/move`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/move`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -662,14 +652,14 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Delete parent (deletes child too)
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
 
     // Permanently delete child
     const permRes = await app.request(
-      `http://localhost/api/notepads/${childNotepadId}/permanent`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${childNotepadId}/permanent`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -677,7 +667,7 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
 
     // Restore parent
     const restRes = await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/restore`,
       { method: 'POST', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -693,14 +683,14 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
   it('Restore Matrix 5: permanently delete parent: whole subtree, its tags, and its FTS rows are gone', async () => {
     // Delete parent first
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
 
     // Permanently delete parent
     await app.request(
-      `http://localhost/api/notepads/${parentNotepadId}/permanent`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${parentNotepadId}/permanent`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -735,17 +725,21 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
       }),
     ]);
 
-    const created = await createCard(db, {
-      workspaceId,
-      actorId: ownerUserId,
-      boardId,
-      columnId,
-      title: 'Card Task',
-    });
+    const createResponse = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/columns/${columnId}/cards`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+        body: JSON.stringify({ title: 'Card Task' }),
+      },
+      env,
+    );
+    expect(createResponse.status).toBe(201);
+    const created = (await createResponse.json()) as { notepadId: string };
 
     // Try to soft-delete card notepad via notepads API -> 400 refused
     const delRes = await app.request(
-      `http://localhost/api/notepads/${created.notepadId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${created.notepadId}`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );
@@ -756,10 +750,121 @@ describe('Phase 3: Notepads, Soft Edit Locks & Restore Matrix', () => {
     await expectInvariantsHold(env.DB);
   });
 
+  it('rejects an ambiguous legacy notepad deletion group', async () => {
+    const deletedAt = Date.now() - 60_000;
+    const rootId = crypto.randomUUID();
+    const otherId = crypto.randomUUID();
+    const now = Date.now();
+    const legacyNotepads = [rootId, otherId].map((id, index) => ({
+      id,
+      workspaceId,
+      projectId,
+      parentId: null,
+      kind: 'notepad' as const,
+      title: `Legacy deleted note ${index}`,
+      content: '[]',
+      version: 1,
+      position: `legacy-${index}`,
+      isFavorite: false,
+      deletedAt,
+      deletionOperationId: null,
+      createdBy: ownerUserId,
+      createdAt: now,
+      updatedAt: now,
+    }));
+    await db.insert(t.notepads).values(legacyNotepads);
+
+    const response = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${rootId}/restore`,
+      { method: 'POST', headers: { Cookie: ownerCookie } },
+      env,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'ambiguous_delete_group' },
+    });
+    const stillDeleted = await db
+      .select({ id: t.notepads.id, deletedAt: t.notepads.deletedAt })
+      .from(t.notepads)
+      .where(eq(t.notepads.id, rootId));
+    expect(stillDeleted[0]?.deletedAt).toBe(deletedAt);
+  });
+
+  it('rejects an ambiguous legacy board restore when its card body shares the old timestamp', async () => {
+    const deletedAt = Date.now() - 60_000;
+    const boardId = crypto.randomUUID();
+    const columnId = crypto.randomUUID();
+    const cardId = crypto.randomUUID();
+    const notepadId = crypto.randomUUID();
+    const now = Date.now();
+
+    await db.insert(t.boards).values({
+      id: boardId,
+      workspaceId,
+      projectId,
+      name: 'Legacy deleted board',
+      position: 'legacy-board',
+      deletedAt,
+      deletionOperationId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(t.boardColumns).values({
+      id: columnId,
+      boardId,
+      name: 'To do',
+      position: 'a0',
+    });
+    await db.insert(t.notepads).values({
+      id: notepadId,
+      workspaceId,
+      projectId,
+      parentId: null,
+      kind: 'card',
+      title: 'Legacy deleted card body',
+      content: '[]',
+      version: 1,
+      position: 'a0',
+      isFavorite: false,
+      deletedAt,
+      deletionOperationId: null,
+      createdBy: ownerUserId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(t.cards).values({
+      id: cardId,
+      boardId,
+      columnId,
+      notepadId,
+      position: 'a0',
+      createdAt: now,
+    });
+
+    const response = await app.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${boardId}/restore`,
+      { method: 'POST', headers: { Cookie: ownerCookie } },
+      env,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'ambiguous_delete_group' },
+    });
+    const [stillDeletedBoard] = await db.select().from(t.boards).where(eq(t.boards.id, boardId));
+    const [stillDeletedBody] = await db
+      .select()
+      .from(t.notepads)
+      .where(eq(t.notepads.id, notepadId));
+    expect(stillDeletedBoard?.deletedAt).toBe(deletedAt);
+    expect(stillDeletedBody?.deletedAt).toBe(deletedAt);
+  });
+
   it('Restore Matrix 7: permanently delete project: all its notepads, boards, tags, FTS rows and inbound link rows are gone', async () => {
     // Delete the project
     const delProjRes = await app.request(
-      `http://localhost/api/projects/${projectId}?confirm=My first project`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}?confirm=My first project`,
       { method: 'DELETE', headers: { Cookie: ownerCookie } },
       env,
     );

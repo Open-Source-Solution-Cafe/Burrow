@@ -115,6 +115,29 @@ export class S3StorageAdapter implements IStorageAdapter {
     } while (continuationToken);
   }
 
+  async listObjects(): Promise<string[]> {
+    const keys: string[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const listed = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          ContinuationToken: continuationToken,
+        }),
+      );
+      keys.push(
+        ...(listed.Contents ?? [])
+          .map((object) => object.Key)
+          .filter((key): key is string => typeof key === 'string'),
+      );
+      if (listed.IsTruncated && !listed.NextContinuationToken) {
+        throw new Error('S3 object listing was truncated without a continuation token');
+      }
+      continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (continuationToken);
+    return keys.sort();
+  }
+
   private isNotFound(err: unknown): boolean {
     const e = err as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
     return (

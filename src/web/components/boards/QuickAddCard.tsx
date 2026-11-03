@@ -8,6 +8,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 
 interface QuickAddCardProps {
+  workspaceId: string;
   boardId: string;
   columnId: string;
   projectId: string;
@@ -22,7 +23,7 @@ interface QuickAddChips {
   notepad?: { mode: 'new'; title?: string } | { mode: 'existing'; id: string; title: string };
 }
 
-export function QuickAddCard({ boardId, columnId, projectId, onClose }: QuickAddCardProps) {
+export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClose }: QuickAddCardProps) {
   const [title, setTitle] = useState('');
   const [chips, setChips] = useState<QuickAddChips>({ assignees: [], tags: [] });
   const [menuMode, setMenuMode] = useState<'none' | 'slash' | 'at' | 'hash'>('none');
@@ -35,8 +36,8 @@ export function QuickAddCard({ boardId, columnId, projectId, onClose }: QuickAdd
   const inputRef = useRef<HTMLInputElement>(null);
   const createCardMutation = useCreateCard();
   const createTagMutation = useCreateTag();
-  const { data: members = [] } = useMembers();
-  const { data: availableTags = [] } = useProjectTags(projectId);
+  const { data: members = [] } = useMembers(workspaceId);
+  const { data: availableTags = [] } = useProjectTags(workspaceId, projectId);
 
   const cleanLastTrigger = (text: string) => {
     const lastSlash = text.lastIndexOf('/');
@@ -94,6 +95,7 @@ export function QuickAddCard({ boardId, columnId, projectId, onClose }: QuickAdd
   const createAndSelectTag = async (tagName: string) => {
     try {
       const newTag = await createTagMutation.mutateAsync({
+        workspaceId,
         projectId,
         name: tagName,
       });
@@ -412,6 +414,7 @@ export function QuickAddCard({ boardId, columnId, projectId, onClose }: QuickAdd
       if (!found) {
         try {
           found = await createTagMutation.mutateAsync({
+            workspaceId,
             projectId,
             name: rawMatch,
           });
@@ -431,6 +434,8 @@ export function QuickAddCard({ boardId, columnId, projectId, onClose }: QuickAdd
 
     try {
       await createCardMutation.mutateAsync({
+        workspaceId,
+        projectId,
         boardId,
         columnId,
         title: cleanTitle,

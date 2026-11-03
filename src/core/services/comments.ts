@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { ICardRepository, INotepadRepository } from '../infrastructure/types';
+import type { ICardRepository, INotepadRepository, ProjectScope } from '../infrastructure/types';
 import { notFound, badRequest, forbidden } from './errors';
 import { chunkByParamBudget } from './utils/chunk';
 
@@ -41,19 +41,18 @@ export class CommentService {
     },
   ) {}
 
-  async listComments(workspaceId: string, cardId: string) {
-    await this.requireCardForWorkspace(workspaceId, cardId);
-
-    return this.repos.cards.listComments(cardId);
+  async listComments(scope: ProjectScope, cardId: string) {
+    await this.requireCardInScope(scope, cardId);
+    return this.repos.cards.listComments(scope, cardId);
   }
 
   async createComment(
-    workspaceId: string,
+    scope: ProjectScope,
     cardId: string,
     actorId: string,
     content: string,
   ): Promise<CreateCommentResult> {
-    const card = await this.requireCardForWorkspace(workspaceId, cardId);
+    await this.requireCardInScope(scope, cardId);
     const trimmed = content.trim();
     if (!trimmed) throw badRequest('invalid_content', 'Comment cannot be empty');
 
@@ -62,7 +61,7 @@ export class CommentService {
     if (mentioned.length > 0) {
       const valid = new Set<string>();
       for (const chunk of chunkByParamBudget(mentioned, 1, 1)) {
-        const rows = await this.repos.members.findByUserIds(workspaceId, chunk);
+        const rows = await this.repos.members.findByUserIds(scope.workspaceId, chunk);
         for (const r of rows) valid.add(r.userId);
       }
       // Mentions of non-members are dropped: no link rows, no notifications.
@@ -70,28 +69,13 @@ export class CommentService {
     }
 
     const now = Date.now();
-    const comment = await this.repos.cards.createComment({
-      id: nanoid(),
-      cardId,
-      userId: actorId,
-      content: trimmed,
-      createdAt: now,
-      updatedAt: now,
+    const comment = await this.repos.cards.createCommentGuarded({
+      data: { id: nanoid(), cardId, userId: actorId, content: trimmed, createdAt: now, updatedAt: now },
+      scope: { workspaceId: scope.workspaceId, actorUserId: actorId, minimumRole: 'editor' },
+      mentionNotifications: mentionedUserIds.map((userId) => ({ id: nanoid(), userId })),
+      now,
     });
-
-    if (mentionedUserIds.length > 0) {
-      // Dispatch mention notifications
-      for (const chunk of chunkByParamBudget(mentionedUserIds, 9, 0)) {
-        await this.repos.notifications.createMentions({
-          workspaceId,
-          notepadId: card.notepadId,
-          cardId,
-          actorId,
-          userIds: chunk,
-          now,
-        });
-      }
-    }
+    if (!comment) throw forbidden('forbidden', 'Editor access changed while creating the comment');
 
     return {
       ...comment,
@@ -102,25 +86,29 @@ export class CommentService {
   }
 
   async deleteComment(
-    workspaceId: string,
+    scope: ProjectScope,
     cardId: string,
     commentId: string,
     actor: { userId: string; isOwner: boolean },
   ): Promise<{ ok: true; commentId: string }> {
-    await this.requireCardForWorkspace(workspaceId, cardId);
+    await this.requireCardInScope(scope, cardId);
 
-    const comment = await this.repos.cards.getComment(commentId, cardId);
+    const comment = await this.repos.cards.getComment(scope, commentId, cardId);
     if (!comment) throw notFound('not_found', 'Comment not found');
     if (comment.userId !== actor.userId && !actor.isOwner) {
       throw forbidden('forbidden', 'You can only delete your own comments');
     }
 
-    await this.repos.cards.deleteComment(commentId);
+    const result = await this.repos.cards.deleteCommentGuarded(commentId, cardId, {
+      workspaceId: scope.workspaceId, actorUserId: actor.userId, minimumRole: 'editor',
+    });
+    if (result === 'not_found') throw notFound('not_found', 'Comment not found');
+    if (result === 'forbidden') throw forbidden('forbidden', 'You can only delete your own comments');
     return { ok: true, commentId };
   }
 
-  private async requireCardForWorkspace(workspaceId: string, cardId: string) {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+  private async requireCardInScope(scope: ProjectScope, cardId: string) {
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card) throw notFound('not_found', 'Card not found');
     return card;
   }

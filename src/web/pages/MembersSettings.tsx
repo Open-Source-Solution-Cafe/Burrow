@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Copy, Check, Trash2, UserPlus, KeyRound, ExternalLink, X } from 'lucide-react';
-import { useMembers, useInvites, useCreateInvite, useRevokeInvite, useMe } from '../lib/queries';
+import { useAccount, useMembers, useInvites, useCreateInvite, useRevokeInvite } from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -8,7 +8,7 @@ import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { toast } from 'sonner';
-
+import { useParams } from '@tanstack/react-router';
 interface CreatedInviteInfo {
   url: string;
   token: string;
@@ -17,11 +17,12 @@ interface CreatedInviteInfo {
 }
 
 export function MembersSettings() {
-  const { data: me } = useMe();
-  const { data: members = [], refetch: refetchMembers } = useMembers();
-  const { data: invites = [] } = useInvites();
-  const createInvite = useCreateInvite();
-  const revokeInvite = useRevokeInvite();
+  const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
+  const { data: account } = useAccount();
+  const { data: members = [], refetch: refetchMembers } = useMembers(workspaceId);
+  const { data: invites = [] } = useInvites(workspaceId);
+  const createInvite = useCreateInvite(workspaceId);
+  const revokeInvite = useRevokeInvite(workspaceId);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
@@ -32,7 +33,7 @@ export function MembersSettings() {
   const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
 
-  const isOwner = me?.role === 'owner';
+  const isOwner = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role === 'owner';
 
   const handleCreateInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,11 +76,15 @@ export function MembersSettings() {
   const handleRoleChange = async (userId: string, newRole: 'owner' | 'editor' | 'viewer') => {
     setError(null);
     try {
-      const res = await fetch(`/api/members/${userId}`, {
+      if (!workspaceId) throw new Error('Workspace is required');
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+        {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: newRole }),
-      });
+        },
+      );
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
           error?: { message?: string };
@@ -100,9 +105,13 @@ export function MembersSettings() {
     setError(null);
     setIsRemoving(true);
     try {
-      const res = await fetch(`/api/members/${memberToRemove.id}`, {
+      if (!workspaceId) throw new Error('Workspace is required');
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(memberToRemove.id)}`,
+        {
         method: 'DELETE',
-      });
+        },
+      );
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as {
           error?: { message?: string };
@@ -275,14 +284,14 @@ export function MembersSettings() {
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-[var(--text)] truncate flex items-center gap-2">
                     <span>{member.name}</span>
-                    {member.userId === me?.user?.id && <Badge>You</Badge>}
+                    {member.userId === account?.user?.id && <Badge>You</Badge>}
                   </div>
                   <div className="text-xs text-[var(--muted)] truncate">{member.email}</div>
                 </div>
               </div>
 
               <div className="flex items-center gap-3">
-                {isOwner && member.userId !== me?.user?.id ? (
+                {isOwner && member.userId !== account?.user?.id ? (
                   <Select
                     value={member.role}
                     onChange={(e) =>
@@ -301,7 +310,7 @@ export function MembersSettings() {
                   <Badge className="capitalize">{member.role}</Badge>
                 )}
 
-                {isOwner && member.userId !== me?.user?.id && (
+                {isOwner && member.userId !== account?.user?.id && (
                   <Button
                     variant="ghost"
                     onClick={() => setMemberToRemove({ id: member.userId, name: member.name })}

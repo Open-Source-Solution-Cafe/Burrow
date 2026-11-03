@@ -1,15 +1,22 @@
 import { env } from 'cloudflare:test';
-import { sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
 import { extractPlainText } from '../../src/shared/extract';
-import { createDb } from '../../src/worker/db/client';
-import { cardCreationStatements, createCard, type CardPlan } from '../../src/worker/services/cards';
-import { buildSaveContentStatements, saveContent } from '../../src/worker/services/notepads';
+import { createDb } from '../../src/core/adapters/db/d1/client';
+import { createD1Infrastructure } from '../../src/core/adapters/db/d1';
+import { CardService, type CardPlan } from '../../src/core/services/cards';
+import { NotepadService } from '../../src/core/services/notepads';
 import { expectInvariantsHold } from './helpers';
-import { runBatch } from '../../src/worker/lib/batch';
 
 const db = createDb(env.DB);
+const infrastructure = createD1Infrastructure(db, env);
+const repositories = infrastructure.repositories;
+const notepads = new NotepadService(repositories, infrastructure.locks);
+const cards = new CardService(repositories);
+const saveBatch = (args: any) => repositories.notepads.saveContentBatch({
+  ...args,
+  scope: { workspaceId: args.row.workspaceId, projectId: args.row.projectId, actorUserId: args.actorId, minimumRole: 'editor' },
+});
 
 /** Unique, collision-free ids so tests never share rows. */
 function uid(prefix: string): string {
@@ -120,17 +127,104 @@ async function countRows(query: string, bindValue: string): Promise<number> {
 }
 
 /**
- * Phase 0 spike: proves D1's db.batch() gives the service layer the atomicity
- * it depends on — a save either commits everything (content + FTS + links +
- * notifications) or changes nothing, and stale writes are complete no-ops.
+ * Live command contracts: content, index, references and notifications commit
+ * together, while failed or stale commands leave no side effects.
  */
-describe('D1 batch atomicity spike', () => {
+describe('D1 atomic command contract', () => {
+  it.each(['foreign-user', 'other-client', 'no-client'] as const)(
+    'denies a current-version save against an active %s lock atomically',
+    async (scenario) => {
+      const seed = await seedWorkspace();
+      const notepad = await seedNotepad(seed, 'quokka original');
+      const now = Date.now();
+      const userId = scenario === 'foreign-user' ? seed.member2Id : seed.userId;
+      await infrastructure.locks.acquire(notepad.id, userId, 'holder', 60_000);
+      const scope = { workspaceId: seed.workspaceId, projectId: seed.projectId };
+      const beforeLock = await repositories.notepads.getLock(scope, notepad.id);
+      await expect(
+        saveBatch({
+          row: {
+            id: notepad.id,
+            workspaceId: seed.workspaceId,
+            projectId: seed.projectId,
+            title: 'Spike notepad',
+          },
+          content: contentMentioning(seed.member2Id, 'gazelle replacement'),
+          baseVersion: 1,
+          actorId: seed.userId,
+          validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
+          previousLinks: [],
+          now,
+          lock:
+            scenario === 'no-client'
+              ? undefined
+              : {
+                  userId: seed.userId,
+                  clientId: scenario === 'foreign-user' ? 'holder' : 'other',
+                  expiresAt: now + 60_000,
+                },
+        }),
+      ).rejects.toThrow('lock_conflict');
+      expect(await notepadRow(notepad.id)).toEqual({ content: notepad.content, version: 1 });
+      expect(await repositories.notepads.getLock(scope, notepad.id)).toEqual(beforeLock);
+      expect(
+        await repositories.notepads.listLinks(
+          { workspaceId: seed.workspaceId, projectId: seed.projectId },
+          notepad.id,
+        ),
+      ).toEqual([]);
+      expect(
+        await countRows('SELECT COUNT(*) AS n FROM notifications WHERE notepad_id = ?', notepad.id),
+      ).toBe(0);
+      expect(await ftsMatches('gazelle')).not.toContain(notepad.id);
+      expect(await ftsMatches('quokka')).toContain(notepad.id);
+    },
+  );
+
+  it.each([false, true])(
+    'allows a save with its own client or an expired foreign lock (expired=%s)',
+    async (expired) => {
+      const seed = await seedWorkspace();
+      const notepad = await seedNotepad(seed, 'quokka original');
+      const now = Date.now();
+      await infrastructure.locks.acquire(
+        notepad.id,
+        expired ? seed.member2Id : seed.userId,
+        expired ? 'rival' : 'original',
+        expired ? -1 : 60_000,
+      );
+      expect(
+        await saveBatch({
+          row: {
+            id: notepad.id,
+            workspaceId: seed.workspaceId,
+            projectId: seed.projectId,
+            title: 'Spike notepad',
+          },
+          content: contentWith('gazelle replacement'),
+          baseVersion: 1,
+          actorId: seed.userId,
+          validLinks: [],
+          previousLinks: [],
+          now,
+          lock: { userId: seed.userId, clientId: 'original', expiresAt: now + 60_000 },
+        }),
+      ).toBe(2);
+      expect(await repositories.notepads.getLock({ workspaceId: seed.workspaceId, projectId: seed.projectId }, notepad.id)).toMatchObject({
+        userId: seed.userId,
+        clientId: 'original',
+      });
+    },
+  );
+
   it('(a) a valid save batch commits content, FTS, links and notifications together', async () => {
     const seed = await seedWorkspace();
     const notepad = await seedNotepad(seed, 'original quokka draft');
 
     const content = contentMentioning(seed.member2Id, 'gazelle patrol');
-    const result = await saveContent(db, {
+    const result = await notepads.saveContent({
+      workspaceId: seed.workspaceId,
+      projectId: seed.projectId,
       notepadId: notepad.id,
       content,
       baseVersion: 1,
@@ -168,37 +262,35 @@ describe('D1 batch atomicity spike', () => {
     await expectInvariantsHold(env.DB);
   });
 
-  it('(b) a failing final statement rolls back the whole save batch, including FTS, links and notifications', async () => {
+  it('(b) a late write failure rolls back content, FTS, links and notifications', async () => {
     const seed = await seedWorkspace();
     const notepad = await seedNotepad(seed, 'original quokka draft');
 
     const newContent = contentMentioning(seed.member2Id, 'wombat replacement');
-    const statements = [
-      ...buildSaveContentStatements(db, {
-        row: {
-          id: notepad.id,
+    const trigger = 'fail_save_' + crypto.randomUUID().replaceAll('-', '');
+    // Abort only after the content, index and notification writes reached the
+    // real command's backlink insert. The transaction must undo all of them.
+    await env.DB.prepare(
+      `CREATE TRIGGER "${trigger}" BEFORE INSERT ON notepad_links
+      WHEN NEW.source_id = '${notepad.id}'
+        AND EXISTS (SELECT 1 FROM notepads WHERE id = NEW.source_id AND version = 2)
+        AND EXISTS (SELECT 1 FROM notifications WHERE notepad_id = NEW.source_id AND user_id = '${seed.member2Id}')
+      BEGIN SELECT RAISE(ABORT, 'forced_save_failure'); END`,
+    ).run();
+    try {
+      await expect(
+        notepads.saveContent({
           workspaceId: seed.workspaceId,
-          title: 'Spike notepad',
-        },
-        content: newContent,
-        baseVersion: 1,
-        actorId: seed.userId,
-        validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
-        previousLinks: [],
-        now: Date.now(),
-      }),
-      // Gated to fail ONLY if the statements above really executed: it copies
-      // the notepad row onto its own primary key, which can only match once
-      // the UPDATE landed (version = 2 AND content = newContent). If D1 ran
-      // nothing, this would be a no-op and the batch would NOT reject.
-      db.run(sql`INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, created_by, created_at, updated_at)
-        SELECT id, workspace_id, project_id, kind, title, content, version, position, created_by, created_at, updated_at
-        FROM notepads WHERE id = ${notepad.id} AND version = 2 AND content = ${newContent}`),
-    ];
-    // The final statement can only throw UNIQUE constraint failed (copying the
-    // row onto its own primary key) if every statement above it really ran —
-    // a generic rejection (e.g. a bind error) would mean nothing executed.
-    await expect(runBatch(db, statements)).rejects.toThrow(/UNIQUE constraint failed/);
+          projectId: seed.projectId,
+          notepadId: notepad.id,
+          content: newContent,
+          baseVersion: 1,
+          actorId: seed.userId,
+        }),
+      ).rejects.toThrow('forced_save_failure');
+    } finally {
+      await env.DB.prepare(`DROP TRIGGER "${trigger}"`).run();
+    }
 
     // Nothing from the batch survived: content, version, FTS, links, notifications.
     const row = await notepadRow(notepad.id);
@@ -222,8 +314,9 @@ describe('D1 batch atomicity spike', () => {
     const seed = await seedWorkspace();
     const { boardId, columnId } = await seedBoard(seed);
 
-    const created = await createCard(db, {
+    const created = await cards.createCard({
       workspaceId: seed.workspaceId,
+      projectId: seed.projectId,
       actorId: seed.userId,
       boardId,
       columnId,
@@ -253,8 +346,14 @@ describe('D1 batch atomicity spike', () => {
     ).toBe(1);
     await expectInvariantsHold(env.DB);
 
-    // Forced failure: the real card-creation statements plus a final statement
-    // that only errors if the first insert really ran (duplicate primary key).
+    // A duplicate notification ID fails the final insert in the real command.
+    const notificationId = uid('notification');
+    await env.DB.prepare(
+      `INSERT INTO notifications (id, workspace_id, user_id, type, actor_id, created_at)
+       VALUES (?, ?, ?, 'assigned', ?, ?)`,
+    )
+      .bind(notificationId, seed.workspaceId, seed.member2Id, seed.userId, Date.now())
+      .run();
     const plan: CardPlan = {
       workspaceId: seed.workspaceId,
       projectId: seed.projectId,
@@ -270,19 +369,14 @@ describe('D1 batch atomicity spike', () => {
       dueDate: null,
       assigneeIds: [],
       tagIds: [],
+      assignmentNotifications: [{ id: notificationId, userId: seed.member2Id }],
       cardPosition: 'a0',
       linkedNotepad: null,
       now: Date.now(),
     };
-    const failing = [
-      ...cardCreationStatements(db, plan),
-      db.run(sql`INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, created_by, created_at, updated_at)
-        SELECT id, workspace_id, project_id, kind, title, content, version, position, created_by, created_at, updated_at
-        FROM notepads WHERE id = ${plan.notepadId}`),
-    ];
-    // Strict: UNIQUE constraint failed proves the card insert above executed
-    // (visibility within the batch) before this statement hit its own key.
-    await expect(runBatch(db, failing)).rejects.toThrow(/UNIQUE constraint failed/);
+    await expect(repositories.cards.createFromPlan(plan)).rejects.toThrow(
+      /UNIQUE constraint failed: notifications.id/,
+    );
 
     expect(
       await env.DB.prepare('SELECT id FROM cards WHERE id = ?').bind(plan.cardId).first(),
@@ -310,9 +404,27 @@ describe('D1 batch atomicity spike', () => {
       `INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, created_by, created_at, updated_at)
        VALUES (?, ?, ?, 'notepad', 'Orphan', '[]', 1, 'a0', ?, ?, ?)`,
     ).bind(uid('np'), seed.workspaceId, 'no-such-project', seed.userId, Date.now(), Date.now());
-    await expect(orphan.run(), 'D1 must reject inserts that violate a foreign key').rejects.toThrow(
-      /FOREIGN KEY constraint failed/,
-    );
+    // Isolate the database FK check from the earlier tenant-scope trigger.
+    // Restore the exact trigger immediately so later operations retain normal guards.
+    await env.DB.prepare('DROP TRIGGER notepads_scope_insert_guard').run();
+    try {
+      await expect(orphan.run(), 'D1 must reject inserts that violate a foreign key').rejects.toThrow(
+        /FOREIGN KEY constraint failed/,
+      );
+    } finally {
+      await env.DB.prepare(`CREATE TRIGGER notepads_scope_insert_guard
+        BEFORE INSERT ON notepads
+        WHEN NOT EXISTS (
+          SELECT 1 FROM projects p
+          WHERE p.id = NEW.project_id AND p.workspace_id = NEW.workspace_id
+        ) OR (NEW.parent_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM notepads parent
+          WHERE parent.id = NEW.parent_id
+            AND parent.project_id = NEW.project_id
+            AND parent.workspace_id = NEW.workspace_id
+        )) OR (NEW.kind = 'card' AND NEW.parent_id IS NOT NULL)
+        BEGIN SELECT RAISE(ABORT, 'scope_write_conflict'); END`).run();
+    }
 
     // Cascade: deleting the project takes its notepads and boards with it.
     await env.DB.prepare('DELETE FROM projects WHERE id = ?').bind(seed.projectId).run();
@@ -337,7 +449,9 @@ describe('D1 batch atomicity spike', () => {
 
     const stale = contentWith('stale outsider narwhal');
     await expect(
-      saveContent(db, {
+      notepads.saveContent({
+        workspaceId: seed.workspaceId,
+        projectId: seed.projectId,
         notepadId: notepad.id,
         content: stale,
         baseVersion: 99,
@@ -366,31 +480,34 @@ describe('D1 batch atomicity spike', () => {
 
     // Another writer wins: version 1 -> 2 with different content.
     const winningContent = contentWith('second writer gazelle');
-    await saveContent(db, {
+    await notepads.saveContent({
+      workspaceId: seed.workspaceId,
+      projectId: seed.projectId,
       notepadId: notepad.id,
       content: winningContent,
       baseVersion: 1,
       actorId: seed.userId,
     });
 
-    // Our save was prepared against version 1 and commits after the winner.
-    // A version-only gate would match here (baseVersion + 1 = 2 = actual
-    // version); the content check is what keeps every statement a no-op.
+    // A command prepared against version 1 must lose to the winner without
+    // modifying its content, index, links or notifications.
     const staleContent = contentMentioning(seed.member2Id, 'sneaky intruder');
-    const statements = buildSaveContentStatements(db, {
-      row: {
-        id: notepad.id,
-        workspaceId: seed.workspaceId,
-        title: 'Spike notepad',
-      },
-      content: staleContent,
-      baseVersion: 1,
-      actorId: seed.userId,
-      validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
-      previousLinks: [],
-      now: Date.now(),
-    });
-    await runBatch(db, statements);
+    await expect(
+      saveBatch({
+        row: {
+          id: notepad.id,
+          workspaceId: seed.workspaceId,
+          projectId: seed.projectId,
+          title: 'Spike notepad',
+        },
+        content: staleContent,
+        baseVersion: 1,
+        actorId: seed.userId,
+        validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
+        previousLinks: [],
+        now: Date.now(),
+      }),
+    ).rejects.toThrow('version_conflict');
 
     const row = await notepadRow(notepad.id);
     expect(row?.version).toBe(2);
@@ -406,6 +523,108 @@ describe('D1 batch atomicity spike', () => {
       await countRows('SELECT COUNT(*) AS n FROM notifications WHERE notepad_id = ?', notepad.id),
     ).toBe(0);
 
+    await expectInvariantsHold(env.DB);
+  });
+
+  it('(e3) a stale identical-content command cannot duplicate mentions or acquire a lock', async () => {
+    const seed = await seedWorkspace();
+    const notepad = await seedNotepad(seed, 'original draft');
+    const content = contentMentioning(seed.member2Id, 'same content');
+    await notepads.saveContent({
+      workspaceId: seed.workspaceId,
+      projectId: seed.projectId,
+      notepadId: notepad.id,
+      content,
+      baseVersion: 1,
+      actorId: seed.userId,
+    });
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notifications WHERE notepad_id = ?', notepad.id),
+    ).toBe(1);
+
+    const now = Date.now();
+    await expect(
+      saveBatch({
+        row: {
+          id: notepad.id,
+          workspaceId: seed.workspaceId,
+          projectId: seed.projectId,
+          title: 'Spike notepad',
+        },
+        content,
+        baseVersion: 1,
+        actorId: seed.userId,
+        validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
+        previousLinks: [],
+        now,
+        lock: { userId: seed.userId, clientId: 'stale-client', expiresAt: now + 60_000 },
+      }),
+    ).rejects.toThrow('version_conflict');
+
+    expect(await notepadRow(notepad.id)).toEqual({ version: 2, content });
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notifications WHERE notepad_id = ?', notepad.id),
+    ).toBe(1);
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notepad_links WHERE source_id = ?', notepad.id),
+    ).toBe(1);
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notepads_fts WHERE notepad_id = ?', notepad.id),
+    ).toBe(1);
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM edit_locks WHERE notepad_id = ?', notepad.id),
+    ).toBe(0);
+    await expectInvariantsHold(env.DB);
+  });
+
+  it('a current-version save under another project leaves content, metadata, links and locks unchanged', async () => {
+    const seed = await seedWorkspace();
+    const note = await seedNotepad(seed, 'unchanged quokka');
+    const projectId = uid('project');
+    const now = Date.now();
+    await env.DB.prepare(
+      'INSERT INTO projects (id, workspace_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+      .bind(projectId, seed.workspaceId, 'Other project', 'a0', now, now)
+      .run();
+    await env.DB.prepare(
+      'INSERT INTO edit_locks (notepad_id, user_id, client_id, expires_at) VALUES (?, ?, ?, ?)',
+    )
+      .bind(note.id, seed.userId, 'expired-original', now - 1)
+      .run();
+    const before = await env.DB.prepare(
+      'SELECT content, version, updated_at FROM notepads WHERE id = ?',
+    )
+      .bind(note.id)
+      .first();
+    const scope = { workspaceId: seed.workspaceId, projectId };
+    const oldLock = await repositories.notepads.getLock(scope, note.id);
+    await expect(
+      saveBatch({
+        row: { id: note.id, workspaceId: seed.workspaceId, projectId, title: 'Spike notepad' },
+        content: contentMentioning(seed.member2Id, 'foreign project overwrite'),
+        baseVersion: 1,
+        actorId: seed.userId,
+        validLinks: [{ targetType: 'user', targetId: seed.member2Id }],
+        previousLinks: [],
+        now,
+        lock: { userId: seed.userId, clientId: 'replacement', expiresAt: now + 60_000 },
+      }),
+    ).rejects.toThrow('version_conflict');
+    expect(
+      await env.DB.prepare('SELECT content, version, updated_at FROM notepads WHERE id = ?')
+        .bind(note.id)
+        .first(),
+    ).toEqual(before);
+    expect(await repositories.notepads.getLock(scope, note.id)).toEqual(oldLock);
+    expect(await ftsMatches('quokka')).toContain(note.id);
+    expect(await ftsMatches('overwrite')).not.toContain(note.id);
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notepad_links WHERE source_id = ?', note.id),
+    ).toBe(0);
+    expect(
+      await countRows('SELECT COUNT(*) AS n FROM notifications WHERE notepad_id = ?', note.id),
+    ).toBe(0);
     await expectInvariantsHold(env.DB);
   });
 });

@@ -3,6 +3,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { createD1Db } from '../../src/core/adapters/db/d1/client';
 import { createNotepadRepository } from '../../src/core/adapters/db/d1/repositories/notepad';
 import * as schema from '../../src/core/adapters/db/d1/schema';
+import { getDescendantIds } from '../../src/core/adapters/db/d1/lib/tree';
+import { assertTreeScopeIsolation } from './tree-scope-cases';
 
 describe('createNotepadRepository contract', () => {
   let workspaceId = '';
@@ -21,6 +23,23 @@ describe('createNotepadRepository contract', () => {
   function repo(): ReturnType<typeof createNotepadRepository> {
     return createNotepadRepository(createD1Db(env.DB));
   }
+  const writeScope = (projectId: string) => ({ workspaceId, projectId, actorUserId: 'notepad-contract-user', minimumRole: 'owner' as const });
+  const readScope = (projectId: string) => ({ workspaceId, projectId });
+
+  it('scopes live traversal and all-row lifecycle traversal to the root project/workspace', async () => {
+    const db = createD1Db(env.DB);
+    const fixture = await assertTreeScopeIsolation({
+      notepads: createNotepadRepository(db),
+      query: (text, params = []) =>
+        env.DB.prepare(text)
+          .bind(...params)
+          .all(),
+    });
+    expect((await getDescendantIds(db, fixture.rootId)).sort()).toEqual(
+      [fixture.liveId, fixture.deletedId].sort(),
+    );
+    expect(await getDescendantIds(db, 'missing')).toEqual([]);
+  });
 
   /** Fresh project per test so list assertions stay isolated. */
   async function seedProject(): Promise<string> {
@@ -61,7 +80,7 @@ describe('createNotepadRepository contract', () => {
       createdBy: 'notepad-contract-user',
       createdAt: now,
       updatedAt: now,
-    });
+    }, writeScope(args.projectId));
     return id;
   }
 
@@ -82,9 +101,9 @@ describe('createNotepadRepository contract', () => {
       kind: 'card',
     });
     const trashedId = await seedNotepad({ projectId, title: 'trashed', position: 'a4' });
-    await repo().softDelete(trashedId, Date.now());
+    await repo().softDelete(trashedId, Date.now(), writeScope(projectId));
 
-    const rows = await repo().listByProject(projectId);
+    const rows = await repo().listByProject(readScope(projectId));
     expect(rows.map((r) => r.id)).toEqual([parentId, childId, otherId]);
     expect(rows.some((r) => r.id === cardId)).toBe(false);
     expect(rows.some((r) => r.id === trashedId)).toBe(false);
@@ -98,9 +117,9 @@ describe('createNotepadRepository contract', () => {
     const projectId = await seedProject();
     const liveId = await seedNotepad({ projectId, title: 'live', position: 'a0' });
     const trashedId = await seedNotepad({ projectId, title: 'trashed', position: 'a1' });
-    await repo().softDelete(trashedId, Date.now());
+    await repo().softDelete(trashedId, Date.now(), writeScope(projectId));
 
-    const rows = await repo().listDeletedByProject(projectId);
+    const rows = await repo().listDeletedByProject(readScope(projectId));
     expect(rows.some((r) => r.id === trashedId)).toBe(true);
     expect(rows.some((r) => r.id === liveId)).toBe(false);
   });
@@ -116,17 +135,17 @@ describe('createNotepadRepository contract', () => {
     });
     const siblingId = await seedNotepad({ projectId, title: 'sibling', position: 'a2' });
 
-    expect((await repo().listByProject(projectId)).map((r) => r.id)).toEqual(
+    expect((await repo().listByProject(readScope(projectId))).map((r) => r.id)).toEqual(
       expect.arrayContaining([parentId, childId, siblingId]),
     );
 
     const now = Date.now();
-    await repo().softDelete(parentId, now);
+    await repo().softDelete(parentId, now, writeScope(projectId));
 
-    const live = await repo().listByProject(projectId);
+    const live = await repo().listByProject(readScope(projectId));
     expect(live.map((r) => r.id)).toEqual([siblingId]);
 
-    const trashed = await repo().listDeletedByProject(projectId);
+    const trashed = await repo().listDeletedByProject(readScope(projectId));
     expect(trashed.map((r) => r.id)).toEqual(expect.arrayContaining([parentId, childId]));
     expect(trashed.some((r) => r.id === siblingId)).toBe(false);
     expect(trashed.find((r) => r.id === childId)?.deletedAt).toBe(now);
@@ -139,15 +158,15 @@ describe('createNotepadRepository contract', () => {
     const child = await seedNotepad({ projectId, title: 'child', position: 'a0', parentId: p1 });
 
     // Move child out of p1 to root after p2
-    await repo().move(child, null, 'a2');
-    let rows = await repo().listByProject(projectId);
+    await repo().move(child, null, 'a2', writeScope(projectId));
+    let rows = await repo().listByProject(readScope(projectId));
     const movedChild = rows.find((r) => r.id === child);
     expect(movedChild?.parentId).toBeNull();
     expect(movedChild?.position).toBe('a2');
 
     // Move p2 to root before p1
-    await repo().move(p2, null, 'Zz');
-    rows = await repo().listByProject(projectId);
+    await repo().move(p2, null, 'Zz', writeScope(projectId));
+    rows = await repo().listByProject(readScope(projectId));
     const roots = rows.filter((r) => r.parentId === null);
     expect(roots.map((r) => r.id)).toEqual([p2, p1, child]);
   });
@@ -155,26 +174,26 @@ describe('createNotepadRepository contract', () => {
   it('getLastRootPosition and getLastChildPosition exclude deleted and card-kind notepads', async () => {
     const projectId = await seedProject();
     // Empty root
-    expect(await repo().getLastRootPosition(projectId)).toBeNull();
+    expect(await repo().getLastRootPosition(readScope(projectId))).toBeNull();
 
     const root1 = await seedNotepad({ projectId, title: 'root1', position: 'a0' });
-    const nextRootPos = await repo().getLastRootPosition(projectId);
+    const nextRootPos = await repo().getLastRootPosition(readScope(projectId));
     expect(nextRootPos).toBeDefined();
     expect(nextRootPos! > 'a0').toBe(true);
 
     // Soft-deleted root shouldn't advance position
     const root2 = await seedNotepad({ projectId, title: 'root2', position: 'a5' });
-    await repo().softDelete(root2, Date.now());
-    expect(await repo().getLastRootPosition(projectId)).toBe(nextRootPos);
+    await repo().softDelete(root2, Date.now(), writeScope(projectId));
+    expect(await repo().getLastRootPosition(readScope(projectId))).toBe(nextRootPos);
 
     // Card kind shouldn't advance root position
     await seedNotepad({ projectId, title: 'card', position: 'a9', kind: 'card' });
-    expect(await repo().getLastRootPosition(projectId)).toBe(nextRootPos);
+    expect(await repo().getLastRootPosition(readScope(projectId))).toBe(nextRootPos);
 
     // Empty children
-    expect(await repo().getLastChildPosition(root1)).toBeNull();
+    expect(await repo().getLastChildPosition(readScope(projectId), root1)).toBeNull();
     await seedNotepad({ projectId, title: 'c1', position: 'a0', parentId: root1 });
-    const nextChildPos = await repo().getLastChildPosition(root1);
+    const nextChildPos = await repo().getLastChildPosition(readScope(projectId), root1);
     expect(nextChildPos).toBeDefined();
     expect(nextChildPos! > 'a0').toBe(true);
   });
@@ -184,7 +203,8 @@ describe('createNotepadRepository contract', () => {
     const notepadId = await seedNotepad({ projectId, title: 'lock test', position: 'a0' });
     const db = createD1Db(env.DB);
 
-    expect(await repo().getLock(notepadId)).toBeNull();
+    const scope = readScope(projectId);
+    expect(await repo().getLock(scope, notepadId)).toBeNull();
 
     const expiresAt = Date.now() + 60_000;
     await db.insert(schema.editLocks).values({
@@ -194,13 +214,13 @@ describe('createNotepadRepository contract', () => {
       expiresAt,
     });
 
-    const lock = await repo().getLock(notepadId);
+    const lock = await repo().getLock(scope, notepadId);
     expect(lock).not.toBeNull();
     expect(lock?.userId).toBe('lock-test-user');
     expect(lock?.clientId).toBe('lock-test-client');
 
     await repo().deleteLock(notepadId);
-    expect(await repo().getLock(notepadId)).toBeNull();
+    expect(await repo().getLock(scope, notepadId)).toBeNull();
   });
 
   it('countByCoverKey accurately counts notepads referencing coverKey and supports excludeNotepadId', async () => {
@@ -211,52 +231,25 @@ describe('createNotepadRepository contract', () => {
     expect(await repo().countByCoverKey(coverKey)).toBe(0);
 
     const np1 = await seedNotepad({ projectId, title: 'cover test 1', position: 'a0' });
-    await repo().update(np1, { coverKey, updatedAt: Date.now() });
+    await repo().update(np1, { coverKey, updatedAt: Date.now() }, writeScope(projectId));
 
     expect(await repo().countByCoverKey(coverKey)).toBe(1);
     expect(await repo().countByCoverKey(coverKey, np1)).toBe(0);
 
     const np2 = await seedNotepad({ projectId, title: 'cover test 2', position: 'a1' });
-    await repo().update(np2, { coverKey, updatedAt: Date.now() });
+    await repo().update(np2, { coverKey, updatedAt: Date.now() }, writeScope(projectId));
 
     expect(await repo().countByCoverKey(coverKey)).toBe(2);
     expect(await repo().countByCoverKey(coverKey, np1)).toBe(1);
     expect(await repo().countByCoverKey(coverKey, np2)).toBe(1);
 
     // After np1 changes coverKey
-    await repo().update(np1, { coverKey: null, updatedAt: Date.now() });
+    await repo().update(np1, { coverKey: null, updatedAt: Date.now() }, writeScope(projectId));
     expect(await repo().countByCoverKey(coverKey)).toBe(1);
     expect(await repo().countByCoverKey(coverKey, np2)).toBe(0);
   });
 
-  it('isValidLink checks validity strictly scoped to workspaceId', async () => {
-    const projectId = await seedProject();
-    const liveNotepadId = await seedNotepad({ projectId, title: 'target notepad', position: 'a0' });
-    const trashedNotepadId = await seedNotepad({ projectId, title: 'trashed target', position: 'a1' });
-    await repo().softDelete(trashedNotepadId, Date.now());
-
-    const otherWorkspaceId = crypto.randomUUID();
-
-    // Valid within workspace (both as string and target object)
-    expect(await repo().isValidLink(liveNotepadId, workspaceId)).toBe(true);
-    expect(
-      await repo().isValidLink({ targetType: 'notepad', targetId: liveNotepadId }, workspaceId),
-    ).toBe(true);
-
-    // Cross-workspace lookup fails
-    expect(await repo().isValidLink(liveNotepadId, otherWorkspaceId)).toBe(false);
-    expect(
-      await repo().isValidLink({ targetType: 'notepad', targetId: liveNotepadId }, otherWorkspaceId),
-    ).toBe(false);
-
-    // Trashed notepad fails
-    expect(await repo().isValidLink(trashedNotepadId, workspaceId)).toBe(false);
-
-    // Non-existent id fails
-    expect(await repo().isValidLink('non-existent-id', workspaceId)).toBe(false);
-  });
-
-  it('listBacklinks returns backlinks strictly scoped to workspaceId with updatedAt', async () => {
+  it('listBacklinks returns live project-scoped backlinks with updatedAt', async () => {
     const projectId = await seedProject();
     const targetId = await seedNotepad({ projectId, title: 'target', position: 'a0' });
     const source1Id = await seedNotepad({ projectId, title: 'source 1', position: 'a1' });
@@ -268,7 +261,8 @@ describe('createNotepadRepository contract', () => {
       { sourceId: source2Id, targetType: 'notepad', targetId },
     ]);
 
-    const backlinks = await repo().listBacklinks(targetId, workspaceId);
+    const scope = { workspaceId, projectId };
+    const backlinks = await repo().listBacklinks(scope, targetId);
     expect(backlinks).toHaveLength(2);
     expect(backlinks.map((b) => b.id).sort()).toEqual([source1Id, source2Id].sort());
     for (const link of backlinks) {
@@ -278,13 +272,15 @@ describe('createNotepadRepository contract', () => {
 
     // Different workspace returns empty
     const otherWorkspaceId = crypto.randomUUID();
-    const otherBacklinks = await repo().listBacklinks(targetId, otherWorkspaceId);
+    const otherBacklinks = await repo().listBacklinks(
+      { ...scope, workspaceId: otherWorkspaceId },
+      targetId,
+    );
     expect(otherBacklinks).toHaveLength(0);
 
     // Soft-deleting one source removes it from backlinks
-    await repo().softDelete(source1Id, Date.now());
-    const afterDelete = await repo().listBacklinks(targetId, workspaceId);
+    await repo().softDelete(source1Id, Date.now(), writeScope(projectId));
+    const afterDelete = await repo().listBacklinks(scope, targetId);
     expect(afterDelete.map((b) => b.id)).toEqual([source2Id]);
   });
 });
-

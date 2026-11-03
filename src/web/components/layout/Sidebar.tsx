@@ -6,6 +6,7 @@ import {
   FileText,
   Home,
   Inbox,
+  Library,
   Kanban,
   LogOut,
   Plus,
@@ -19,6 +20,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ProjectSwitcher } from './ProjectSwitcher';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ThemeToggle } from './ThemeToggle';
 import { Badge } from '../ui/Badge';
 import { StatusDiamond } from '../ui/StatusDiamond';
@@ -29,7 +31,7 @@ import {
   useBoards,
   useCreateBoard,
   useDeleteBoard,
-  useMe,
+  useAccount,
   useMembers,
   useMyTasks,
   useNotepads,
@@ -40,6 +42,18 @@ import {
 import { THEME_LABELS, useTheme, type BurrowTheme } from '../../lib/theme';
 import { NotepadTree } from '../notepads/NotepadTree';
 import { NotificationsBell } from './NotificationsBell';
+import {
+  boardTarget,
+  notepadTarget,
+  projectTarget,
+  projectLibraryTarget,
+  trashTarget,
+  workspaceMembersTarget,
+  workspaceSettingsTarget,
+  workspaceTasksTarget,
+  workspaceTarget,
+  projectApiPath,
+} from '../../lib/workspaceRoutes';
 
 interface SidebarProps {
   onCloseMobile?: () => void;
@@ -54,23 +68,41 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const location = useLocation();
   const pathname = location.pathname;
   const { isModern, theme, setTheme } = useTheme();
-  const { data: me } = useMe();
+  const { data: account } = useAccount();
   const params = useParams({ strict: false }) as {
+    workspaceId?: string;
     projectId?: string;
     boardId?: string;
     notepadId?: string;
   };
-  const currentProjectId = params.projectId || me?.lastProjectId || undefined;
+  const workspaceId = params.workspaceId;
+  const currentProjectId = params.projectId;
+  const workspaceRole = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role;
+  const libraryActive = pathname.endsWith('/library');
+  const projectLibraryLink = workspaceId && currentProjectId && (
+    <Link
+      {...projectLibraryTarget(workspaceId, currentProjectId)}
+      onClick={() => {
+        setActiveRailTab('overview');
+        onCloseMobile?.();
+      }}
+      aria-current={libraryActive ? 'page' : undefined}
+      className={`flex items-center gap-2.5 px-2.5 py-2 text-sm theme-radius-md ${libraryActive ? 'bg-hi text-hi-ink font-semibold' : 'text-muted hover:bg-hi hover:text-text'}`}
+    >
+      <Library className="h-4 w-4 shrink-0" />
+      <span>Project library</span>
+    </Link>
+  );
   const currentBoardId = params.boardId;
   const currentNotepadId = params.notepadId;
 
-  const { data: boards = [] } = useBoards(currentProjectId);
-  const { data: notepads = [] } = useNotepads(currentProjectId);
+  const { data: boards = [] } = useBoards(workspaceId, currentProjectId);
+  const { data: notepads = [] } = useNotepads(workspaceId, currentProjectId);
   const favoriteNotepads = notepads.filter((n) => Boolean(n.isFavorite));
-  const { data: projectTags = [] } = useProjectTags(currentProjectId);
-  const { data: myTasks = [] } = useMyTasks({ status: 'open' });
-  const { data: members = [] } = useMembers();
-  const { data: trashData } = useTrash(currentProjectId);
+  const { data: projectTags = [] } = useProjectTags(workspaceId, currentProjectId);
+  const { data: myTasks = [] } = useMyTasks({ status: 'open' }, workspaceId);
+  const { data: members = [] } = useMembers(workspaceId);
+  const { data: trashData } = useTrash(workspaceId, currentProjectId);
 
   const createBoardMutation = useCreateBoard();
   const deleteBoardMutation = useDeleteBoard();
@@ -91,14 +123,18 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const badgeCount = dueTasks.length;
 
   const isOverviewActive = currentProjectId
-    ? pathname === `/p/${currentProjectId}` || pathname === `/p/${currentProjectId}/`
-    : pathname === '/';
+    ? pathname === `/w/${workspaceId}/p/${currentProjectId}` ||
+      pathname === `/w/${workspaceId}/p/${currentProjectId}/`
+    : workspaceId
+      ? pathname === `/w/${workspaceId}` || pathname === `/w/${workspaceId}/`
+      : pathname === '/';
 
   // Active rail tab selection state
   const getInitialRailTab = (): RailTab => {
-    if (pathname.startsWith('/my-tasks')) return 'tasks';
-    if (pathname.startsWith('/settings')) return 'members';
-    if (currentProjectId && pathname.startsWith(`/p/${currentProjectId}/trash`)) return 'trash';
+    if (pathname.endsWith('/tasks')) return 'tasks';
+    if (pathname.includes('/settings')) return 'members';
+    if (currentProjectId && pathname.startsWith(`/w/${workspaceId}/p/${currentProjectId}/trash`))
+      return 'trash';
     if (currentBoardId) return 'boards';
     if (currentNotepadId) return 'notepads';
     return 'overview';
@@ -110,11 +146,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
   // Synchronize rail tab when URL changes
   useEffect(() => {
-    if (pathname.startsWith('/my-tasks')) {
+    if (pathname.endsWith('/tasks')) {
       setActiveRailTab('tasks');
-    } else if (pathname.startsWith('/settings')) {
+    } else if (pathname.includes('/settings')) {
       setActiveRailTab('members');
-    } else if (currentProjectId && pathname.startsWith(`/p/${currentProjectId}/trash`)) {
+    } else if (
+      currentProjectId &&
+      pathname.startsWith(`/w/${workspaceId}/p/${currentProjectId}/trash`)
+    ) {
       setActiveRailTab('trash');
     } else if (currentBoardId) {
       setActiveRailTab('boards');
@@ -123,7 +162,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
     } else if (isOverviewActive) {
       setActiveRailTab('overview');
     }
-  }, [pathname, currentProjectId, currentBoardId, currentNotepadId, isOverviewActive]);
+  }, [pathname, workspaceId, currentProjectId, currentBoardId, currentNotepadId, isOverviewActive]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -223,8 +262,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   };
 
   const createRootNotepad = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/projects/${currentProjectId}/notepads`, {
+    mutationFn: async ({ workspaceId, projectId }: { workspaceId: string; projectId: string }) => {
+      const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'Untitled' }),
@@ -232,12 +271,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       if (!res.ok) throw new Error('Failed to create notepad');
       return res.json();
     },
-    onSuccess: (data: { id: string }) => {
-      queryClient.invalidateQueries({ queryKey: ['notepads', currentProjectId] });
-      if (currentProjectId && data.id) {
+    onSuccess: (data: { id: string }, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] });
+      if (data.id) {
         navigate({
-          to: '/p/$projectId/notepads/$notepadId',
-          params: { projectId: currentProjectId, notepadId: data.id },
+          ...notepadTarget(vars.workspaceId, vars.projectId, data.id),
         });
       }
     },
@@ -245,6 +283,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       toast.error(err?.message || 'Failed to create notepad');
     },
   });
+
+  const createRootNotepadNow = () => {
+    if (!workspaceId || !currentProjectId) return;
+    createRootNotepad.mutate({ workspaceId, projectId: currentProjectId });
+  };
 
   const openPalette = (query?: string) => {
     window.dispatchEvent(
@@ -269,12 +312,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const renderAccountMenu = () => (
     <div className="absolute bottom-full left-0 mb-2 w-60 bg-surface border border-line theme-radius-md p-1 z-50 text-xs">
       <div className="px-3 py-2 border-b border-hair">
-        <div className="font-semibold text-text truncate">{me?.user?.name || 'Account'}</div>
-        {me?.user?.email && <div className="text-[11px] text-muted truncate">{me.user.email}</div>}
-        {me?.role && (
+        <div className="font-semibold text-text truncate">{account?.user?.name || 'Account'}</div>
+        {account?.user?.email && (
+          <div className="text-[11px] text-muted truncate">{account.user.email}</div>
+        )}
+        {workspaceRole && (
           <div className="mt-1">
             <span className="inline-block px-1.5 py-0.5 text-[9px] uppercase font-mono tracking-wider bg-hi text-muted border border-hair theme-radius-xs">
-              {me.role}
+              {workspaceRole}
             </span>
           </div>
         )}
@@ -285,19 +330,19 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           type="button"
           onClick={() => {
             setAccountMenuOpen(false);
-            navigate({ to: '/settings' });
+            navigate(workspaceId ? workspaceSettingsTarget(workspaceId) : { to: '/' });
           }}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
         >
           <Settings className="w-3.5 h-3.5" />
           <span>Settings</span>
         </button>
-        {me?.role === 'owner' && (
+        {workspaceRole === 'owner' && (
           <button
             type="button"
             onClick={() => {
               setAccountMenuOpen(false);
-              navigate({ to: '/settings/members' });
+              navigate(workspaceId ? workspaceMembersTarget(workspaceId) : { to: '/' });
             }}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
           >
@@ -345,13 +390,13 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
     <>
       {isModern ? (
         <aside className="w-[232px] h-screen flex flex-col bg-side text-side-text border-r border-hair py-3.5 px-2 gap-0.5 select-none">
-          {/* Top project header */}
+          {/* Workspace header */}
           <div className="flex items-center justify-between px-2.5 pt-0.5 pb-3 gap-1">
             <div className="flex-1 min-w-0">
-              <ProjectSwitcher currentProjectId={currentProjectId} />
+              <WorkspaceSwitcher />
             </div>
             <div className="flex items-center gap-0.5 shrink-0">
-              <NotificationsBell projectId={currentProjectId} />
+              <NotificationsBell workspaceId={workspaceId} projectId={currentProjectId} />
               {onCloseMobile && (
                 <button
                   type="button"
@@ -380,8 +425,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           {/* Primary nav items */}
           {currentProjectId ? (
             <Link
-              to="/p/$projectId"
-              params={{ projectId: currentProjectId }}
+              {...projectTarget(workspaceId!, currentProjectId)}
               className={`flex items-center gap-2.5 px-2.5 h-8 theme-radius-md text-[13px] transition ${
                 isOverviewActive
                   ? 'bg-hi text-hi-ink font-medium'
@@ -406,9 +450,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           )}
 
           <Link
-            to="/my-tasks"
+            {...(workspaceId ? workspaceTasksTarget(workspaceId) : { to: '/' as const })}
             className={`flex items-center justify-between gap-2.5 px-2.5 h-8 theme-radius-md text-[13px] transition ${
-              pathname.startsWith('/my-tasks')
+              pathname.endsWith('/tasks')
                 ? 'bg-hi text-hi-ink font-medium'
                 : 'text-muted hover:text-text hover:bg-hi'
             }`}
@@ -423,6 +467,12 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </Badge>
             )}
           </Link>
+
+          <div className="px-2.5 pt-3 pb-1">
+            <div className="font-eyebrow mb-1">Project</div>
+            <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
+            {projectLibraryLink}
+          </div>
 
           {/* Scrollable sections */}
           <div className="flex-1 overflow-y-auto space-y-1">
@@ -442,8 +492,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     return (
                       <Link
                         key={np.id}
-                        to="/p/$projectId/notepads/$notepadId"
+                        to="/w/$workspaceId/p/$projectId/notepads/$notepadId"
                         params={{
+                          workspaceId: workspaceId!,
                           projectId: currentProjectId!,
                           notepadId: np.id,
                         }}
@@ -474,12 +525,12 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 >
                   <span>Notepads</span>
                 </button>
-                {currentProjectId && me?.role !== 'viewer' && (
+                {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
                     type="button"
                     onClick={() => {
                       if (!notepadsOpen) setNotepadsOpen(true);
-                      createRootNotepad.mutate();
+                      createRootNotepadNow();
                     }}
                     className="flex h-5 w-5 items-center justify-center hover:bg-hi text-muted hover:text-text theme-radius-xs transition cursor-pointer"
                     title="New notepad"
@@ -490,7 +541,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </div>
               {notepadsOpen && (
                 <div id="sidebar-notepad-tree" className="space-y-0.5">
-                  {currentProjectId && <NotepadTree projectId={currentProjectId} />}
+                  {workspaceId && currentProjectId && (
+                    <NotepadTree workspaceId={workspaceId} projectId={currentProjectId} />
+                  )}
                 </div>
               )}
             </div>
@@ -507,7 +560,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 >
                   <span>Boards</span>
                 </button>
-                {currentProjectId && me?.role !== 'viewer' && (
+                {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
                     type="button"
                     onClick={() => {
@@ -534,8 +587,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                           className="group relative flex items-center justify-between"
                         >
                           <Link
-                            to="/p/$projectId/boards/$boardId"
+                            to="/w/$workspaceId/p/$projectId/boards/$boardId"
                             params={{
+                              workspaceId: workspaceId!,
                               projectId: currentProjectId!,
                               boardId: b.id,
                             }}
@@ -548,7 +602,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             <Kanban className="w-3.5 h-3.5 shrink-0" />
                             <span className="truncate">{b.name}</span>
                           </Link>
-                          {me?.role !== 'viewer' && (
+                          {workspaceRole !== 'viewer' && (
                             <button
                               type="button"
                               onClick={(e) => {
@@ -594,9 +648,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           </div>
 
           {/* Bottom links */}
-          {me?.role === 'owner' && (
+          {workspaceRole === 'owner' && workspaceId && (
             <Link
-              to="/settings/members"
+              {...workspaceMembersTarget(workspaceId)}
               className="h-8 px-2.5 theme-radius-md text-[13px] text-muted hover:text-text hover:bg-hi flex items-center gap-2.5 transition"
             >
               <Users className="w-4 h-4 shrink-0" />
@@ -605,8 +659,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           )}
           {currentProjectId && (
             <Link
-              to="/p/$projectId/trash"
-              params={{ projectId: currentProjectId }}
+              {...trashTarget(workspaceId!, currentProjectId)}
               className="h-8 px-2.5 theme-radius-md text-[13px] text-muted hover:text-text hover:bg-hi flex items-center gap-2.5 transition"
             >
               <Trash2 className="w-4 h-4 shrink-0" />
@@ -628,11 +681,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               aria-haspopup="menu"
             >
               <Avatar
-                name={me?.user?.name || 'Account'}
+                name={account?.user?.name || 'Account'}
                 size="xs"
                 className="w-[22px] h-[22px] text-[10px]"
               />
-              <span className="truncate font-medium">{me?.user?.name || 'Account'}</span>
+              <span className="truncate font-medium">{account?.user?.name || 'Account'}</span>
             </button>
             <div className="flex items-center gap-0.5">
               <ThemeToggle />
@@ -661,9 +714,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               onClick={() => {
                 setActiveRailTab('overview');
                 if (currentProjectId) {
-                  navigate({ to: '/p/$projectId', params: { projectId: currentProjectId } });
+                  navigate(projectTarget(workspaceId!, currentProjectId));
                 } else {
-                  navigate({ to: '/' });
+                  navigate(workspaceId ? workspaceTarget(workspaceId) : { to: '/' });
                 }
               }}
               className="w-[38px] h-[38px] clip-hex bg-accent text-accent-ink flex items-center justify-center text-base font-display mb-3 shrink-0 cursor-pointer"
@@ -694,9 +747,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               onClick={() => {
                 setActiveRailTab('overview');
                 if (currentProjectId) {
-                  navigate({ to: '/p/$projectId', params: { projectId: currentProjectId } });
+                  navigate(projectTarget(workspaceId!, currentProjectId));
                 } else {
-                  navigate({ to: '/' });
+                  navigate(workspaceId ? workspaceTarget(workspaceId) : { to: '/' });
                 }
               }}
               className={`w-10 h-10 flex items-center justify-center transition cursor-pointer ${
@@ -715,7 +768,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               type="button"
               onClick={() => {
                 setActiveRailTab('tasks');
-                navigate({ to: '/my-tasks' });
+                if (workspaceId) navigate(workspaceTasksTarget(workspaceId));
               }}
               className={`relative w-10 h-10 flex items-center justify-center transition cursor-pointer ${
                 activeRailTab === 'tasks'
@@ -770,7 +823,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               type="button"
               onClick={() => {
                 setActiveRailTab('members');
-                navigate({ to: '/settings/members' });
+                if (workspaceId) navigate(workspaceMembersTarget(workspaceId));
               }}
               className={`w-10 h-10 flex items-center justify-center transition cursor-pointer ${
                 activeRailTab === 'members'
@@ -789,7 +842,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 type="button"
                 onClick={() => {
                   setActiveRailTab('trash');
-                  navigate({ to: '/p/$projectId/trash', params: { projectId: currentProjectId } });
+                  navigate(trashTarget(workspaceId!, currentProjectId));
                 }}
                 className={`w-10 h-10 flex items-center justify-center transition cursor-pointer ${
                   activeRailTab === 'trash'
@@ -817,7 +870,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 aria-haspopup="menu"
               >
                 <Avatar
-                  name={me?.user?.name || 'Account'}
+                  name={account?.user?.name || 'Account'}
                   size="sm"
                   className="w-[30px] h-[30px] text-[10px] font-extrabold cursor-pointer"
                 />
@@ -857,6 +910,20 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/40 active:bg-accent transition z-20"
             />
 
+            <div className="flex items-center justify-between px-3 pt-0.5 pb-2 gap-1">
+              <div className="flex-1 min-w-0">
+                <WorkspaceSwitcher />
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <NotificationsBell workspaceId={workspaceId} projectId={currentProjectId} />
+              </div>
+            </div>
+            <div className="px-3 pt-2 pb-3">
+              <div className="font-eyebrow mb-1">Project</div>
+              <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
+              {projectLibraryLink}
+            </div>
+
             {/* ------------------------------------------------------------- */}
             {/* Panel 1: SEARCH                                               */}
             {/* ------------------------------------------------------------- */}
@@ -888,8 +955,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         {searchMatchesNotepads.map((np) => (
                           <Link
                             key={np.id}
-                            to="/p/$projectId/notepads/$notepadId"
-                            params={{ projectId: currentProjectId!, notepadId: np.id }}
+                            {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
                             className="flex items-center gap-2 h-7 px-2 text-xs text-ink-muted hover:text-text hover:bg-hi truncate"
                           >
                             <FileText className="w-3.5 h-3.5 shrink-0 text-accent" />
@@ -911,8 +977,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         {searchMatchesBoards.map((b) => (
                           <Link
                             key={b.id}
-                            to="/p/$projectId/boards/$boardId"
-                            params={{ projectId: currentProjectId!, boardId: b.id }}
+                            {...boardTarget(workspaceId!, currentProjectId!, b.id)}
                             className="flex items-center gap-2 h-7 px-2 text-xs text-ink-muted hover:text-text hover:bg-hi truncate"
                           >
                             <Kanban className="w-3.5 h-3.5 shrink-0 text-accent" />
@@ -971,15 +1036,6 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {/* ------------------------------------------------------------- */}
             {activeRailTab === 'overview' && (
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 pt-0.5 pb-2 gap-1">
-                  <div className="flex-1 min-w-0">
-                    <ProjectSwitcher currentProjectId={currentProjectId} />
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <NotificationsBell projectId={currentProjectId} />
-                  </div>
-                </div>
-
                 <div className="flex-1 overflow-y-auto space-y-1">
                   {/* Favorites section */}
                   <div>
@@ -998,8 +1054,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                           return (
                             <Link
                               key={np.id}
-                              to="/p/$projectId/notepads/$notepadId"
-                              params={{ projectId: currentProjectId!, notepadId: np.id }}
+                              {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
                               title={np.title || 'Untitled'}
                               className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
                                 isActive
@@ -1032,7 +1087,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     </div>
                     {notepadsOpen && (
                       <div id="sidebar-notepad-tree" className="space-y-0.5">
-                        {currentProjectId && <NotepadTree projectId={currentProjectId} />}
+                        {workspaceId && currentProjectId && (
+                          <NotepadTree workspaceId={workspaceId} projectId={currentProjectId} />
+                        )}
                       </div>
                     )}
                   </div>
@@ -1055,8 +1112,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         {boards.slice(0, 5).map((b) => (
                           <Link
                             key={b.id}
-                            to="/p/$projectId/boards/$boardId"
-                            params={{ projectId: currentProjectId!, boardId: b.id }}
+                            {...boardTarget(workspaceId!, currentProjectId!, b.id)}
                             title={b.name}
                             className="flex items-center gap-2.5 h-[32px] px-3 text-[13px] text-ink-muted hover:bg-hi hover:text-side-text truncate"
                           >
@@ -1092,10 +1148,10 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   )}
                 </div>
 
-                {currentProjectId && me?.role !== 'viewer' && (
+                {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
                     type="button"
-                    onClick={() => createRootNotepad.mutate()}
+                    onClick={() => createRootNotepadNow()}
                     className="mt-2 w-full flex items-center gap-2 h-9 px-3 border border-dashed border-line text-ink-muted hover:text-text hover:border-accent text-[13px] font-semibold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
@@ -1110,15 +1166,6 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {/* ------------------------------------------------------------- */}
             {activeRailTab === 'notepads' && (
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 pt-0.5 pb-2 gap-1">
-                  <div className="flex-1 min-w-0">
-                    <ProjectSwitcher currentProjectId={currentProjectId} />
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <NotificationsBell projectId={currentProjectId} />
-                  </div>
-                </div>
-
                 <div className="flex-1 overflow-y-auto space-y-1">
                   {/* Favorites section */}
                   {favoriteNotepads.length > 0 && (
@@ -1133,8 +1180,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                           return (
                             <Link
                               key={np.id}
-                              to="/p/$projectId/notepads/$notepadId"
-                              params={{ projectId: currentProjectId!, notepadId: np.id }}
+                              {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
                               title={np.title || 'Untitled'}
                               className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
                                 isActive
@@ -1158,10 +1204,10 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       <span>All Notepads</span>
                       <div className="flex items-center gap-1.5">
                         <span>{notepads.length}</span>
-                        {currentProjectId && me?.role !== 'viewer' && (
+                        {currentProjectId && workspaceRole !== 'viewer' && (
                           <button
                             type="button"
-                            onClick={() => createRootNotepad.mutate()}
+                            onClick={() => createRootNotepadNow()}
                             className="flex h-5 w-5 items-center justify-center hover:bg-hi text-ink-muted hover:text-text transition cursor-pointer"
                             title="New notepad"
                           >
@@ -1171,15 +1217,17 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       </div>
                     </div>
                     <div className="space-y-0.5">
-                      {currentProjectId && <NotepadTree projectId={currentProjectId} />}
+                      {workspaceId && currentProjectId && (
+                        <NotepadTree workspaceId={workspaceId} projectId={currentProjectId} />
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {currentProjectId && me?.role !== 'viewer' && (
+                {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
                     type="button"
-                    onClick={() => createRootNotepad.mutate()}
+                    onClick={() => createRootNotepadNow()}
                     className="mt-2 w-full flex items-center gap-2 h-9 px-3 border border-dashed border-line text-ink-muted hover:text-text hover:border-accent text-[13px] font-semibold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
@@ -1194,15 +1242,6 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {/* ------------------------------------------------------------- */}
             {activeRailTab === 'boards' && (
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 pt-0.5 pb-2 gap-1">
-                  <div className="flex-1 min-w-0">
-                    <ProjectSwitcher currentProjectId={currentProjectId} />
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <NotificationsBell projectId={currentProjectId} />
-                  </div>
-                </div>
-
                 <div className="flex-1 overflow-y-auto space-y-1">
                   {/* Boards section */}
                   <div>
@@ -1210,7 +1249,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       <span>Boards</span>
                       <div className="flex items-center gap-1.5">
                         <span>{boards.length}</span>
-                        {currentProjectId && me?.role !== 'viewer' && (
+                        {currentProjectId && workspaceRole !== 'viewer' && (
                           <button
                             type="button"
                             onClick={() => setCreateBoardOpen(true)}
@@ -1237,8 +1276,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                               className="group relative flex items-center justify-between"
                             >
                               <Link
-                                to="/p/$projectId/boards/$boardId"
-                                params={{ projectId: currentProjectId!, boardId: b.id }}
+                                {...boardTarget(workspaceId!, currentProjectId!, b.id)}
                                 title={b.name}
                                 className={`flex-1 flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition min-w-0 pr-8 ${
                                   isActive
@@ -1250,7 +1288,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                                 <span className="flex-1 truncate">{b.name}</span>
                                 {isActive && <span className="diamond-dot group-hover:hidden" />}
                               </Link>
-                              {me?.role !== 'viewer' && (
+                              {workspaceRole !== 'viewer' && (
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1295,7 +1333,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   )}
                 </div>
 
-                {currentProjectId && me?.role !== 'viewer' && (
+                {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
                     type="button"
                     onClick={() => setCreateBoardOpen(true)}
@@ -1360,8 +1398,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     displayedTasks.map((t) => (
                       <Link
                         key={t.id}
-                        to="/p/$projectId/boards/$boardId"
-                        params={{ projectId: t.projectId, boardId: t.boardId }}
+                        {...boardTarget(workspaceId!, t.projectId, t.boardId)}
                         search={{ cardId: t.id }}
                         title={t.title}
                         className="block px-3 py-2 text-xs hover:bg-hi text-ink-muted hover:text-text transition border-b border-hair/50"
@@ -1391,7 +1428,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 </div>
 
                 <Link
-                  to="/my-tasks"
+                  {...(workspaceId ? workspaceTasksTarget(workspaceId) : { to: '/' as const })}
                   className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-text hover:bg-hi transition"
                 >
                   <Inbox className="w-3.5 h-3.5 text-accent" />
@@ -1415,9 +1452,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <div className="flex-1 overflow-y-auto space-y-3 pt-2">
                   <div className="space-y-0.5">
                     <Link
-                      to="/settings/members"
+                      {...(workspaceId
+                        ? workspaceMembersTarget(workspaceId)
+                        : { to: '/' as const })}
                       className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
-                        pathname.startsWith('/settings/members')
+                        pathname.endsWith('/settings/members')
                           ? 'bg-hi text-hi-ink font-bold'
                           : 'text-ink-muted font-medium hover:bg-hi hover:text-side-text'
                       }`}
@@ -1426,9 +1465,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       <span>Workspace Members</span>
                     </Link>
                     <Link
-                      to="/settings"
+                      {...(workspaceId
+                        ? workspaceSettingsTarget(workspaceId)
+                        : { to: '/' as const })}
                       className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
-                        pathname === '/settings'
+                        pathname.endsWith('/settings')
                           ? 'bg-hi text-hi-ink font-bold'
                           : 'text-ink-muted font-medium hover:bg-hi hover:text-side-text'
                       }`}
@@ -1546,8 +1587,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
                 {currentProjectId && (
                   <Link
-                    to="/p/$projectId/trash"
-                    params={{ projectId: currentProjectId }}
+                    {...trashTarget(workspaceId!, currentProjectId)}
                     className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-text hover:bg-hi transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -1571,9 +1611,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           busy={deleteBoardMutation.isPending}
           onConfirm={async () => {
             try {
-              await deleteBoardMutation.mutateAsync(confirmDeleteBoard.id);
+              if (!workspaceId || !currentProjectId) throw new Error('Project is unavailable');
+              await deleteBoardMutation.mutateAsync({
+                workspaceId,
+                projectId: currentProjectId,
+                boardId: confirmDeleteBoard.id,
+              });
               if (confirmDeleteBoard.id === currentBoardId && currentProjectId) {
-                navigate({ to: '/p/$projectId', params: { projectId: currentProjectId } });
+                navigate(projectTarget(workspaceId!, currentProjectId));
               }
               setConfirmDeleteBoard(null);
             } catch (err: any) {
@@ -1594,20 +1639,15 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
         confirmLabel="Create"
         busy={createBoardMutation.isPending}
         onConfirm={async (name) => {
-          if (!currentProjectId) return;
+          if (!workspaceId || !currentProjectId) return;
           try {
             const res = await createBoardMutation.mutateAsync({
+              workspaceId,
               projectId: currentProjectId,
               name,
             });
             setCreateBoardOpen(false);
-            navigate({
-              to: '/p/$projectId/boards/$boardId',
-              params: {
-                projectId: currentProjectId,
-                boardId: res.id,
-              },
-            });
+            navigate(boardTarget(workspaceId!, currentProjectId, res.id));
           } catch (err: any) {
             toast.error(err?.message || 'Failed to create board');
           }

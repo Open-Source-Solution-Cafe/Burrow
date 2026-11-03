@@ -44,4 +44,18 @@ export class R2StorageAdapter implements IStorageAdapter {
       cursor = listed.truncated ? listed.cursor : undefined;
     } while (cursor);
   }
+
+  async listObjects(): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await this.bucket.list({ cursor });
+      keys.push(...page.objects.map((object) => object.key));
+      if (page.truncated && !page.cursor) {
+        throw new Error('R2 object listing was truncated without a continuation cursor');
+      }
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return keys.sort();
+  }
 }

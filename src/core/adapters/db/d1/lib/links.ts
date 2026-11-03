@@ -1,97 +1,112 @@
-import { sql, and, eq, inArray, type SQL } from 'drizzle-orm';
+import { sql, and, eq, inArray, isNull, type SQL } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
-import type { ExtractedLink } from '../../../../shared/extract';
-import type { LinkTargetType } from '../../../../shared/blocks';
+import type { ExtractedLink as StoredLink } from '../../../../../shared/extract';
+export type { ExtractedLink as StoredLink } from '../../../../../shared/extract';
 import type { DB } from '../client';
 import * as t from '../schema';
-import { chunkByParamBudget, chunkInList } from './chunk';
+import type { ProjectScope } from '../../../../infrastructure/types';
+import { resolveReferenceTargets } from '../../../../shared/links';
+import { chunkByParamBudget, chunkInList } from '../../../../services/utils/chunk';
 
-export interface StoredLink {
-  targetType: LinkTargetType;
-  targetId: string;
-}
-
-const linkKey = (l: { targetType: string; targetId: string }) => `${l.targetType}:${l.targetId}`;
-
-/** Diff previous vs new references: added drives notifications, removed is a silent delete. */
-export function diffLinks(
-  previous: StoredLink[],
-  next: StoredLink[],
-): { added: StoredLink[]; removed: StoredLink[] } {
-  const prevMap = new Map(previous.map((l) => [linkKey(l), l]));
-  const nextMap = new Map(next.map((l) => [linkKey(l), l]));
-  const added = [...nextMap.entries()].filter(([k]) => !prevMap.has(k)).map(([, v]) => v);
-  const removed = [...prevMap.entries()].filter(([k]) => !nextMap.has(k)).map(([, v]) => v);
-  return { added, removed };
-}
-
-/**
- * Security rule: link rows are only ever written for targets in the caller's
- * workspace (PLAN.md section 6.1, I8). Mentions of missing/foreign targets are
- * dropped from the extraction before diffing; they never produce links or
- * notifications. Large IN (...) lists are chunked (D1: max 100 bound params).
- */
-export async function filterWorkspaceTargets(
+/** Scoped, live target IDs; reused by bulk validation and backlink resolution. */
+export function projectTargetQuery(
   db: DB,
-  workspaceId: string,
-  links: ExtractedLink[] | StoredLink[],
-): Promise<StoredLink[]> {
-  const byType: Record<'user' | 'notepad' | 'card' | 'board', string[]> = {
-    user: [],
-    notepad: [],
-    card: [],
-    board: [],
-  };
-  for (const link of links) byType[link.targetType].push(link.targetId);
-
-  const valid = new Set<string>();
-  const mark = (type: string, ids: string[]) => {
-    for (const id of ids) valid.add(`${type}:${id}`);
-  };
-
-  for (const chunk of chunkInList(byType.user, 1)) {
-    const rows = await db
-      .select({ userId: t.members.userId })
+  scope: ProjectScope,
+  type: StoredLink['targetType'],
+  ids: string[],
+) {
+  if (type === 'user') {
+    return db
+      .select({ id: t.members.userId })
       .from(t.members)
-      .where(and(eq(t.members.workspaceId, workspaceId), inArray(t.members.userId, chunk)));
-    mark(
-      'user',
-      rows.map((r) => r.userId),
-    );
+      .where(and(eq(t.members.workspaceId, scope.workspaceId), inArray(t.members.userId, ids)));
   }
-  for (const chunk of chunkInList(byType.notepad, 1)) {
-    const rows = await db
+  if (type === 'notepad') {
+    return db
       .select({ id: t.notepads.id })
       .from(t.notepads)
-      .where(and(eq(t.notepads.workspaceId, workspaceId), inArray(t.notepads.id, chunk)));
-    mark(
-      'notepad',
-      rows.map((r) => r.id),
-    );
+      .innerJoin(
+        t.projects,
+        and(
+          eq(t.projects.id, t.notepads.projectId),
+          eq(t.projects.workspaceId, t.notepads.workspaceId),
+        ),
+      )
+      .where(
+        and(
+          eq(t.notepads.workspaceId, scope.workspaceId),
+          eq(t.notepads.projectId, scope.projectId),
+          eq(t.notepads.kind, 'notepad'),
+          isNull(t.notepads.deletedAt),
+          inArray(t.notepads.id, ids),
+        ),
+      );
   }
-  for (const chunk of chunkInList(byType.card, 1)) {
-    const rows = await db
+  if (type === 'card') {
+    return db
       .select({ id: t.cards.id })
       .from(t.cards)
       .innerJoin(t.notepads, eq(t.notepads.id, t.cards.notepadId))
-      .where(and(eq(t.notepads.workspaceId, workspaceId), inArray(t.cards.id, chunk)));
-    mark(
-      'card',
-      rows.map((r) => r.id),
-    );
+      .innerJoin(
+        t.boards,
+        and(
+          eq(t.boards.id, t.cards.boardId),
+          eq(t.boards.workspaceId, t.notepads.workspaceId),
+          eq(t.boards.projectId, t.notepads.projectId),
+        ),
+      )
+      .innerJoin(
+        t.projects,
+        and(
+          eq(t.projects.id, t.boards.projectId),
+          eq(t.projects.workspaceId, t.boards.workspaceId),
+        ),
+      )
+      .innerJoin(
+        t.boardColumns,
+        and(eq(t.boardColumns.id, t.cards.columnId), eq(t.boardColumns.boardId, t.boards.id)),
+      )
+      .where(
+        and(
+          eq(t.notepads.workspaceId, scope.workspaceId),
+          eq(t.notepads.projectId, scope.projectId),
+          eq(t.notepads.kind, 'card'),
+          isNull(t.notepads.deletedAt),
+          isNull(t.boards.deletedAt),
+          inArray(t.cards.id, ids),
+        ),
+      );
   }
-  for (const chunk of chunkInList(byType.board, 1)) {
-    const rows = await db
-      .select({ id: t.boards.id })
-      .from(t.boards)
-      .where(and(eq(t.boards.workspaceId, workspaceId), inArray(t.boards.id, chunk)));
-    mark(
-      'board',
-      rows.map((r) => r.id),
+  return db
+    .select({ id: t.boards.id })
+    .from(t.boards)
+    .innerJoin(
+      t.projects,
+      and(eq(t.projects.id, t.boards.projectId), eq(t.projects.workspaceId, t.boards.workspaceId)),
+    )
+    .where(
+      and(
+        eq(t.boards.workspaceId, scope.workspaceId),
+        eq(t.boards.projectId, scope.projectId),
+        isNull(t.boards.deletedAt),
+        inArray(t.boards.id, ids),
+      ),
     );
-  }
+}
 
-  return links.filter((l) => valid.has(linkKey(l)));
+/** Content targets are live/project-local; user mentions remain workspace-local. */
+export async function filterProjectTargets(
+  db: DB,
+  scope: ProjectScope,
+  links: StoredLink[],
+): Promise<StoredLink[]> {
+  return resolveReferenceTargets(links, async (type, ids) => {
+    const valid: string[] = [];
+    for (const chunk of chunkInList(ids, type === 'user' ? 1 : type === 'board' ? 2 : 3)) {
+      valid.push(...(await projectTargetQuery(db, scope, type, chunk)).map(({ id }) => id));
+    }
+    return valid;
+  });
 }
 
 /** Remove `removed` links for `sourceId`, but only if `cond` holds (4 params). */

@@ -29,11 +29,14 @@ export interface StorageObject {
  *   - delete(key): Deletes the object at `key`. Must be idempotent: succeeds even if `key` does not exist. Validates `key`.
  *   - deletePrefix(prefix): Deletes all objects matching the prefix. `prefix` must be a non-empty, non-root string
  *     without traversal ('..') or null bytes. Throws Error('Invalid storage prefix') if prefix is empty or invalid.
+ *   - listObjects(): Returns all stored keys in deterministic order without modifying storage.
  */
 export interface IStorageAdapter {
   put(key: string, data: ArrayBuffer | Uint8Array, contentType?: string): Promise<void>;
   get(key: string): Promise<StorageObject | null>;
   delete(key: string): Promise<void>;
   deletePrefix(prefix: string): Promise<void>;
+  /** Lists every object key in deterministic order; intended for read-only maintenance inventory. */
+  listObjects(): Promise<string[]>;
 }
 

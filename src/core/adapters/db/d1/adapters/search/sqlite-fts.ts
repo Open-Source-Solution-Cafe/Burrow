@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { DB } from '../../client';
 import { ftsDeleteAllStmt, ftsInsertNowStmt } from '../../lib/search';
-import type { ISearchAdapter, SearchHit, SearchIndexDoc, SearchQuery } from './types';
+import type { ISearchAdapter, SearchHit, SearchIndexDoc, SearchQuery } from '../../../../search';
 
 export class SqliteFtsSearchAdapter implements ISearchAdapter {
   constructor(private db: DB) {}

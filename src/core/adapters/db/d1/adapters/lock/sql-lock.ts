@@ -1,7 +1,7 @@
 import { and, eq, gt, lte, or } from 'drizzle-orm';
 import type { DB } from '../../client';
 import * as t from '../../schema';
-import type { ILockAdapter, LockAcquireResult } from './types';
+import type { ILockAdapter, LockAcquireResult } from '../../../../lock';
 
 export interface LockAcquireOptions {
   takeover?: boolean;
@@ -12,10 +12,7 @@ export interface LockReleaseOptions {
 }
 
 export class SqlLockAdapter implements ILockAdapter {
-  constructor(
-    private readonly db: DB,
-    private readonly resolveHolderName?: (userId: string) => Promise<string | null>,
-  ) {}
+  constructor(private readonly db: DB) {}
 
   async acquire(
     resourceId: string,
@@ -72,16 +69,9 @@ export class SqlLockAdapter implements ILockAdapter {
       }
     }
 
-    let holderName: string | undefined;
-    if (this.resolveHolderName && existing) {
-      const name = await this.resolveHolderName(existing.userId);
-      if (name) holderName = name;
-    }
-
     return {
       acquired: false,
       holderUserId: existing?.userId,
-      holderName,
       expiresAt: existing?.expiresAt,
     };
   }

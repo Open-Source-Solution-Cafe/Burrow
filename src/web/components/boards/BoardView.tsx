@@ -19,8 +19,10 @@ import { SegmentedControl } from '../ui/SegmentedControl';
 import { Select } from '../ui/Select';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import type { ColumnItem } from './views/types';
+import { projectTarget } from '../../lib/workspaceRoutes';
 
 interface BoardViewProps {
+  workspaceId: string;
   boardId: string;
   projectId: string;
 }
@@ -45,9 +47,9 @@ const VIEW_TABS: Array<{ mode: BoardViewMode; label: string; icon: typeof Kanban
   { mode: 'calendar', label: 'Calendar', icon: CalendarDays },
 ];
 
-export function BoardView({ boardId, projectId }: BoardViewProps) {
+export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
   const navigate = useNavigate();
-  const { data: board, isLoading } = useBoard(boardId);
+  const { data: board, isLoading } = useBoard(workspaceId, projectId, boardId);
   const updateBoardMutation = useUpdateBoard();
   const deleteBoardMutation = useDeleteBoard();
 
@@ -108,8 +110,8 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
     }
   };
 
-  const { data: members = [] } = useMembers();
-  const { data: tags = [] } = useProjectTags(projectId);
+  const { data: members = [] } = useMembers(workspaceId);
+  const { data: tags = [] } = useProjectTags(workspaceId, projectId);
 
   const columns = useMemo<ColumnItem[]>(() => board?.columns || [], [board?.columns]);
 
@@ -152,6 +154,8 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
   const handleBoardNameSave = () => {
     if (boardName.trim() && boardName !== board.name) {
       updateBoardMutation.mutate({
+        workspaceId,
+        projectId,
         boardId,
         name: boardName.trim(),
       });
@@ -160,9 +164,13 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
   };
 
   const handleDeleteBoard = async () => {
-    await deleteBoardMutation.mutateAsync(boardId);
-    setConfirmDeleteOpen(false);
-    navigate({ to: '/p/$projectId', params: { projectId } });
+    try {
+      await deleteBoardMutation.mutateAsync({ workspaceId, projectId, boardId });
+      setConfirmDeleteOpen(false);
+      navigate(projectTarget(workspaceId, projectId));
+    } catch {
+      // The mutation surfaces the failure via a toast and leaves the dialog open.
+    }
   };
 
   return (
@@ -330,6 +338,7 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
       {/* Active View */}
       {viewMode === 'kanban' ? (
         <KanbanView
+          workspaceId={workspaceId}
           boardId={boardId}
           projectId={projectId}
           columns={columns}
@@ -339,9 +348,11 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
           onCardClick={(id) => openCard(id)}
         />
       ) : viewMode === 'list' ? (
-        <ListView boardId={boardId} columns={filteredColumns} onCardClick={(id) => openCard(id)} />
+        <ListView workspaceId={workspaceId} projectId={projectId} boardId={boardId} columns={filteredColumns} onCardClick={(id) => openCard(id)} />
       ) : (
         <CalendarView
+          workspaceId={workspaceId}
+          projectId={projectId}
           boardId={boardId}
           columns={filteredColumns}
           onCardClick={(id) => openCard(id)}
@@ -352,6 +363,7 @@ export function BoardView({ boardId, projectId }: BoardViewProps) {
       {selectedCardId && (
         <CardPanel
           cardId={selectedCardId}
+          workspaceId={workspaceId}
           boardId={boardId}
           projectId={projectId}
           columns={columns.map((c) => ({ id: c.id, name: c.name }))}

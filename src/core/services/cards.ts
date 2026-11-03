@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import type {
   ICardRepository,
+  CardPlan,
   INotepadRepository,
   ITagRepository,
   IBoardRepository,
@@ -8,6 +9,7 @@ import type {
   MyTasksFilters,
   MyTaskItem,
   CardSummary,
+  ProjectScope,
   CardSubtask,
   CreateSubtaskData,
   UpdateSubtaskData,
@@ -15,12 +17,13 @@ import type {
   CardWithDetails,
   INotificationRepository,
 } from '../infrastructure/types';
-import { notFound, badRequest } from './errors';
+import { notFound, badRequest, conflict, forbidden, rethrowAmbiguousDeleteGroup } from './errors';
 import { positionAfterLast, positionBetween } from './utils/ordering';
-import { extractPlainText } from '../shared/extract';
+import { extractPlainText } from '../../shared/extract';
 
 export interface CreateCardInput {
   workspaceId: string;
+  projectId: string;
   actorId: string;
   boardId: string;
   columnId: string;
@@ -38,25 +41,7 @@ export interface CreatedCard {
   linkedNotepadId: string | null;
 }
 
-export interface CardPlan {
-  workspaceId: string;
-  projectId: string;
-  boardId: string;
-  columnId: string;
-  actorId: string;
-  cardId: string;
-  notepadId: string;
-  title: string;
-  content: string;
-  plainText: string;
-  priority: CardPriority | null;
-  dueDate: number | null;
-  assigneeIds: string[];
-  tagIds: string[];
-  cardPosition: string;
-  linkedNotepad: { id: string; position: string; title: string; mode?: 'existing' | 'new' } | null;
-  now: number;
-}
+export type { CardPlan } from '../infrastructure/types';
 
 export class CardService {
   constructor(
@@ -66,16 +51,16 @@ export class CardService {
       tags: ITagRepository;
       boards: IBoardRepository;
       notifications: INotificationRepository;
-      boardColumns?: { findById: (id: string) => Promise<any> };
     },
   ) {}
 
   async createCard(input: CreateCardInput): Promise<CreatedCard> {
-    const board = await this.repos.boards.findById(input.boardId);
-    if (!board || board.workspaceId !== input.workspaceId || board.deletedAt !== null) {
+    const scope = { workspaceId: input.workspaceId, projectId: input.projectId };
+    const board = await this.repos.boards.findByIdInScope(scope, input.boardId);
+    if (!board || board.deletedAt !== null) {
       throw notFound('not_found', 'Board not found');
     }
-    const column = await this.repos.boards.findColumnById(input.columnId);
+    const column = await this.repos.boards.findColumnByIdInScope(scope, input.columnId);
     if (!column || column.boardId !== board.id) {
       throw notFound('not_found', 'Column not found');
     }
@@ -90,7 +75,7 @@ export class CardService {
 
     const tagIds = [...new Set(input.tagIds ?? [])];
     if (tagIds.length > 0) {
-      const tags = await this.validateTags(board.projectId, tagIds);
+      const tags = await this.validateTags(scope, tagIds);
       if (tags.length !== tagIds.length) {
         throw badRequest('invalid_tags', 'Tags must belong to this project');
       }
@@ -99,7 +84,7 @@ export class CardService {
     let linkedNotepad: CardPlan['linkedNotepad'] = null;
     let content = '[]';
     if (input.notepad?.mode === 'existing') {
-      const linked = await this.repos.notepads.findById(input.notepad.id);
+      const linked = await this.repos.notepads.findByIdInScope(scope, input.notepad.id);
       if (
         !linked ||
         linked.projectId !== board.projectId ||
@@ -119,7 +104,10 @@ export class CardService {
     } else if (input.notepad?.mode === 'new') {
       linkedNotepad = {
         id: nanoid(),
-        position: await this.repos.notepads.getLastRootNotepadPosition(board.projectId),
+        position: await this.repos.notepads.getLastRootNotepadPosition({
+          workspaceId: board.workspaceId,
+          projectId: board.projectId,
+        }),
         title: input.title.trim() || 'Untitled',
         mode: 'new',
       };
@@ -142,13 +130,20 @@ export class CardService {
       dueDate: input.dueDate ?? null,
       assigneeIds,
       tagIds,
-      cardPosition: await this.lastCardPosition(column.id),
+      assignmentNotifications: assigneeIds
+        .filter((userId) => userId !== input.actorId)
+        .map((userId) => ({ id: nanoid(), userId })),
+      cardPosition: await this.lastCardPosition(column.id, {
+        workspaceId: input.workspaceId,
+        projectId: board.projectId,
+      }),
       linkedNotepad,
       now: Date.now(),
     };
 
-    // Execute creation statements atomically (repository should handle batching)
-    await this.executeCardCreation(plan);
+    if (!(await this.repos.cards.createFromPlan(plan))) {
+      throw forbidden('forbidden', 'Editor access changed while creating the card');
+    }
 
     return {
       cardId: plan.cardId,
@@ -157,117 +152,39 @@ export class CardService {
     };
   }
 
-  /** The exact statements createCard runs. Exported for the atomicity spike. */
-  async executeCardCreation(plan: CardPlan): Promise<void> {
-    // This should be a single atomic batch in the repository
-    // For now, we call individual methods - the repository impl should batch them
-
-    if (plan.linkedNotepad && plan.linkedNotepad.mode === 'new') {
-      await this.repos.notepads.create({
-        id: plan.linkedNotepad.id,
-        workspaceId: plan.workspaceId,
-        projectId: plan.projectId,
-        parentId: null,
-        kind: 'notepad',
-        title: plan.linkedNotepad.title,
-        content: '[]',
-        version: 1,
-        position: plan.linkedNotepad.position,
-        isFavorite: false,
-        createdBy: plan.actorId,
-        createdAt: plan.now,
-        updatedAt: plan.now,
-      });
-      await this.repos.notepads.insertFts(plan.linkedNotepad.id, plan.linkedNotepad.title, '');
-    }
-
-    await this.repos.notepads.create({
-      id: plan.notepadId,
-      workspaceId: plan.workspaceId,
-      projectId: plan.projectId,
-      parentId: null, // I2: card notepads are never in the tree
-      kind: 'card',
-      title: plan.title,
-      content: plan.content,
-      version: 1,
-      position: 'a0',
-      isFavorite: false,
-      createdBy: plan.actorId,
-      createdAt: plan.now,
-      updatedAt: plan.now,
-    });
-    await this.repos.notepads.insertFts(plan.notepadId, plan.title, plan.plainText);
-
-    if (plan.linkedNotepad) {
-      await this.repos.notepads.replaceLinks(
-        plan.notepadId,
-        [{ targetType: 'notepad', targetId: plan.linkedNotepad.id }],
-        [],
-        1,
-        plan.content,
-      );
-    }
-
-    await this.repos.cards.create({
-      id: plan.cardId,
-      boardId: plan.boardId,
-      columnId: plan.columnId,
-      notepadId: plan.notepadId,
-      position: plan.cardPosition,
-      priority: plan.priority,
-      dueDate: plan.dueDate,
-      createdAt: plan.now,
-    });
-
-    if (plan.assigneeIds.length > 0) {
-      await this.repos.cards.setAssignees(plan.cardId, plan.assigneeIds);
-    }
-
-    if (plan.tagIds.length > 0) {
-      await this.repos.cards.setTagIds(plan.notepadId, plan.tagIds);
-    }
-
-    if (plan.assigneeIds.length > 0 && plan.actorId) {
-      const newlyAdded = plan.assigneeIds.filter((id) => id !== plan.actorId);
-      if (newlyAdded.length > 0) {
-        await this.repos.notifications.createAssignments({
-          workspaceId: plan.workspaceId,
-          notepadId: plan.notepadId,
-          cardId: plan.cardId,
-          actorId: plan.actorId,
-          userIds: newlyAdded,
-          now: plan.now,
-        });
-      }
-    }
-  }
-
-  async getCard(workspaceId: string, cardId: string): Promise<CardWithDetails> {
-    const card = await this.repos.cards.getCardWithDetails(cardId, workspaceId);
+  async getCard(scope: ProjectScope, cardId: string): Promise<CardWithDetails> {
+    const scopedCard = await this.repos.cards.findByIdInScope(scope, cardId);
+    if (!scopedCard || scopedCard.deletedAt !== null) throw notFound('not_found', 'Card not found');
+    const card = await this.repos.cards.getCardWithDetails(scope, cardId);
     if (!card) throw notFound('not_found', 'Card not found');
     return card;
   }
 
   async moveCard(
-    workspaceId: string,
+    scope: ProjectScope,
+    actorId: string,
     cardId: string,
     columnId: string,
     afterId?: string | null,
   ): Promise<{ columnId: string; position: string }> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+    const { workspaceId } = scope;
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card) throw notFound('not_found', 'Card not found');
     if (card.deletedAt !== null && card.deletedAt !== undefined) {
       throw badRequest('card_deleted', 'Cannot modify a deleted card');
     }
 
-    const column = await this.repos.boards.findColumnById(columnId);
+    const column = await this.repos.boards.findColumnByIdInScope(scope, columnId);
     if (!column || column.boardId !== card.boardId) {
       throw notFound('not_found', 'Destination column not found on this board');
     }
 
     // Get cards in destination column for positioning
     // This requires a repository method to list cards by column
-    const columnCards = await this.repos.cards.listByColumn(columnId);
+    const columnCards = await this.repos.cards.listByColumn(
+      { workspaceId, projectId: card.projectId },
+      columnId,
+    );
     const others = columnCards.filter((c) => c.id !== cardId);
 
     let newPosition: string;
@@ -282,12 +199,16 @@ export class CardService {
       newPosition = positionBetween(prev, next);
     }
 
-    await this.repos.cards.move(cardId, columnId, newPosition);
+    if (!(await this.repos.cards.moveGuarded(cardId, columnId, newPosition, {
+      workspaceId,
+      actorUserId: actorId,
+      minimumRole: 'editor',
+    }))) throw forbidden('forbidden', 'Editor access changed while moving the card');
     return { columnId, position: newPosition };
   }
 
   async updateCard(
-    workspaceId: string,
+    scope: ProjectScope,
     cardId: string,
     updates: {
       title?: string;
@@ -296,9 +217,10 @@ export class CardService {
       assigneeIds?: string[];
       tagIds?: string[];
     },
-    actorId?: string,
+    actorId: string,
   ): Promise<{ ok: true; cardId: string }> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+    const { workspaceId } = scope;
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card) throw notFound('not_found', 'Card not found');
     if (card.deletedAt !== null && card.deletedAt !== undefined) {
       throw badRequest('card_deleted', 'Cannot modify a deleted card');
@@ -316,35 +238,19 @@ export class CardService {
         }
       }
 
-      // Detect newly added assignees for notifications (excluding actor)
-      const existingAssignees = await this.repos.cards.listAssignees(cardId);
-      const existingSet = new Set(existingAssignees.map((a) => a.userId));
-      const newlyAdded = cleanAssignees.filter((uid) => !existingSet.has(uid) && uid !== actorId);
-
-      await this.repos.cards.setAssignees(cardId, cleanAssignees);
-
-      if (actorId && newlyAdded.length > 0) {
-        await this.repos.notifications.createAssignments({
-          workspaceId,
-          notepadId: card.notepadId,
-          cardId: card.id,
-          actorId,
-          userIds: newlyAdded,
-          now,
-        });
-      }
+      updates.assigneeIds = cleanAssignees;
     }
 
     // Tags validation & update
     if (updates.tagIds !== undefined) {
       const cleanTags = [...new Set(updates.tagIds)];
       if (cleanTags.length > 0) {
-        const tags = await this.validateTags(card.projectId, cleanTags);
+        const tags = await this.validateTags(scope, cleanTags);
         if (tags.length !== cleanTags.length) {
           throw badRequest('invalid_tags', 'Tags must belong to this project');
         }
       }
-      await this.repos.cards.setTagIds(card.notepadId, cleanTags);
+      updates.tagIds = cleanTags;
     }
 
     // Priority and Due Date
@@ -352,81 +258,91 @@ export class CardService {
     if (updates.priority !== undefined) cardUpdates.priority = updates.priority ?? null;
     if (updates.dueDate !== undefined) cardUpdates.dueDate = updates.dueDate ?? null;
 
-    if (Object.keys(cardUpdates).length > 0) {
-      await this.repos.cards.update(cardId, cardUpdates);
-    }
-
-    // Title update on notepad & FTS
-    if (updates.title !== undefined) {
-      const newTitle = updates.title.trim() || 'Untitled';
-      const notepad = await this.repos.notepads.findById(card.notepadId);
-      if (notepad) {
-        await this.repos.notepads.update(card.notepadId, { title: newTitle, updatedAt: now });
-        await this.repos.notepads.deleteFts(card.notepadId);
-        await this.repos.notepads.insertFts(
-          card.notepadId,
-          newTitle,
-          extractPlainText(notepad.content),
-        );
-      }
-    }
+    const newTitle = updates.title === undefined ? undefined : updates.title.trim() || 'Untitled';
+    const written = await this.repos.cards.updateGuarded({
+      cardId,
+      scope: { workspaceId, actorUserId: actorId, minimumRole: 'editor' },
+      data: cardUpdates,
+      assigneeIds: updates.assigneeIds,
+      tagIds: updates.tagIds,
+      title: newTitle === undefined ? undefined : {
+        value: newTitle,
+        plainText: extractPlainText(card.content ?? ''),
+      },
+      assignmentNotifications: (updates.assigneeIds ?? [])
+        .filter((userId) => userId !== actorId)
+        .map((userId) => ({ id: nanoid(), userId })),
+      now,
+    });
+    if (!written) throw forbidden('forbidden', 'Editor access changed while updating the card');
 
     return { ok: true, cardId };
   }
 
-  async deleteCard(workspaceId: string, cardId: string): Promise<{ ok: true; cardId: string }> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+  async deleteCard(scope: ProjectScope, actorId: string, cardId: string): Promise<{ ok: true; cardId: string }> {
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card || (card.deletedAt !== null && card.deletedAt !== undefined)) {
       throw notFound('not_found', 'Card not found');
     }
 
     const now = Date.now();
     // Invariant I5: Card and its notepad always have the same soft-delete state
-    await this.repos.notepads.softDelete(card.notepadId, now);
-    await this.repos.notepads.deleteFts(card.notepadId);
-    await this.repos.notepads.deleteLock(card.notepadId);
+    const deleted = await this.repos.notepads.softDelete(card.notepadId, now, {
+      workspaceId: scope.workspaceId, projectId: scope.projectId, actorUserId: actorId, minimumRole: 'editor',
+    });
+    if (!deleted) throw forbidden('forbidden', 'Editor access changed while deleting the card');
 
     return { ok: true, cardId };
   }
 
-  async restoreCard(workspaceId: string, cardId: string): Promise<{ ok: true; cardId: string }> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+  async restoreCard(scope: ProjectScope, actorId: string, cardId: string): Promise<{ ok: true; cardId: string }> {
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card) throw notFound('not_found', 'Deleted card not found');
 
-    const notepad = await this.repos.notepads.findById(card.notepadId);
+    const notepad = await this.repos.notepads.findByIdInScope(scope, card.notepadId);
     if (!notepad || notepad.deletedAt === null) {
       throw notFound('not_found', 'Deleted card not found');
     }
 
-    const plainText = extractPlainText(notepad.content);
-
-    await this.repos.notepads.restore(card.notepadId, notepad.deletedAt);
-    await this.repos.notepads.insertFts(card.notepadId, notepad.title, plainText);
+    try {
+      const restored = await this.repos.notepads.restore(card.notepadId, notepad.deletedAt, {
+        workspaceId: scope.workspaceId, projectId: scope.projectId, actorUserId: actorId, minimumRole: 'editor',
+      });
+      if (!restored?.some((item) => item.id === card.notepadId)) {
+        throw conflict('deletion_changed', 'This card changed while it was being restored');
+      }
+    } catch (error) {
+      rethrowAmbiguousDeleteGroup(error);
+    }
 
     return { ok: true, cardId };
   }
 
   async permanentDeleteCard(
-    workspaceId: string,
+    scope: ProjectScope,
+    actorId: string,
     cardId: string,
   ): Promise<{ ok: true; cardId: string }> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card) throw notFound('not_found', 'Deleted card not found in trash');
 
-    const notepad = await this.repos.notepads.findById(card.notepadId);
+    const notepad = await this.repos.notepads.findByIdInScope(scope, card.notepadId);
     if (!notepad || notepad.deletedAt === null) {
       throw notFound('not_found', 'Deleted card not found in trash');
     }
 
-    await this.repos.notepads.hardDelete(card.notepadId);
+    const removed = await this.repos.notepads.hardDelete(card.notepadId, {
+      workspaceId: scope.workspaceId, projectId: scope.projectId, actorUserId: actorId, minimumRole: 'owner',
+    });
+    if (!removed) throw forbidden('forbidden', 'Owner access changed while deleting the card');
 
     return { ok: true, cardId };
   }
 
-  async getCardsSummary(workspaceId: string, cardIds: string[]): Promise<CardSummary[]> {
+  async getCardsSummary(scope: ProjectScope, cardIds: string[]): Promise<CardSummary[]> {
     if (cardIds.length === 0) return [];
     const cappedIds = cardIds.slice(0, 500);
-    return this.repos.cards.getCardsSummary(workspaceId, cappedIds);
+    return this.repos.cards.getCardsSummary(scope, cappedIds);
   }
 
   async getMyTasks(
@@ -440,15 +356,16 @@ export class CardService {
   // ---------------------------------------------------------------------------
   // Subtasks
   // ---------------------------------------------------------------------------
-  async listSubtasks(cardId: string): Promise<CardSubtask[]> {
-    return this.repos.cards.listSubtasks(cardId);
+  async listSubtasks(scope: ProjectScope, cardId: string): Promise<CardSubtask[]> {
+    await this.requireCardInScope(scope, cardId);
+    return this.repos.cards.listSubtasks(scope, cardId);
   }
 
-  async createSubtask(workspaceId: string, cardId: string, title: string): Promise<CardSubtask> {
-    await this.requireCardForWorkspace(workspaceId, cardId);
+  async createSubtask(scope: ProjectScope, actorId: string, cardId: string, title: string): Promise<CardSubtask> {
+    await this.requireCardInScope(scope, cardId);
 
     const [last] = await this.repos.cards
-      .listSubtasks(cardId)
+      .listSubtasks(scope, cardId)
       .then((s) => [s[s.length - 1]])
       .catch(() => [null as any]);
     const row: CreateSubtaskData = {
@@ -459,19 +376,26 @@ export class CardService {
       position: positionAfterLast(last?.position ?? null),
       createdAt: Date.now(),
     };
-    await this.repos.cards.createSubtask(row);
-    return row;
+    const created = await this.repos.cards.createSubtaskGuarded(row, {
+      workspaceId: scope.workspaceId, actorUserId: actorId, minimumRole: 'editor',
+    });
+    if (!created) throw forbidden('forbidden', 'Editor access changed while creating the subtask');
+    return created;
   }
 
   async updateSubtask(
-    workspaceId: string,
+    scope: ProjectScope,
+    actorId: string,
     cardId: string,
     subtaskId: string,
     updates: { title?: string; completed?: boolean; afterId?: string | null },
   ): Promise<{ ok: true; subtaskId: string }> {
-    await this.requireCardForWorkspace(workspaceId, cardId);
+    await this.requireCardInScope(scope, cardId);
 
-    const subtasks = await this.repos.cards.listSubtasks(cardId);
+    const subtasks = await this.repos.cards.listSubtasks(
+      scope,
+      cardId,
+    );
     const subtask = subtasks.find((s) => s.id === subtaskId);
     if (!subtask) throw notFound('not_found', 'Subtask not found');
 
@@ -493,29 +417,38 @@ export class CardService {
     }
 
     if (Object.keys(patch).length > 0) {
-      await this.repos.cards.updateSubtask(subtaskId, patch);
+      if (!(await this.repos.cards.updateSubtaskGuarded(subtaskId, cardId, patch, {
+        workspaceId: scope.workspaceId, actorUserId: actorId, minimumRole: 'editor',
+      }))) throw forbidden('forbidden', 'Editor access changed while updating the subtask');
     }
     return { ok: true, subtaskId };
   }
 
   async deleteSubtask(
-    workspaceId: string,
+    scope: ProjectScope,
+    actorId: string,
     cardId: string,
     subtaskId: string,
   ): Promise<{ ok: true; subtaskId: string }> {
-    await this.requireCardForWorkspace(workspaceId, cardId);
-    const subtasks = await this.repos.cards.listSubtasks(cardId);
+    await this.requireCardInScope(scope, cardId);
+    const subtasks = await this.repos.cards.listSubtasks(
+      scope,
+      cardId,
+    );
     if (!subtasks.find((s) => s.id === subtaskId)) throw notFound('not_found', 'Subtask not found');
 
-    await this.repos.cards.deleteSubtask(subtaskId);
+    if (!(await this.repos.cards.deleteSubtaskGuarded(subtaskId, cardId, {
+      workspaceId: scope.workspaceId, actorUserId: actorId, minimumRole: 'editor',
+    }))) throw forbidden('forbidden', 'Editor access changed while deleting the subtask');
     return { ok: true, subtaskId };
   }
 
-  private async requireCardForWorkspace(workspaceId: string, cardId: string): Promise<void> {
-    const card = await this.repos.cards.findByIdAndWorkspace(cardId, workspaceId);
+  private async requireCardInScope(scope: ProjectScope, cardId: string) {
+    const card = await this.repos.cards.findByIdInScope(scope, cardId);
     if (!card || (card.deletedAt !== null && card.deletedAt !== undefined)) {
       throw notFound('not_found', 'Card not found');
     }
+    return card;
   }
 
   private async validateAssignees(
@@ -527,12 +460,12 @@ export class CardService {
     return this.repos.cards.validateAssignees(workspaceId, userIds);
   }
 
-  private async validateTags(projectId: string, tagIds: string[]): Promise<{ id: string }[]> {
-    return this.repos.tags.validateByProject(projectId, tagIds);
+  private async validateTags(scope: ProjectScope, tagIds: string[]): Promise<{ id: string }[]> {
+    return this.repos.tags.validateByProject(scope, tagIds);
   }
 
-  private async lastCardPosition(columnId: string): Promise<string> {
-    const cards = await this.repos.cards.listByColumn(columnId);
+  private async lastCardPosition(columnId: string, scope: ProjectScope): Promise<string> {
+    const cards = await this.repos.cards.listByColumn(scope, columnId);
     return positionAfterLast(cards[cards.length - 1]?.position ?? null);
   }
 }

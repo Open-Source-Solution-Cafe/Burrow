@@ -1,59 +1,38 @@
 #!/usr/bin/env node
 import path from 'node:path';
-import {
-  bin,
-  getWranglerConfigArgs,
-  isRemoteTarget,
-  parseFirstJson,
-  printTargetBanner,
-  root,
-  run,
-} from './lib.mjs';
+import { loadEnv } from '../src/server/env.ts';
+import { executeDatabaseFile, getDatabaseTarget, printTargetBanner, root } from './lib.mjs';
 
 /**
- * Run scripts/check-invariants.sql (one query per invariant I1..I10) against D1.
+ * Run the canonical invariant queries against the selected database.
  *
  * Targets:
- *   (default)              Local Miniflare D1 database
+ *   (default)              Local Node SQLite database
+ *   --worker               Local Worker/D1 persisted under ./data
  *   --remote, --r, -r      Remote Cloudflare D1 database
  */
-const isRemote = isRemoteTarget();
-printTargetBanner('Check Data Invariants', isRemote);
-
-const sqlFile = path.join(root, 'scripts', 'check-invariants.sql');
-const configArgs = isRemote
-  ? getWranglerConfigArgs({ required: true, purpose: 'remote data check' })
-  : [];
-
-const res = run(
-  bin('wrangler'),
-  [
-    ...configArgs,
-    'd1',
-    'execute',
-    'burrow',
-    isRemote ? '--remote' : '--local',
-    '--file',
-    sqlFile,
-    '--json',
-  ],
-  { capture: true, allowFail: true, quiet: true },
-);
-
-if (res.status !== 0) {
-  console.error(res.stderr || res.stdout);
-  console.error('check:data failed to execute SQL');
-  process.exit(res.status);
+const postgresSelected = process.argv.slice(2).includes('--postgres');
+let target;
+if (postgresSelected) {
+  if (process.argv.slice(2).some((arg) => ['--remote', '--worker'].includes(arg))) {
+    throw new Error('Cannot combine --postgres with --remote or --worker');
+  }
+  loadEnv({ rootDir: root });
+  const url = process.env.DATABASE_URL;
+  if (!url || !/^postgres(ql)?:\/\//.test(url)) {
+    throw new Error('Set DATABASE_URL to a PostgreSQL connection URL before running --postgres');
+  }
+  target = { kind: 'postgres', url };
+} else {
+  target = getDatabaseTarget();
 }
+printTargetBanner('Check Data Invariants', target);
 
-const parsed = parseFirstJson(res.stdout);
-if (parsed === null) {
-  console.error('could not parse d1 execute output:');
-  console.error(res.stdout);
-  process.exit(1);
-}
-
-const resultSets = Array.isArray(parsed) ? parsed : [parsed];
+const invariantFile = target.kind === 'postgres'
+  ? 'check-invariants.postgres.sql'
+  : 'check-invariants.sql';
+const sqlFile = path.join(root, 'scripts', invariantFile);
+const resultSets = await executeDatabaseFile(target, sqlFile, { readOnly: true });
 const offenders = [];
 let queryIndex = 0;
 for (const rs of resultSets) {
@@ -68,6 +47,4 @@ if (offenders.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `check:data OK — all invariants hold (${queryIndex} queries, ${isRemote ? 'remote Cloudflare' : 'local Miniflare'})`,
-);
+console.log(`check:data OK — all invariants hold (${queryIndex} queries, ${target.kind})`);

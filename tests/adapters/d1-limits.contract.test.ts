@@ -4,7 +4,8 @@ import { createD1Db } from '../../src/core/adapters/db/d1/client';
 import { createBoardRepository } from '../../src/core/adapters/db/d1/repositories/board';
 import { createCardRepository } from '../../src/core/adapters/db/d1/repositories/card';
 import { createNotepadRepository } from '../../src/core/adapters/db/d1/repositories/notepad';
-import { getDescendantIds, getSubtreeHeight } from '../../src/core/adapters/db/d1/lib/tree';
+import { getDescendantIds } from '../../src/core/adapters/db/d1/lib/tree';
+import { getSubtreeHeight } from '../../src/core/shared/tree';
 import * as schema from '../../src/core/adapters/db/d1/schema';
 
 describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', () => {
@@ -30,6 +31,12 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
       name: 'limits-test-ws',
       createdBy: userId,
       createdAt: Date.now(),
+    });
+    await db.insert(schema.members).values({
+      workspaceId,
+      userId,
+      role: 'owner',
+      joinedAt: Date.now(),
     });
   });
 
@@ -75,7 +82,7 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
     const columnId = crypto.randomUUID();
     const now = Date.now();
 
-    await boardRepo.create({
+    await db.insert(schema.boards).values({
       id: boardId,
       workspaceId,
       projectId,
@@ -86,7 +93,7 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
       updatedAt: now,
     });
 
-    await boardRepo.createColumn({
+    await db.insert(schema.boardColumns).values({
       id: columnId,
       boardId,
       name: 'Column 1',
@@ -155,41 +162,44 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
     ]);
 
     // 1. LOOKUP: getBoardWithDetails (fetches cards, assignees, subtasks, tags with chunked inArray)
-    const boardWithDetails = await boardRepo.getBoardWithDetails(boardId, workspaceId);
+    const projectScope = { workspaceId, projectId };
+    const boardWithDetails = await boardRepo.getBoardWithDetails(projectScope, boardId);
     expect(boardWithDetails).not.toBeNull();
     expect(boardWithDetails?.columns[0]?.cards).toHaveLength(CARD_COUNT);
 
     // 1b. LOOKUP: getCardsSummary (exercises chunkInList on 160 IDs)
-    const summaries = await cardRepo.getCardsSummary(workspaceId, cardIds);
+    const summaries = await cardRepo.getCardsSummary({ workspaceId, projectId }, cardIds);
     expect(summaries).toHaveLength(CARD_COUNT);
 
     // 2. SOFT DELETE: soft-deletes board and all 160 cards without exceeding batch limit
     const deleteTimestamp = Date.now();
-    await boardRepo.softDelete(boardId, deleteTimestamp);
+    const scope = { workspaceId, actorUserId: userId, minimumRole: 'editor' as const };
+    await boardRepo.softDeleteGuarded(boardId, deleteTimestamp, scope);
 
-    const deletedBoard = await boardRepo.findById(boardId);
+    const deletedBoard = await boardRepo.findByIdInScope(projectScope, boardId);
     expect(deletedBoard?.deletedAt).toBe(deleteTimestamp);
 
-    const boardAfterSoftDelete = await boardRepo.getBoardWithDetails(boardId, workspaceId);
+    const boardAfterSoftDelete = await boardRepo.getBoardWithDetails(projectScope, boardId);
     expect(boardAfterSoftDelete).toBeNull();
 
     // 3. RESTORE: restores board, cards, and re-inserts 160 FTS rows split across batches
-    await boardRepo.restore(boardId);
+    await boardRepo.restoreGuarded(boardId, scope);
 
     // 3b. IDEMPOTENT RESTORE: re-running restore succeeds without error or duplicate index rows
-    await boardRepo.restore(boardId);
+    await boardRepo.restoreGuarded(boardId, scope);
 
-    const restoredBoard = await boardRepo.getBoardWithDetails(boardId, workspaceId);
+    const restoredBoard = await boardRepo.getBoardWithDetails(projectScope, boardId);
     expect(restoredBoard).not.toBeNull();
     expect(restoredBoard?.columns[0]?.cards).toHaveLength(CARD_COUNT);
 
     // 4. HARD DELETE: deletes board, columns, 160 cards, and notepads across batches
-    await boardRepo.hardDelete(boardId);
+    await boardRepo.softDeleteGuarded(boardId, Date.now() + 1, scope);
+    await boardRepo.hardDeleteGuarded(boardId, { ...scope, minimumRole: 'owner' });
 
-    const nonExistent = await boardRepo.findById(boardId);
+    const nonExistent = await boardRepo.findByIdInScope(projectScope, boardId);
     expect(nonExistent).toBeNull();
 
-    const nonExistentCards = await cardRepo.getCardsSummary(workspaceId, cardIds);
+    const nonExistentCards = await cardRepo.getCardsSummary({ workspaceId, projectId }, cardIds);
     expect(nonExistentCards).toHaveLength(0);
   });
 
@@ -218,7 +228,7 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
-    });
+    }, { workspaceId, projectId, actorUserId: userId, minimumRole: 'owner' });
 
     const DESCENDANT_COUNT = 160;
     const descendantIds: string[] = [];
@@ -246,7 +256,7 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
 
     await bulkInsertNotepads(db, rows);
 
-    // 1. LOOKUP: getDescendantIds & findById
+    // 1. LOOKUP: getDescendantIds & findByIdInScope
     const descendants = await getDescendantIds(db, rootId);
     expect(descendants).toHaveLength(DESCENDANT_COUNT);
     for (const dId of descendantIds) {
@@ -255,30 +265,32 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
 
     // 2. SOFT DELETE: soft-deletes root and 160 descendants (161 statements across batch limit)
     const deleteTimestamp = Date.now();
-    await notepadRepo.softDelete(rootId, deleteTimestamp);
+    const noteScope = { workspaceId, projectId, actorUserId: userId, minimumRole: 'owner' as const };
+    await notepadRepo.softDelete(rootId, deleteTimestamp, noteScope);
 
-    const trashedRoot = await notepadRepo.findById(rootId);
+    const readScope = { workspaceId, projectId };
+    const trashedRoot = await notepadRepo.findByIdInScope(readScope, rootId);
     expect(trashedRoot?.deletedAt).toBe(deleteTimestamp);
 
-    const trashedList = await notepadRepo.listDeletedByProject(projectId);
+    const trashedList = await notepadRepo.listDeletedByProject(readScope);
     expect(trashedList).toHaveLength(DESCENDANT_COUNT + 1);
 
     // 3. RESTORE: restores root and 160 descendants (re-indexes FTS across batch limit)
-    await notepadRepo.restore(rootId, deleteTimestamp);
+    await notepadRepo.restore(rootId, deleteTimestamp, noteScope);
 
     // 3b. IDEMPOTENT RESTORE: re-running restore succeeds without error or duplicate index rows
-    await notepadRepo.restore(rootId, deleteTimestamp);
+    await notepadRepo.restore(rootId, deleteTimestamp, noteScope);
 
-    const restoredRoot = await notepadRepo.findById(rootId);
+    const restoredRoot = await notepadRepo.findByIdInScope(readScope, rootId);
     expect(restoredRoot?.deletedAt).toBeNull();
 
-    const liveList = await notepadRepo.listByProject(projectId);
+    const liveList = await notepadRepo.listByProject(readScope);
     expect(liveList).toHaveLength(DESCENDANT_COUNT + 1);
 
     // 4. HARD DELETE: hard deletes root and 160 descendants across batch limit
-    await notepadRepo.hardDelete(rootId);
+    await notepadRepo.hardDelete(rootId, noteScope);
 
-    const deletedRoot = await notepadRepo.findById(rootId);
+    const deletedRoot = await notepadRepo.findByIdInScope(readScope, rootId);
     expect(deletedRoot).toBeNull();
 
     const descendantsAfterDelete = await getDescendantIds(db, rootId);
@@ -310,7 +322,7 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
-    });
+    }, { workspaceId, projectId, actorUserId: userId, minimumRole: 'owner' });
 
     const PARENT_COUNT = 160;
     const level1Ids: string[] = [];
@@ -368,28 +380,29 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
     expect(allDescendants).toHaveLength(PARENT_COUNT * 2);
 
     // b) getSubtreeHeight: traverses height with 160 currentParentIds chunked
-    const height = await getSubtreeHeight(db, rootId);
+    const scope = { workspaceId, projectId };
+    const height = await getSubtreeHeight((ids) => notepadRepo.getChildren(scope, ids), rootId);
     expect(height).toBe(3); // root -> level 1 -> level 2
 
     // c) getChildren: passing 160 parent IDs exercises chunkInList(parentIds, 1)
-    const level2Children = await notepadRepo.getChildren(level1Ids);
+    const level2Children = await notepadRepo.getChildren(scope, level1Ids);
     expect(level2Children).toHaveLength(PARENT_COUNT);
 
     // 2. SOFT DELETE: soft-deletes root, 160 level-1 parents, and 160 level-2 children (321 total)
     const deleteTimestamp = Date.now();
-    await notepadRepo.softDelete(rootId, deleteTimestamp);
+    const noteScope = { workspaceId, projectId, actorUserId: userId, minimumRole: 'owner' as const };
+    await notepadRepo.softDelete(rootId, deleteTimestamp, noteScope);
 
-    const trashedRoot = await notepadRepo.findById(rootId);
+    const trashedRoot = await notepadRepo.findByIdInScope(scope, rootId);
     expect(trashedRoot?.deletedAt).toBe(deleteTimestamp);
 
     // 3. HARD DELETE: hard deletes all 321 notepads across split batches
-    await notepadRepo.hardDelete(rootId);
+    await notepadRepo.hardDelete(rootId, noteScope);
 
-    const deletedRoot = await notepadRepo.findById(rootId);
+    const deletedRoot = await notepadRepo.findByIdInScope(scope, rootId);
     expect(deletedRoot).toBeNull();
 
     const descendantsAfterDelete = await getDescendantIds(db, rootId);
     expect(descendantsAfterDelete).toHaveLength(0);
   });
 });
-

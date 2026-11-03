@@ -1,4 +1,5 @@
 import { createMiddleware } from 'hono/factory';
+import type { Env } from '../app';
 import type { AuthProvider, IMemberRepository } from '../infrastructure/types';
 
 const ROLE_RANK = {
@@ -9,41 +10,49 @@ const ROLE_RANK = {
 
 type Role = keyof typeof ROLE_RANK;
 
-/**
- * Resolves session and member info, attaching userId, workspaceId, and role to context.
- * Uses the auth provider to get the user, then the member repository to resolve workspace/role.
- */
-export const createSessionMiddleware = (auth: AuthProvider, members: IMemberRepository) =>
-  createMiddleware(async (c, next) => {
+export function sessionUnavailable(err: unknown) {
+  console.error('Session retrieval error', err);
+  return { error: { code: 'session_unavailable', message: 'Unable to verify your session' } };
+}
+
+/** Resolve the account session without assuming it belongs to a workspace. */
+export const createIdentityMiddleware = (auth: AuthProvider) =>
+  createMiddleware<Env>(async (c, next) => {
     try {
-      const sessionRes = await auth.getSession(c.req.raw.headers);
-
-      if (sessionRes) {
-        // Get workspace and role from member repository
-        const member = await members.findByUserIdGlobal(sessionRes.userId);
-        if (member) {
-          c.set('userId', sessionRes.userId);
-          c.set('workspaceId', member.workspaceId);
-          c.set('role', member.role);
-        }
-      }
+      const identity = await auth.getSession(c.req.raw.headers);
+      if (identity) c.set('identity', identity);
     } catch (err) {
-      console.error('Session retrieval error', err);
+      return c.json(sessionUnavailable(err), 503);
     }
-
     await next();
   });
 
-/**
- * Requires an active session. Returns 401 otherwise.
- */
-export const requireSession = createMiddleware(async (c, next) => {
-  const userId = c.get('userId');
-  if (!userId) {
-    return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
-  }
-  await next();
-});
+/** Resolve the requested workspace directly from the signed-in account's current membership. */
+export const createExplicitWorkspaceMiddleware = (members: IMemberRepository) =>
+  createMiddleware<Env>(async (c, next) => {
+    c.header('Cache-Control', 'private, no-store');
+    const identity = c.get('identity');
+    const workspaceId = c.req.param('wid');
+    if (!identity) {
+      return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+    }
+    if (!workspaceId) {
+      return c.json({ error: { code: 'not_found', message: 'Workspace not found' } }, 404);
+    }
+    let member;
+    try {
+      member = await members.findByUserId(workspaceId, identity.userId);
+    } catch (err) {
+      return c.json(sessionUnavailable(err), 503);
+    }
+    if (!member) {
+      return c.json({ error: { code: 'not_found', message: 'Workspace not found' } }, 404);
+    }
+    c.set('userId', identity.userId);
+    c.set('workspaceId', workspaceId);
+    c.set('role', member.role);
+    await next();
+  });
 
 /**
  * Requires a minimum role level (viewer < editor < owner).

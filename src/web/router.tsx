@@ -1,20 +1,39 @@
-import { useEffect } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import {
   createRootRoute,
   createRoute,
   createRouter,
+  Link,
   Outlet,
   useNavigate,
   useParams,
 } from '@tanstack/react-router';
 import { AppShell } from './components/layout/AppShell';
+import { BoardView } from './components/boards/BoardView';
+import { NotepadEditor } from './editor/NotepadEditor';
+import { TrashView } from './pages/TrashView';
 import { Login } from './pages/Login';
 import { InviteAccept } from './pages/InviteAccept';
 import { ProjectHome } from './pages/ProjectHome';
+import { ProjectMediaLibrary } from './components/media/ProjectMediaLibrary';
 import { MembersSettings } from './pages/MembersSettings';
 import { MyTasksView } from './pages/MyTasksView';
 import { SettingsView } from './pages/SettingsView';
-import { useMe, useProjects } from './lib/queries';
+import {
+  accountProjectsQueryOptions,
+  useAccount,
+  useCreateWorkspace,
+  useProjects,
+} from './lib/queries';
+import {
+  boardTarget,
+  notepadTarget,
+  projectTarget,
+  trashTarget,
+  uniqueWorkspaceForProject,
+  workspaceTarget,
+} from './lib/workspaceRoutes';
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
@@ -38,143 +57,441 @@ const rootRoute = createRootRoute({
   ),
 });
 
-function IndexRedirect() {
+function AccountHome() {
   const navigate = useNavigate();
-  const { data: me, isLoading: meLoading } = useMe();
-  const { data: projects = [], isLoading: projectsLoading } = useProjects();
+  const { data: account, isLoading, isError, refetch } = useAccount();
+  const createWorkspace = useCreateWorkspace();
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (meLoading || projectsLoading) return;
-    if (!me) {
-      navigate({ to: '/login' });
+    if (isLoading || isError) return;
+    if (!account) {
+      void navigate({ to: '/login' });
+    } else if (account.workspaces.length === 1) {
+      void navigate(workspaceTarget(account.workspaces[0]!.id));
+    }
+  }, [account, isLoading, isError, navigate]);
+
+  if (isLoading || (account?.workspaces.length === 1 && !isError)) {
+    return <Status>Loading workspaces…</Status>;
+  }
+  if (isError) {
+    return (
+      <Status>
+        Could not load your workspaces.{' '}
+        <button className="underline" onClick={() => void refetch()}>
+          Try again
+        </button>
+      </Status>
+    );
+  }
+  if (!account) return <Status>Redirecting to sign in…</Status>;
+  if (account.workspaces.length === 0) {
+    const create = async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setCreateError(null);
+      try {
+        const result = await createWorkspace.mutateAsync({
+          name: workspaceName.trim(),
+          requestId: crypto.randomUUID(),
+        });
+        void navigate(workspaceTarget(result.workspace.id));
+      } catch (err) {
+        setCreateError(err instanceof Error ? err.message : 'Failed to create workspace');
+      }
+    };
+    return (
+      <form
+        onSubmit={create}
+        className="mx-auto flex h-full w-full max-w-lg flex-col justify-center gap-4 p-8"
+      >
+        <h1 className="text-2xl font-bold text-[var(--text)]">Create a workspace</h1>
+        <p className="text-sm text-muted">
+          Your account has no workspace yet. Create one to get started.
+        </p>
+        <label className="grid gap-1 text-xs font-medium text-text" htmlFor="first-workspace-name">
+          Workspace name
+          <input
+            id="first-workspace-name"
+            className="min-h-11 border border-line bg-surface px-3 text-sm"
+            value={workspaceName}
+            onChange={(event) => setWorkspaceName(event.target.value)}
+            maxLength={100}
+            required
+          />
+        </label>
+        {createError && (
+          <p className="text-xs text-danger" role="alert">
+            {createError}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={!workspaceName.trim() || createWorkspace.isPending}
+          className="min-h-11 bg-accent px-4 text-sm font-semibold text-accent-ink disabled:opacity-50"
+        >
+          {createWorkspace.isPending ? 'Creating…' : 'Create workspace'}
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-4 overflow-y-auto p-8">
+      <h1 className="text-2xl font-bold text-[var(--text)]">Choose a workspace</h1>
+      <div className="grid gap-2">
+        {account.workspaces.map((workspace) => (
+          <Link
+            key={workspace.id}
+            {...workspaceTarget(workspace.id)}
+            className="flex min-h-12 items-center justify-between border border-line bg-surface px-4 py-3 text-sm text-text hover:bg-hi"
+          >
+            <span>{workspace.name}</span>
+            <span className="text-xs text-muted capitalize">{workspace.role}</span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Status({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="flex h-full items-center justify-center p-8 text-center text-sm text-[var(--muted)]"
+      role="status"
+    >
+      {children}
+    </div>
+  );
+}
+
+function WorkspaceGate() {
+  const navigate = useNavigate();
+  const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
+  const { data: account, isLoading, isError } = useAccount();
+  const workspace = account?.workspaces.find((item) => item.id === workspaceId);
+
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (!account) void navigate({ to: '/login' });
+    else if (!workspace) void navigate({ to: '/' });
+  }, [account, isLoading, isError, workspace, navigate]);
+
+  if (isLoading || (account && !workspace)) return <Status>Loading workspace…</Status>;
+  if (isError) return <Status>Could not load this workspace.</Status>;
+  if (!workspace) return <Status>Workspace unavailable.</Status>;
+  return <Outlet />;
+}
+
+function WorkspaceIndex() {
+  const navigate = useNavigate();
+  const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
+  const { data: projects = [], isLoading, isError } = useProjects(workspaceId);
+
+  useEffect(() => {
+    if (!isLoading && !isError && projects.length > 0 && workspaceId) {
+      const lastProject = localStorage.getItem(`burrow-last-project:${workspaceId}`);
+      const project = projects.find((item) => item.id === lastProject) ?? projects[0]!;
+      void navigate(projectTarget(workspaceId, project.id));
+    }
+  }, [projects, workspaceId, isLoading, isError, navigate]);
+
+  if (isLoading) return <Status>Loading projects…</Status>;
+  if (isError) return <Status>Could not load projects for this workspace.</Status>;
+  if (projects.length > 0) return <Status>Opening project…</Status>;
+  return <Status>No active projects in this workspace. Create a project from the sidebar.</Status>;
+}
+
+function ProjectGate() {
+  const { workspaceId, projectId } = useParams({ strict: false }) as {
+    workspaceId?: string;
+    projectId?: string;
+  };
+  const { data: projects = [], isLoading, isError } = useProjects(workspaceId);
+  if (isLoading) return <Status>Loading project…</Status>;
+  if (isError) return <Status>Could not verify this project in the selected workspace.</Status>;
+  if (!projectId || !projects.some((project) => project.id === projectId)) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-[var(--muted)]">
+        <p>This project is unavailable in the selected workspace.</p>
+        {workspaceId && (
+          <Link {...workspaceTarget(workspaceId)} className="underline text-[var(--text)]">
+            Choose another project
+          </Link>
+        )}
+      </div>
+    );
+  }
+  return <Outlet />;
+}
+
+type LegacyTarget = 'home' | 'notepad' | 'board' | 'trash';
+
+function LegacyProjectRedirect({ target }: { target: LegacyTarget }) {
+  const navigate = useNavigate();
+  const { projectId, notepadId, boardId } = useParams({ strict: false }) as {
+    projectId?: string;
+    notepadId?: string;
+    boardId?: string;
+  };
+  const { data: account, isLoading: accountLoading, isError: accountError } = useAccount();
+  const workspaces = account?.workspaces ?? [];
+  const projectQueries = useQueries({
+    queries: workspaces.map((workspace) =>
+      accountProjectsQueryOptions(account!.user.id, workspace.id),
+    ),
+  });
+  const pending = projectQueries.some((query) => query.isLoading);
+  const failed = projectQueries.some((query) => query.isError);
+  const projectsByWorkspace = new Map(
+    workspaces.map((workspace, index) => [workspace.id, projectQueries[index]?.data ?? []]),
+  );
+  const resolvedWorkspace = projectId
+    ? uniqueWorkspaceForProject(projectId, workspaces, projectsByWorkspace)
+    : null;
+
+  useEffect(() => {
+    if (accountLoading || accountError || pending || failed) return;
+    if (!account) {
+      void navigate({ to: '/login' });
       return;
     }
+    if (!resolvedWorkspace || !projectId) return;
+    const routeTarget =
+      target === 'notepad' && notepadId
+        ? notepadTarget(resolvedWorkspace, projectId, notepadId)
+        : target === 'board' && boardId
+          ? boardTarget(resolvedWorkspace, projectId, boardId)
+          : target === 'trash'
+            ? trashTarget(resolvedWorkspace, projectId)
+            : projectTarget(resolvedWorkspace, projectId);
+    void navigate(routeTarget);
+  }, [
+    accountLoading,
+    accountError,
+    pending,
+    failed,
+    account,
+    resolvedWorkspace,
+    projectId,
+    notepadId,
+    boardId,
+    target,
+    navigate,
+  ]);
 
-    const savedProjectId = localStorage.getItem('burrow-last-project');
-    const activeProject =
-      projects.find((p) => p.id === savedProjectId) ||
-      (me.lastProjectId && projects.find((p) => p.id === me.lastProjectId)) ||
-      projects[0];
-
-    if (activeProject) {
-      navigate({ to: `/p/${activeProject.id}` });
-    }
-  }, [me, meLoading, projects, projectsLoading, navigate]);
-
-  return (
-    <div className="flex h-screen items-center justify-center p-8 text-sm text-[var(--muted)]">
-      Loading Burrow…
-    </div>
-  );
+  if (accountLoading || pending) return <Status>Resolving this project link…</Status>;
+  if (accountError) return <Status>Could not verify this project link.</Status>;
+  if (!account) return <Status>Redirecting to sign in…</Status>;
+  if (failed) return <Status>Could not verify this project link.</Status>;
+  if (!resolvedWorkspace) {
+    return <Status>This project link is unavailable or matches more than one workspace.</Status>;
+  }
+  return <Status>Opening project…</Status>;
 }
-
-import { NotepadEditor } from './editor/NotepadEditor';
 
 function NotepadView() {
-  const { notepadId } = useParams({ strict: false }) as { notepadId?: string };
-  if (!notepadId) return <div className="p-8 text-sm text-[var(--muted)]">Select a notepad</div>;
+  const { workspaceId, notepadId, projectId } = useParams({ strict: false }) as {
+    workspaceId?: string;
+    notepadId?: string;
+    projectId?: string;
+  };
+  if (!workspaceId || !notepadId || !projectId)
+    return <div className="p-8 text-sm text-[var(--muted)]">Select a notepad</div>;
   return (
     <div className="flex-1 overflow-y-auto w-full">
-      <NotepadEditor notepadId={notepadId} />
+      <NotepadEditor workspaceId={workspaceId} notepadId={notepadId} projectId={projectId} />
     </div>
   );
 }
 
-import { BoardView } from './components/boards/BoardView';
-
 function BoardWrapper() {
-  const { projectId, boardId } = useParams({ strict: false }) as {
+  const { workspaceId, projectId, boardId } = useParams({ strict: false }) as {
+    workspaceId?: string;
     projectId?: string;
     boardId?: string;
   };
-  if (!projectId || !boardId) {
+  if (!workspaceId || !projectId || !boardId) {
     return <div className="p-8 text-sm text-[var(--muted)]">Board not found</div>;
   }
-  return <BoardView boardId={boardId} projectId={projectId} />;
+  return <BoardView workspaceId={workspaceId} boardId={boardId} projectId={projectId} />;
 }
 
-// Routes without shell
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: Login,
 });
-
 const inviteRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/invite/$token',
   component: InviteAccept,
 });
 
-// Routes within app shell
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: 'shell',
   component: AppShell,
 });
 
-const indexRoute = createRoute({
+const homeRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/',
-  component: IndexRedirect,
+  component: AccountHome,
 });
 
-const projectHomeRoute = createRoute({
+const workspaceRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: '/p/$projectId',
+  path: '/w/$workspaceId',
+  component: WorkspaceGate,
+});
+const workspaceIndexRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/',
+  component: WorkspaceIndex,
+});
+const projectRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'p/$projectId',
+  component: ProjectGate,
+});
+const projectHomeRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/',
   component: ProjectHome,
 });
-
 const notepadRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/p/$projectId/notepads/$notepadId',
+  getParentRoute: () => projectRoute,
+  path: 'notepads/$notepadId',
   component: NotepadView,
 });
-
 const boardRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/p/$projectId/boards/$boardId',
+  getParentRoute: () => projectRoute,
+  path: 'boards/$boardId',
   component: BoardWrapper,
 });
-
-import { TrashView } from './pages/TrashView';
-
 const trashRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/p/$projectId/trash',
+  getParentRoute: () => projectRoute,
+  path: 'trash',
   component: TrashView,
 });
-
-const myTasksRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/my-tasks',
+const libraryRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'library',
+  component: () => {
+    const { workspaceId, projectId } = libraryRoute.useParams();
+    return (
+      <ProjectMediaLibrary
+        key={`${workspaceId}/${projectId}`}
+        workspaceId={workspaceId}
+        projectId={projectId}
+      />
+    );
+  },
+});
+const tasksRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'tasks',
   component: MyTasksView,
 });
-
 const settingsRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/settings',
+  getParentRoute: () => workspaceRoute,
+  path: 'settings',
   component: SettingsView,
 });
-
 const membersRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: '/settings/members',
+  getParentRoute: () => workspaceRoute,
+  path: 'settings/members',
   component: MembersSettings,
 });
+
+const legacyProjectRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/p/$projectId',
+  component: () => <LegacyProjectRedirect target="home" />,
+});
+const legacyNotepadRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/p/$projectId/notepads/$notepadId',
+  component: () => <LegacyProjectRedirect target="notepad" />,
+});
+const legacyBoardRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/p/$projectId/boards/$boardId',
+  component: () => <LegacyProjectRedirect target="board" />,
+});
+const legacyTrashRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/p/$projectId/trash',
+  component: () => <LegacyProjectRedirect target="trash" />,
+});
+const legacyTasksRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/my-tasks',
+  component: () => <LegacyWorkspaceRedirect target="tasks" />,
+});
+const legacySettingsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/settings',
+  component: () => <LegacyWorkspaceRedirect target="settings" />,
+});
+const legacyMembersRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/settings/members',
+  component: () => <LegacyWorkspaceRedirect target="members" />,
+});
+
+type LegacyWorkspaceTarget = 'tasks' | 'settings' | 'members';
+function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) {
+  const navigate = useNavigate();
+  const { data: account, isLoading, isError } = useAccount();
+  const workspaceId = account?.workspaces.length === 1 ? account.workspaces[0]!.id : null;
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (!account) {
+      void navigate({ to: '/login' });
+      return;
+    }
+    if (!workspaceId) return;
+    if (target === 'tasks') void navigate({ to: '/w/$workspaceId/tasks', params: { workspaceId } });
+    else if (target === 'members')
+      void navigate({ to: '/w/$workspaceId/settings/members', params: { workspaceId } });
+    else void navigate({ to: '/w/$workspaceId/settings', params: { workspaceId } });
+  }, [account, isLoading, isError, workspaceId, target, navigate]);
+  if (isLoading) return <Status>Resolving workspace link…</Status>;
+  if (isError) return <Status>Could not verify this workspace link.</Status>;
+  if (!account) return <Status>Redirecting to sign in…</Status>;
+  if (!workspaceId) return <Status>This link needs a unique workspace selection.</Status>;
+  return <Status>Opening workspace…</Status>;
+}
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
   shellRoute.addChildren([
-    indexRoute,
-    projectHomeRoute,
-    notepadRoute,
-    boardRoute,
-    myTasksRoute,
-    trashRoute,
-    settingsRoute,
-    membersRoute,
+    homeRoute,
+    workspaceRoute.addChildren([
+      workspaceIndexRoute,
+      projectRoute.addChildren([
+        projectHomeRoute,
+        notepadRoute,
+        boardRoute,
+        trashRoute,
+        libraryRoute,
+      ]),
+      tasksRoute,
+      settingsRoute,
+      membersRoute,
+    ]),
+    legacyProjectRoute,
+    legacyNotepadRoute,
+    legacyBoardRoute,
+    legacyTrashRoute,
+    legacyTasksRoute,
+    legacySettingsRoute,
+    legacyMembersRoute,
   ]),
 ]);
 

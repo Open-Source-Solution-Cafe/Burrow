@@ -10,27 +10,6 @@
       href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
-    <script>
-      // Blocking theme init — avoids FOUC. Reads localStorage['burrow-theme'].
-      (function () {
-        try {
-          var stored = localStorage.getItem('burrow-theme');
-          var theme =
-            stored === 'light' || stored === 'modern' || stored === 'basalt' ? stored : 'basalt';
-          if (theme === 'light') {
-            document.documentElement.classList.remove('dark');
-            document.documentElement.style.colorScheme = 'light';
-          } else {
-            document.documentElement.classList.add('dark');
-            document.documentElement.style.colorScheme = 'dark';
-          }
-          document.documentElement.setAttribute('data-theme', theme);
-        } catch (e) {
-          document.documentElement.classList.add('dark');
-          document.documentElement.setAttribute('data-theme', 'basalt');
-        }
-      })();
-    </script>
   </head>
   <body>
     <div id="root"></div>

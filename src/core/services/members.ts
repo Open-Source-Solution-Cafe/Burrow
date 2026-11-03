@@ -1,18 +1,12 @@
-import type { IMemberRepository, Member } from '../infrastructure/types';
-import { notFound, badRequest } from './errors';
+import type {
+  IMemberRepository,
+  Member,
+  ChangeRoleArgs,
+  RemoveMemberArgs,
+} from '../infrastructure/types';
+import { notFound, badRequest, forbidden } from './errors';
 
-export interface ChangeRoleArgs {
-  workspaceId: string;
-  actorUserId: string;
-  targetUserId: string;
-  newRole: 'owner' | 'editor' | 'viewer';
-}
-
-export interface RemoveMemberArgs {
-  workspaceId: string;
-  actorUserId: string;
-  targetUserId: string;
-}
+export type { ChangeRoleArgs, RemoveMemberArgs } from '../infrastructure/types';
 
 export class MemberService {
   constructor(private readonly repos: { members: IMemberRepository }) {}
@@ -22,43 +16,26 @@ export class MemberService {
   }
 
   async changeRole(args: ChangeRoleArgs): Promise<void> {
-    const targetMember = await this.repos.members.findByUserId(args.workspaceId, args.targetUserId);
-    if (!targetMember) {
-      throw notFound('not_found', 'Member not found');
-    }
-
-    if (targetMember.role === 'owner' && args.newRole !== 'owner') {
-      // Check if target is the last owner
-      const owners = await this.repos.members.listOwners(args.workspaceId);
-      if (owners.length <= 1) {
-        throw badRequest(
-          'cannot_demote_last_owner',
-          'Cannot demote the last owner of the workspace',
-        );
-      }
-    }
-
-    await this.repos.members.updateRole(args.workspaceId, args.targetUserId, args.newRole);
+    await this.repos.members.updateRole(args).catch(mapMemberError);
   }
 
   async removeMember(args: RemoveMemberArgs): Promise<void> {
-    const targetMember = await this.repos.members.findByUserId(args.workspaceId, args.targetUserId);
-    if (!targetMember) {
-      throw notFound('not_found', 'Member not found');
-    }
-
-    if (targetMember.role === 'owner') {
-      const owners = await this.repos.members.listOwners(args.workspaceId);
-      if (owners.length <= 1) {
-        throw badRequest(
-          'cannot_remove_last_owner',
-          'Cannot remove the last owner of the workspace',
-        );
-      }
-    }
-
-    // Invariant I10: Removing a member deletes that member's card_assignees rows in the same batch
-    await this.repos.members.remove(args.workspaceId, args.targetUserId);
-    await this.repos.members.deleteSessions(args.targetUserId);
+    await this.repos.members.remove(args).catch(mapMemberError);
   }
+}
+
+function mapMemberError(error: unknown): never {
+  if (error instanceof Error) {
+    switch (error.message) {
+      case 'not_found':
+        throw notFound('not_found', 'Member not found');
+      case 'forbidden':
+        throw forbidden('forbidden', 'Insufficient permissions');
+      case 'cannot_demote_last_owner':
+        throw badRequest(error.message, 'Cannot demote the last owner of the workspace');
+      case 'cannot_remove_last_owner':
+        throw badRequest(error.message, 'Cannot remove the last owner of the workspace');
+    }
+  }
+  throw error;
 }

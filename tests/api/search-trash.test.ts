@@ -2,12 +2,14 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createWorkerApp } from '../../src/worker/index';
 import { expectInvariantsHold } from './helpers';
+import { getAccountWorkspaceScope } from './account-scope';
 
 const app = createWorkerApp(env);
 
 describe('Phase 6: Organization, Search & Trash', () => {
   const bootstrapToken = env.BOOTSTRAP_TOKEN || 'test-bootstrap-token';
   let ownerCookie = '';
+  let workspaceId = '';
   let projectId = '';
   let notepad1Id = '';
   let notepad2Id = '';
@@ -33,17 +35,17 @@ describe('Phase 6: Organization, Search & Trash', () => {
     expect(ownerRes.status).toBe(200);
     ownerCookie = ownerRes.headers.get('set-cookie')!;
 
-    const meRes = await app.request(
-      'http://localhost/api/me',
+    const scope = await getAccountWorkspaceScope(async (path) => app.request(
+      `http://localhost${path}`,
       { headers: { Cookie: ownerCookie } },
       env,
-    );
-    const me = (await meRes.json()) as { lastProjectId: string };
-    projectId = me.lastProjectId;
+    ));
+    workspaceId = scope.workspaceId;
+    projectId = scope.projectId;
 
     // 2. Create Tag: "research"
     const tagRes = await app.request(
-      `http://localhost/api/projects/${projectId}/tags`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/tags`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -58,7 +60,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 3. Create Notepad 1: "Quantum Computing Overview" with search terms in body
     const np1Res = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -83,7 +85,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
       },
     ]);
     await app.request(
-      `http://localhost/api/notepads/${notepad1Id}/content`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad1Id}/content`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -97,7 +99,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // Tag Notepad 1 with "research"
     const tagAttachRes = await app.request(
-      `http://localhost/api/notepads/${notepad1Id}/tags`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad1Id}/tags`,
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -109,7 +111,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 4. Create Notepad 2: "Machine Learning Notes"
     const np2Res = await app.request(
-      `http://localhost/api/projects/${projectId}/notepads`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -123,7 +125,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 5. Create Board
     const boardRes = await app.request(
-      `http://localhost/api/projects/${projectId}/boards`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
@@ -139,7 +141,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
   it('searches by title and body matches via FTS5 with snippet', async () => {
     // Search for "quantum"
     const searchRes = await app.request(
-      `http://localhost/api/search?q=quantum&projectId=${projectId}&scope=project`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=quantum&projectId=${projectId}&scope=project`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -157,7 +159,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // Search for body term "superposition"
     const bodySearchRes = await app.request(
-      `http://localhost/api/search?q=superposition&projectId=${projectId}`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=superposition&projectId=${projectId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -173,7 +175,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
   it('excludes soft-deleted items from search and lists them in Trash', async () => {
     // 1. Soft delete Notepad 1
     const delRes = await app.request(
-      `http://localhost/api/notepads/${notepad1Id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad1Id}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -184,7 +186,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 2. Search for "quantum" -> should return 0 results now
     const searchRes = await app.request(
-      `http://localhost/api/search?q=quantum&projectId=${projectId}`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=quantum&projectId=${projectId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -192,9 +194,9 @@ describe('Phase 6: Organization, Search & Trash', () => {
     const results = (await searchRes.json()) as Array<{ id: string }>;
     expect(results.find((r) => r.id === notepad1Id)).toBeUndefined();
 
-    // 3. GET /api/projects/:pid/trash -> lists notepad1
+    // 3. GET the scoped project trash -> lists notepad1
     const trashRes = await app.request(
-      `http://localhost/api/projects/${projectId}/trash`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/trash`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -212,7 +214,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
   it('restores notepad from Trash and verifies it is searchable again', async () => {
     // 1. Restore Notepad 1
     const restoreRes = await app.request(
-      `http://localhost/api/notepads/${notepad1Id}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad1Id}/restore`,
       {
         method: 'POST',
         headers: { Cookie: ownerCookie },
@@ -223,7 +225,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 2. Search again for "quantum" -> should be found again!
     const searchRes = await app.request(
-      `http://localhost/api/search?q=quantum&projectId=${projectId}`,
+      `http://localhost/api/workspaces/${workspaceId}/search?q=quantum&projectId=${projectId}`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -231,9 +233,9 @@ describe('Phase 6: Organization, Search & Trash', () => {
     const results = (await searchRes.json()) as Array<{ id: string }>;
     expect(results.some((r) => r.id === notepad1Id)).toBe(true);
 
-    // 3. GET /api/projects/:pid/recent -> includes notepad1 & notepad2
+    // 3. GET the scoped project recent list -> includes notepad1 & notepad2
     const recentRes = await app.request(
-      `http://localhost/api/projects/${projectId}/recent`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/recent`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -249,7 +251,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
   it('tests board trash lifecycle: soft delete, list in trash, restore', async () => {
     // 1. Soft delete board
     const delBoardRes = await app.request(
-      `http://localhost/api/boards/${boardId}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${boardId}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -260,7 +262,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 2. Check trash
     const trashRes = await app.request(
-      `http://localhost/api/projects/${projectId}/trash`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/trash`,
       { headers: { Cookie: ownerCookie } },
       env,
     );
@@ -269,7 +271,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 3. Restore board
     const restoreBoardRes = await app.request(
-      `http://localhost/api/boards/${boardId}/restore`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/boards/${boardId}/restore`,
       {
         method: 'POST',
         headers: { Cookie: ownerCookie },
@@ -285,7 +287,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
   it('tests permanent delete of a notepad from trash', async () => {
     // 1. Soft delete notepad2
     await app.request(
-      `http://localhost/api/notepads/${notepad2Id}`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad2Id}`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -295,7 +297,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 2. Permanently delete notepad2
     const permRes = await app.request(
-      `http://localhost/api/notepads/${notepad2Id}/permanent`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${notepad2Id}/permanent`,
       {
         method: 'DELETE',
         headers: { Cookie: ownerCookie },
@@ -306,7 +308,7 @@ describe('Phase 6: Organization, Search & Trash', () => {
 
     // 3. Verify it is gone from trash
     const trashRes = await app.request(
-      `http://localhost/api/projects/${projectId}/trash`,
+      `http://localhost/api/workspaces/${workspaceId}/projects/${projectId}/trash`,
       { headers: { Cookie: ownerCookie } },
       env,
     );

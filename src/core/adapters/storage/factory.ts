@@ -20,6 +20,10 @@ export class UnconfiguredWorkerStorageAdapter implements IStorageAdapter {
   async deletePrefix(_prefix: string): Promise<void> {
     throw new Error('Storage not configured: FILES R2 binding is missing in Worker environment');
   }
+
+  async listObjects(): Promise<string[]> {
+    throw new Error('Storage not configured: FILES R2 binding is missing in Worker environment');
+  }
 }
 
 export interface StorageEnv {

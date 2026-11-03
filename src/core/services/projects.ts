@@ -1,18 +1,20 @@
 import { nanoid } from 'nanoid';
+import { uploadPolicyStorageKey } from '../../shared/uploadPolicy';
 import type {
   IProjectRepository,
   INotepadRepository,
-  IBoardRepository,
-  ITagRepository,
+  IProjectFileRepository,
+  IMemberRepository,
   Project,
   UpdateProjectData,
 } from '../infrastructure/types';
-import { notFound, badRequest } from './errors';
+import { notFound, badRequest, forbidden, conflict } from './errors';
 import { positionAfterLast, positionBetween } from './utils/ordering';
 import type { IStorageAdapter } from '../adapters/storage/types';
 
 export interface CreateProjectArgs {
   workspaceId: string;
+  actorUserId: string;
   name: string;
   icon?: string | null;
   color?: string | null;
@@ -20,6 +22,7 @@ export interface CreateProjectArgs {
 
 export interface UpdateProjectArgs {
   workspaceId: string;
+  actorUserId: string;
   projectId: string;
   name?: string;
   icon?: string | null;
@@ -29,12 +32,14 @@ export interface UpdateProjectArgs {
 
 export interface MoveProjectArgs {
   workspaceId: string;
+  actorUserId: string;
   projectId: string;
   afterId?: string | null;
 }
 
 export interface PermanentDeleteProjectArgs {
   workspaceId: string;
+  actorUserId: string;
   projectId: string;
   confirmName: string;
 }
@@ -42,8 +47,8 @@ export interface PermanentDeleteProjectArgs {
 export type Repositories = {
   projects: IProjectRepository;
   notepads: INotepadRepository;
-  boards: IBoardRepository;
-  tags: ITagRepository;
+  members: IMemberRepository;
+  projectFiles: IProjectFileRepository;
 };
 
 export class ProjectService {
@@ -56,24 +61,37 @@ export class ProjectService {
     return this.repos.projects.listByWorkspace(workspaceId);
   }
 
+  private async requireEditor(workspaceId: string, actorUserId: string): Promise<void> {
+    const member = await this.repos.members.findByUserId(workspaceId, actorUserId);
+    if (!member || member.role === 'viewer')
+      throw forbidden('forbidden', 'Insufficient permissions');
+  }
+
   async createProject(args: CreateProjectArgs): Promise<{ id: string; position: string }> {
-    const last = await this.repos.projects.listByWorkspace(args.workspaceId);
-    const position = positionAfterLast(last[last.length - 1]?.position ?? null);
     const id = nanoid();
     const now = Date.now();
-
-    await this.repos.projects.create({
-      id,
-      workspaceId: args.workspaceId,
-      name: args.name.trim() || 'Untitled Project',
-      icon: args.icon ?? null,
-      color: args.color ?? null,
-      position,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    return { id, position };
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const rows = await this.repos.projects.listByWorkspace(args.workspaceId);
+      const last = rows.at(-1) ?? null;
+      const position = positionAfterLast(last?.position ?? null);
+      const created = await this.repos.projects.createGuarded(
+        {
+          id,
+          workspaceId: args.workspaceId,
+          name: args.name.trim() || 'Untitled Project',
+          icon: args.icon ?? null,
+          color: args.color ?? null,
+          position,
+          createdAt: now,
+          updatedAt: now,
+        },
+        args.actorUserId,
+        last && { id: last.id, position: last.position },
+      );
+      if (created) return { id, position };
+      await this.requireEditor(args.workspaceId, args.actorUserId);
+    }
+    throw conflict('project_order_changed', 'Project order changed; please try again');
   }
 
   async updateProject(args: UpdateProjectArgs): Promise<void> {
@@ -91,33 +109,54 @@ export class ProjectService {
       updates.archivedAt = args.archived ? Date.now() : null;
     }
 
-    await this.repos.projects.update(args.projectId, updates);
+    if (
+      !(await this.repos.projects.updateGuarded(
+        args.workspaceId,
+        args.actorUserId,
+        args.projectId,
+        updates,
+      ))
+    ) {
+      await this.requireEditor(args.workspaceId, args.actorUserId);
+      if (!(await this.repos.projects.findByIdAndWorkspace(args.projectId, args.workspaceId)))
+        throw notFound('not_found', 'Project not found');
+      throw conflict('project_changed', 'Project changed; please try again');
+    }
   }
 
   async moveProject(args: MoveProjectArgs): Promise<{ position: string }> {
-    const project = await this.repos.projects.findByIdAndWorkspace(
-      args.projectId,
-      args.workspaceId,
-    );
-    if (!project) throw notFound('not_found', 'Project not found');
-
-    const allProjects = await this.repos.projects.listByWorkspace(args.workspaceId);
-    const others = allProjects.filter((p) => p.id !== args.projectId);
-
-    let newPosition: string;
-    if (!args.afterId) {
-      const next = others[0]?.position ?? null;
-      newPosition = positionBetween(null, next);
-    } else {
-      const afterIndex = others.findIndex((p) => p.id === args.afterId);
-      if (afterIndex === -1) throw badRequest('invalid_after_id', 'afterId not found');
-      const prev = others[afterIndex]!.position;
-      const next = others[afterIndex + 1]?.position ?? null;
-      newPosition = positionBetween(prev, next);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const project = await this.repos.projects.findByIdAndWorkspace(
+        args.projectId,
+        args.workspaceId,
+      );
+      if (!project) throw notFound('not_found', 'Project not found');
+      const others = (await this.repos.projects.listByWorkspace(args.workspaceId)).filter(
+        (p) => p.id !== args.projectId,
+      );
+      const afterIndex = args.afterId ? others.findIndex((p) => p.id === args.afterId) : -1;
+      if (args.afterId && afterIndex === -1)
+        throw badRequest('invalid_after_id', 'afterId not found');
+      const previous = afterIndex < 0 ? null : others[afterIndex]!;
+      const next = others[afterIndex + 1] ?? null;
+      if (previous && next && previous.position >= next.position)
+        throw conflict('project_order_changed', 'Project order requires repair');
+      const position = positionBetween(previous?.position ?? null, next?.position ?? null);
+      const moved = await this.repos.projects.moveGuarded(
+        args.workspaceId,
+        args.actorUserId,
+        args.projectId,
+        position,
+        {
+          targetPosition: project.position,
+          previous: previous && { id: previous.id, position: previous.position },
+          next: next && { id: next.id, position: next.position },
+        },
+      );
+      if (moved) return { position };
+      await this.requireEditor(args.workspaceId, args.actorUserId);
     }
-
-    await this.repos.projects.updatePosition(args.projectId, newPosition);
-    return { position: newPosition };
+    throw conflict('project_order_changed', 'Project order changed; please try again');
   }
 
   async permanentDeleteProject(args: PermanentDeleteProjectArgs): Promise<void> {
@@ -131,55 +170,63 @@ export class ProjectService {
       throw badRequest('name_mismatch', 'Project confirmation name does not match');
     }
 
-    const projectId = args.projectId;
-
-    // 1. Hard delete all trashed notepads in the project (cascades to FTS, links, tags via repository).
-    // NOTE: listByProject returns live tree rows only, so trashed rows must come from listDeletedByProject.
-    const liveNotepads = await this.repos.notepads.listByProject(projectId);
-    const trashedNotepads = await this.repos.notepads.listDeletedByProject(projectId);
-    const coverKeys: string[] = [];
-    for (const np of [...liveNotepads, ...trashedNotepads]) {
-      try {
-        const exists = await this.repos.notepads.findById(np.id);
-        if (exists) {
-          const deletedNotepads = await this.repos.notepads.hardDelete(np.id);
-          for (const d of deletedNotepads ?? []) {
-            if (d.coverKey) {
-              coverKeys.push(d.coverKey);
-            }
-          }
-        }
-      } catch (err: any) {
-        if (!err?.message?.includes('not found')) throw err;
-      }
+    const member = await this.repos.members.findByUserId(args.workspaceId, args.actorUserId);
+    if (!member || member.role !== 'owner') {
+      throw forbidden('forbidden', 'Only workspace owners can permanently delete a project');
     }
 
+    let coverKeys: string[] | null;
+    try {
+      coverKeys = await this.repos.projects.hardDeleteGuarded(
+        args.workspaceId,
+        args.actorUserId,
+        args.projectId,
+        args.confirmName,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === 'project_scope_conflict') {
+        throw conflict(
+          'project_scope_conflict',
+          'Project content has inconsistent workspace or parent relationships and needs repair',
+        );
+      }
+      throw error;
+    }
+    if (!coverKeys) {
+      const current = await this.repos.projects.findByIdAndWorkspace(
+        args.projectId,
+        args.workspaceId,
+      );
+      if (!current) throw notFound('not_found', 'Project not found');
+      if (current.name !== args.confirmName) {
+        throw conflict('project_delete_changed', 'Project changed before it could be deleted');
+      }
+      const currentMember = await this.repos.members.findByUserId(
+        args.workspaceId,
+        args.actorUserId,
+      );
+      if (!currentMember || currentMember.role !== 'owner') {
+        throw forbidden('forbidden', 'Only workspace owners can permanently delete a project');
+      }
+      throw conflict('project_delete_changed', 'Project changed before it could be deleted');
+    }
+
+    if (this.storage) {
+      await this.storage.delete(uploadPolicyStorageKey(args.workspaceId, args.projectId))
+        .catch((error) => console.error('[projects] failed to clean up upload policy:', error));
+    }
     if (this.storage && coverKeys.length > 0) {
-      const uniqueCoverKeys = Array.from(new Set(coverKeys));
       await Promise.allSettled(
-        uniqueCoverKeys.map(async (k) => {
-          const count = await this.repos.notepads.countByCoverKey(k);
-          if (count === 0) {
-            await this.storage!.delete(k);
+        Array.from(new Set(coverKeys)).map(async (key) => {
+          const [registrations, covers] = await Promise.all([
+            this.repos.projectFiles.countByStorageKey(key),
+            this.repos.notepads.countByCoverKey(key),
+          ]);
+          if (registrations === 0 && covers === 0) {
+            await this.storage!.delete(key);
           }
         }),
       );
     }
-
-    // 2. Hard delete all boards in the project
-    const liveBoards = await this.repos.boards.listByProject(projectId);
-    const trashedBoards = await this.repos.boards.listDeletedByProject(projectId);
-    for (const board of [...liveBoards, ...trashedBoards]) {
-      await this.repos.boards.hardDelete(board.id);
-    }
-
-    // 3. Delete all tags in the project
-    const tags = await this.repos.tags.listByProject(projectId);
-    for (const tag of tags) {
-      await this.repos.tags.delete(tag.id);
-    }
-
-    // 4. Hard delete the project itself
-    await this.repos.projects.hardDelete(projectId);
   }
 }

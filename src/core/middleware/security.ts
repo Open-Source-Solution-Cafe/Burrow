@@ -10,7 +10,7 @@ export const securityHeaders = createMiddleware(async (c, next) => {
   if (!c.res.headers.has('Content-Security-Policy')) {
     c.header(
       'Content-Security-Policy',
-      "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'",
+      "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; script-src 'self'; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'self'",
     );
   }
   c.header('X-Content-Type-Options', 'nosniff');

@@ -22,7 +22,7 @@ async function buildInfrastructure(config: ServerConfig) {
   }
   const { db } = openNodeDb(config.SQLITE_PATH, `${process.cwd()}/migrations`);
   const { createD1Infrastructure } = await import('../core/adapters/db/d1');
-  const { wrapNodeDb, createDb } = await import('../worker/db/client');
+  const { wrapNodeDb, createDb } = await import('../core/adapters/db/d1/client');
   const d1Db = createDb(wrapNodeDb(db));
   const env = {
     DB: d1Db,
