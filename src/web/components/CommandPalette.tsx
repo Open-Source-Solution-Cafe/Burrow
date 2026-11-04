@@ -17,14 +17,21 @@ import { toast } from 'sonner';
 import { SegmentedControl } from './ui/SegmentedControl';
 
 const ITEM_CLASSES =
-  'flex flex-col gap-0.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]';
+  'flex flex-col gap-1 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]';
 
 function renderHighlightedSnippet(snippet: string) {
   const parts = snippet.split(/(<mark>[\s\S]*?<\/mark>)/g);
   return parts.map((part, index) => {
     const match = /^<mark>([\s\S]*?)<\/mark>$/i.exec(part);
     if (match) {
-      return <mark key={index}>{match[1]}</mark>;
+      return (
+        <mark
+          key={index}
+          className="bg-[var(--accent)] text-[var(--accent-ink)] font-semibold px-0.5"
+        >
+          {match[1]}
+        </mark>
+      );
     }
     return <span key={index}>{part}</span>;
   });
@@ -186,11 +193,11 @@ export function CommandPalette() {
                       className={ITEM_CLASSES}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="text-sm">
+                        <span className="text-sm shrink-0">
                           {item.icon || (item.kind === 'notepad' ? '📄' : '📋')}
                         </span>
-                        <span className="font-semibold">{item.title || 'Untitled'}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--line)] text-[var(--muted)] ml-auto">
+                        <span className="font-semibold truncate">{item.title || 'Untitled'}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-[var(--surface)] border border-[var(--line)] text-[var(--muted)] ml-auto shrink-0">
                           {item.projectName}
                         </span>
                       </div>
@@ -221,9 +228,9 @@ export function CommandPalette() {
                               navigate(notepadTarget(workspaceId, currentProjectId, np.id));
                             })
                           }
-                          className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                          className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                         >
-                          <span className="text-sm">{np.icon || '📄'}</span>
+                          <span className="text-sm shrink-0">{np.icon || '📄'}</span>
                           <span className="font-medium truncate">{np.title || 'Untitled'}</span>
                         </Command.Item>
                       ))}
@@ -241,9 +248,9 @@ export function CommandPalette() {
                             if (workspaceId) navigate(projectTarget(workspaceId, currentProjectId));
                           })
                         }
-                        className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                        className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
-                        <Home className="w-4 h-4 text-purple-500" />
+                        <Home className="w-4 h-4 text-purple-500 shrink-0" />
                         <span>Project Overview</span>
                       </Command.Item>
                     )}
@@ -257,9 +264,9 @@ export function CommandPalette() {
                             navigate(boardTarget(workspaceId, currentProjectId, b.id));
                           })
                         }
-                        className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                        className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
-                        <Kanban className="w-4 h-4 text-emerald-500" />
+                        <Kanban className="w-4 h-4 text-emerald-500 shrink-0" />
                         <span>Board: {b.name}</span>
                       </Command.Item>
                     ))}
@@ -271,9 +278,9 @@ export function CommandPalette() {
                             if (workspaceId) navigate(trashTarget(workspaceId, currentProjectId));
                           })
                         }
-                        className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                        className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
-                        <Trash2 className="w-4 h-4 text-rose-500" />
+                        <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
                         <span>Trash</span>
                       </Command.Item>
                     )}
@@ -284,9 +291,9 @@ export function CommandPalette() {
                           if (workspaceId) navigate(workspaceMembersTarget(workspaceId));
                         })
                       }
-                      className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
-                      <Users className="w-4 h-4 text-blue-500" />
+                      <Users className="w-4 h-4 text-blue-500 shrink-0" />
                       <span>Members & Invites</span>
                     </Command.Item>
 
@@ -296,9 +303,9 @@ export function CommandPalette() {
                           if (workspaceId) navigate(workspaceSettingsTarget(workspaceId));
                         })
                       }
-                      className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-[var(--text)] cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
-                      <Settings className="w-4 h-4 text-[var(--muted)]" />
+                      <Settings className="w-4 h-4 text-[var(--muted)] shrink-0" />
                       <span>Settings</span>
                     </Command.Item>
 
@@ -308,9 +315,9 @@ export function CommandPalette() {
                           setConfirmSignOut(true);
                         })
                       }
-                      className="flex items-center gap-2.5 px-3 py-2 min-h-[44px] text-xs text-red-500 cursor-pointer select-none data-[selected=true]:bg-[var(--accent)] data-[selected=true]:text-[var(--accent-ink)]"
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-red-500 cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
-                      <LogOut className="w-4 h-4 text-red-500" />
+                      <LogOut className="w-4 h-4 text-red-500 shrink-0" />
                       <span>Log out</span>
                     </Command.Item>
                   </Command.Group>

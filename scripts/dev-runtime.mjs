@@ -7,6 +7,7 @@ import { bin, getBootstrapToken, loadEnv, root, run } from './lib.mjs';
 
 /** Start the shared development lifecycle with its Node or Worker backend. */
 export function startDev(runtime) {
+  process.env.NODE_ENV = 'development';
   loadEnv();
   const env = process.env;
   const auth = {
@@ -119,6 +120,7 @@ export function startDev(runtime) {
     launch('server', [path.join(root, 'dist', 'server.mjs')], {
       ...env,
       ...auth,
+      NODE_ENV: 'development',
       PORT: '8787',
       SQLITE_PATH: sqlitePath,
       LOCAL_STORAGE_PATH: storagePath,

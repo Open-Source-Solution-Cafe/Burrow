@@ -58,11 +58,11 @@ function CalendarChip({
       {...listeners}
       onClick={onClick}
       active={overlay}
-      className={`cursor-grab truncate px-2 py-1 text-[11px] normal-case tracking-normal active:cursor-grabbing ${
+      className={`cursor-grab truncate px-1 sm:px-2 py-0.5 sm:py-1 text-[10px] sm:text-[11px] normal-case tracking-normal active:cursor-grabbing ${
         isDragging ? 'opacity-30' : ''
       } ${overlay ? 'rotate-2 scale-105' : ''} ${overdue ? 'border-[var(--danger)]' : ''}`}
     >
-      <StatusDiamond color={priorityDiamondColor(card.priority)} />
+      <StatusDiamond color={priorityDiamondColor(card.priority)} size={7} />
       <span className="truncate">{card.title || 'Untitled'}</span>
     </Chip>
   );
@@ -87,15 +87,15 @@ function DayCell({
   return (
     <div
       ref={setNodeRef}
-      className={`min-h-28 border p-1.5 transition-colors ${
+      className={`min-h-16 sm:min-h-28 border p-1 sm:p-1.5 transition-colors overflow-hidden ${
         isOver ? 'border-[var(--accent)] bg-[var(--hi)]' : 'border-[var(--line)]'
       } ${!inMonth ? 'bg-[var(--surface2)]/60 opacity-50' : 'bg-[var(--surface)]/40'}`}
     >
-      <div className="mb-1 flex items-center justify-between px-0.5">
+      <div className="mb-0.5 sm:mb-1 flex items-center justify-between px-0.5">
         <span
-          className={`text-[11px] font-semibold tabular-nums ${
+          className={`text-[10px] sm:text-[11px] font-semibold tabular-nums ${
             isToday
-              ? 'chamfer-sm flex h-6 min-w-6 items-center justify-center bg-[var(--accent)] text-[var(--accent-ink)] px-1'
+              ? 'chamfer-sm flex h-5 min-w-5 sm:h-6 sm:min-w-6 items-center justify-center bg-[var(--accent)] text-[var(--accent-ink)] px-1'
               : inMonth
                 ? 'text-[var(--text)]'
                 : 'text-[var(--muted)]'
@@ -104,7 +104,7 @@ function DayCell({
           {date.getDate()}
         </span>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-0.5 sm:space-y-1">
         {cards.map((card) => (
           <CalendarChip key={card.id} card={card} onClick={() => onCardClick(card.id)} />
         ))}

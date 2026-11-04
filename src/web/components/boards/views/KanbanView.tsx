@@ -348,7 +348,7 @@ function ColumnComponent({
     <div
       ref={setNodeRef}
       style={style}
-      className={`group/column w-[300px] md:w-[320px] shrink-0 snap-start self-start bg-[var(--side)] border p-2.5 flex flex-col transition-all duration-150 theme-radius-md ${
+      className={`group/column w-[calc(100vw-3rem)] max-w-[320px] sm:w-[300px] md:w-[320px] shrink-0 snap-start self-start bg-[var(--side)] border p-2.5 flex flex-col transition-all duration-150 theme-radius-md ${
         isDragging ? 'z-10 relative opacity-60' : ''
       } ${isOver ? 'border-[var(--accent)] bg-[var(--hi)]/30' : 'border-[var(--hair)]'}`}
     >
@@ -392,13 +392,13 @@ function ColumnComponent({
           <CountPill count={column.cards.length} wipLimit={column.wipLimit} />
         </div>
 
-        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover/column:opacity-100 transition-opacity">
+        <div className="flex items-center gap-0.5 shrink-0 opacity-100 sm:opacity-0 sm:group-hover/column:opacity-100 transition-opacity">
           <button
             type="button"
             onClick={() => setIsCollapsed(true)}
             aria-label="Collapse column"
             title="Collapse column"
-            className="h-6 w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
+            className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
@@ -410,7 +410,7 @@ function ColumnComponent({
             {...listeners}
             aria-label="Drag to reorder column"
             title="Drag to reorder"
-            className="h-6 w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs cursor-grab active:cursor-grabbing touch-none transition"
+            className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs cursor-grab active:cursor-grabbing touch-none transition"
           >
             <GripVertical className="w-3.5 h-3.5" />
           </button>
@@ -419,7 +419,7 @@ function ColumnComponent({
             <button
               onClick={() => setShowMenu(!showMenu)}
               aria-label="Column menu"
-              className="h-6 w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
+              className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
             >
               <MoreHorizontal className="w-3.5 h-3.5" />
             </button>
@@ -588,7 +588,7 @@ export function KanbanView({
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5,
+        distance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -789,7 +789,7 @@ export function KanbanView({
   return (
     <>
       {/* Columns Container (Horizontal Scroll with mobile snap) */}
-      <div className="flex-1 overflow-x-auto overflow-y-auto p-4 md:p-6 flex items-start gap-4 snap-x snap-mandatory md:snap-none bg-[var(--bg)] min-h-0">
+      <div className="flex-1 overflow-x-auto overflow-y-auto p-3 sm:p-4 md:p-6 flex items-start gap-3 sm:gap-4 snap-x snap-mandatory md:snap-none bg-[var(--bg)] min-h-0">
         <DndContext
           sensors={sensors}
           collisionDetection={collisionDetectionStrategy}
@@ -824,7 +824,7 @@ export function KanbanView({
 
         {/* Add Column Button & Inline Card on the Kanban Board */}
         {isAddingColumn ? (
-          <div className="w-[300px] md:w-[320px] shrink-0 snap-start bg-[var(--side)] p-3 flex flex-col gap-2.5 border border-[var(--accent)] theme-radius-md">
+          <div className="w-[calc(100vw-3rem)] max-w-[320px] sm:w-[300px] md:w-[320px] shrink-0 snap-start bg-[var(--side)] p-3 flex flex-col gap-2.5 border border-[var(--accent)] theme-radius-md">
             <Input
               autoFocus
               type="text"

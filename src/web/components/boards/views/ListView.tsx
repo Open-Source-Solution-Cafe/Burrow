@@ -39,13 +39,13 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const updateCard = useUpdateCard();
 
-  const gridCols = 'grid grid-cols-[minmax(0,1fr)_96px_140px_120px_minmax(0,1fr)] gap-3';
+  const gridCols = 'md:grid md:grid-cols-[minmax(0,1fr)_96px_140px_120px_minmax(0,1fr)] md:gap-3';
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 bg-[var(--bg)] text-[var(--text)]">
-      {/* Table header */}
+    <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 bg-[var(--bg)] text-[var(--text)]">
+      {/* Table header (desktop only) */}
       <div
-        className={`${gridCols} sticky top-0 z-10 bg-[var(--surface2)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)] border-b border-[var(--line)]`}
+        className={`hidden ${gridCols} sticky top-0 z-10 bg-[var(--surface2)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)] border-b border-[var(--line)]`}
       >
         <span>Title</span>
         <span>Priority</span>
@@ -63,7 +63,7 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
               <button
                 type="button"
                 onClick={() => setCollapsed((c) => ({ ...c, [col.id]: !c[col.id] }))}
-                className="flex w-full items-center gap-2 px-3 py-2 min-h-[44px] text-left hover:bg-[var(--hi)] transition border-l-4"
+                className="flex w-full items-center gap-2 px-3 py-2 min-h-[44px] text-left hover:bg-[var(--hi)] transition border-l-4 cursor-pointer"
                 style={{ borderLeftColor: col.color || 'var(--c1)' }}
               >
                 {isCollapsed ? (
@@ -94,7 +94,7 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
 
               {/* Rows */}
               {!isCollapsed && (
-                <div className="mt-1 space-y-0.5">
+                <div className="mt-1 space-y-2 md:space-y-0.5">
                   {col.cards.length === 0 && (
                     <div className="px-3 py-2 text-xs italic text-[var(--muted)]">No cards</div>
                   )}
@@ -112,12 +112,12 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
                             onCardClick(card.id);
                           }
                         }}
-                        className={`${gridCols} items-center px-3 py-1.5 min-h-[44px] text-xs cursor-pointer border border-transparent border-l-4 hover:bg-[var(--surface)] hover:border-[var(--line)] transition`}
+                        className={`flex flex-col gap-2 p-3 md:p-0 md:h-auto md:min-h-[44px] ${gridCols} md:items-center md:px-3 md:py-1.5 text-xs cursor-pointer border border-[var(--line)] md:border-transparent md:border-l-4 border-l-4 hover:bg-[var(--surface)] hover:border-[var(--line)] transition bg-[var(--surface)] md:bg-transparent`}
                         style={{ borderLeftColor: col.color || 'var(--c1)' }}
                       >
                         {/* Title */}
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-[var(--text)]">
+                        <div className="flex min-w-0 items-center justify-between md:justify-start gap-2">
+                          <span className="truncate font-medium md:font-normal text-[var(--text)]">
                             {card.title || 'Untitled'}
                           </span>
                           {(card.totalSubtasks ?? 0) > 0 && (
@@ -133,92 +133,95 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
                           )}
                         </div>
 
-                        {/* Priority (inline quick-edit) */}
-                        <select
-                          value={card.priority ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            updateCard.mutate({
-                              workspaceId,
-                              projectId,
-                              cardId: card.id,
-                              boardId,
-                              priority: v ? (v as Priority) : null,
-                            });
-                          }}
-                          className={`chamfer-sm border border-transparent bg-transparent px-1 py-0.5 min-h-[44px] md:min-h-0 text-[11px] font-semibold outline-none hover:border-[var(--line)] focus:border-[var(--accent)] ${
-                            card.priority && PRIORITY_BADGES[card.priority]
-                              ? PRIORITY_BADGES[card.priority]!.class
-                              : 'text-[var(--muted)]'
-                          }`}
-                          title="Change priority"
-                        >
-                          <option value="">—</option>
-                          {PRIORITIES.map((p) => (
-                            <option key={p} value={p}>
-                              {PRIORITY_BADGES[p]?.label ?? p}
-                            </option>
-                          ))}
-                        </select>
-
-                        {/* Due date (inline quick-edit) */}
-                        <div
-                          className="flex items-center gap-1"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <CalendarDays
-                            className={`h-3.5 w-3.5 shrink-0 ${
-                              overdue ? 'text-[var(--danger)]' : 'text-[var(--muted)]'
-                            }`}
-                          />
-                          <input
-                            type="date"
-                            value={toDateInput(card.dueDate)}
+                        {/* Mobile metadata row / Desktop grid columns via md:contents */}
+                        <div className="flex items-center justify-between flex-wrap gap-2 md:contents pt-1.5 md:pt-0 border-t border-[var(--hair)] md:border-0">
+                          {/* Priority (inline quick-edit) */}
+                          <select
+                            value={card.priority ?? ''}
+                            onClick={(e) => e.stopPropagation()}
                             onChange={(e) => {
-                              const ts = e.target.value ? parseDateInput(e.target.value) : null;
+                              const v = e.target.value;
                               updateCard.mutate({
                                 workspaceId,
                                 projectId,
                                 cardId: card.id,
                                 boardId,
-                                dueDate: e.target.value ? ts : null,
+                                priority: v ? (v as Priority) : null,
                               });
                             }}
-                            className={`min-w-0 border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none hover:border-[var(--line)] focus:border-[var(--accent)] ${
-                              overdue ? 'text-[var(--danger)] font-medium' : 'text-[var(--text)]'
+                            className={`chamfer-sm border border-transparent bg-transparent px-1 py-0.5 min-h-[36px] md:min-h-0 text-[11px] font-semibold outline-none hover:border-[var(--line)] focus:border-[var(--accent)] ${
+                              card.priority && PRIORITY_BADGES[card.priority]
+                                ? PRIORITY_BADGES[card.priority]!.class
+                                : 'text-[var(--muted)]'
                             }`}
-                            title="Change due date"
-                          />
-                        </div>
+                            title="Change priority"
+                          >
+                            <option value="">—</option>
+                            {PRIORITIES.map((p) => (
+                              <option key={p} value={p}>
+                                {PRIORITY_BADGES[p]?.label ?? p}
+                              </option>
+                            ))}
+                          </select>
 
-                        {/* Assignees */}
-                        <AvatarGroup max={4} className="min-w-0">
-                          {card.assignees.map((a) => (
-                            <Avatar key={a.userId} name={a.name || 'U'} size="xs" title={a.name} />
-                          ))}
-                        </AvatarGroup>
-
-                        {/* Tags */}
-                        <div className="flex min-w-0 flex-wrap gap-1">
-                          {card.tags.slice(0, 3).map((tag) => (
-                            <Badge
-                              key={tag.id}
-                              tone="neutral"
-                              style={{
-                                backgroundColor: `${tag.color || '#64748b'}20`,
-                                color: tag.color || '#64748b',
-                                borderColor: `${tag.color || '#64748b'}40`,
+                          {/* Due date (inline quick-edit) */}
+                          <div
+                            className="flex items-center gap-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <CalendarDays
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                overdue ? 'text-[var(--danger)]' : 'text-[var(--muted)]'
+                              }`}
+                            />
+                            <input
+                              type="date"
+                              value={toDateInput(card.dueDate)}
+                              onChange={(e) => {
+                                const ts = e.target.value ? parseDateInput(e.target.value) : null;
+                                updateCard.mutate({
+                                  workspaceId,
+                                  projectId,
+                                  cardId: card.id,
+                                  boardId,
+                                  dueDate: e.target.value ? ts : null,
+                                });
                               }}
-                            >
-                              #{tag.name}
-                            </Badge>
-                          ))}
-                          {card.tags.length > 3 && (
-                            <span className="text-[10px] text-[var(--muted)]">
-                              +{card.tags.length - 3}
-                            </span>
-                          )}
+                              className={`min-w-0 border border-transparent bg-transparent px-1 py-0.5 text-[11px] outline-none hover:border-[var(--line)] focus:border-[var(--accent)] min-h-[36px] md:min-h-0 ${
+                                overdue ? 'text-[var(--danger)] font-medium' : 'text-[var(--text)]'
+                              }`}
+                              title="Change due date"
+                            />
+                          </div>
+
+                          {/* Assignees */}
+                          <AvatarGroup max={4} className="min-w-0">
+                            {card.assignees.map((a) => (
+                              <Avatar key={a.userId} name={a.name || 'U'} size="xs" title={a.name} />
+                            ))}
+                          </AvatarGroup>
+
+                          {/* Tags */}
+                          <div className="flex min-w-0 flex-wrap gap-1">
+                            {card.tags.slice(0, 3).map((tag) => (
+                              <Badge
+                                key={tag.id}
+                                tone="neutral"
+                                style={{
+                                  backgroundColor: `${tag.color || '#64748b'}20`,
+                                  color: tag.color || '#64748b',
+                                  borderColor: `${tag.color || '#64748b'}40`,
+                                }}
+                              >
+                                #{tag.name}
+                              </Badge>
+                            ))}
+                            {card.tags.length > 3 && (
+                              <span className="text-[10px] text-[var(--muted)]">
+                                +{card.tags.length - 3}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );

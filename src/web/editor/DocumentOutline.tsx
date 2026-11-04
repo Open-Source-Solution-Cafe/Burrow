@@ -126,6 +126,13 @@ export function DocumentOutline({
     }
   };
 
+  const handleSelectHeading = (heading: HeadingEntry) => {
+    scrollTo(heading);
+    if (typeof window !== 'undefined' && window.innerWidth < 640) {
+      setOpen(false);
+    }
+  };
+
   const ordered = useMemo(() => headings, [headings]);
 
   if (variant === 'inline') {
@@ -170,7 +177,7 @@ export function DocumentOutline({
         variant="ghost"
         onClick={() => setOpen((v) => !v)}
         title={open ? 'Hide outline' : 'Show outline (table of contents)'}
-        className={`p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 border ${
+        className={`p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 border flex items-center justify-center transition cursor-pointer ${
           open
             ? 'text-[var(--accent-ink)] bg-[var(--accent)] border-[var(--accent)]'
             : 'text-[var(--muted)] border-[var(--line)] hover:text-[var(--text)]'
@@ -179,48 +186,55 @@ export function DocumentOutline({
         <ListTree className="w-4 h-4" />
       </Button>
 
-      {/* Floating outline panel — angular Basalt surface */}
+      {/* Floating outline panel — responsive bottom sheet on mobile, angular Basalt surface on desktop */}
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 max-h-[70vh] overflow-y-auto bg-[var(--surface)] border border-[var(--line)] z-30 p-2">
-          <div className="flex items-center justify-between px-2 py-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
-              On this page
-            </span>
-            <button
-              onClick={() => setOpen(false)}
-              className="p-0.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-
-          {ordered.length === 0 ? (
-            <div className="px-2 py-3 text-xs text-[var(--muted)] italic">
-              No headings yet. Add H1–H3 blocks to build an outline.
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-black/40 sm:hidden"
+          />
+          <div className="fixed inset-x-3 bottom-4 max-h-[60vh] sm:static sm:inset-x-auto sm:bottom-auto sm:max-h-none sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-64 sm:max-h-[70vh] overflow-y-auto bg-[var(--surface)] border border-[var(--line)] z-40 p-3 sm:p-2 chamfer-md">
+            <div className="flex items-center justify-between px-2 py-1.5 mb-1">
+              <span className="text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
+                On this page
+              </span>
+              <button
+                onClick={() => setOpen(false)}
+                className="p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
+                aria-label="Close outline"
+              >
+                <X className="w-4 h-4 sm:w-3 sm:h-3" />
+              </button>
             </div>
-          ) : (
-            <nav className="space-y-0.5">
-              {ordered.map((heading) => (
-                <button
-                  key={heading.id}
-                  onClick={() => scrollTo(heading)}
-                  className={`w-full text-left px-2 py-1 min-h-[44px] sm:min-h-0 text-xs transition truncate flex items-center gap-2 ${
-                    activeId === heading.id
-                      ? 'bg-[var(--accent)] text-[var(--accent-ink)] font-medium'
-                      : 'text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]'
-                  }`}
-                  style={{ paddingLeft: `${8 + (heading.level - 1) * 12}px` }}
-                >
-                  <StatusDiamond
-                    color={activeId === heading.id ? 'var(--accent-ink)' : 'var(--muted)'}
-                    size={6}
-                  />
-                  <span className="truncate">{heading.text}</span>
-                </button>
-              ))}
-            </nav>
-          )}
-        </div>
+
+            {ordered.length === 0 ? (
+              <div className="px-2 py-3 text-xs text-[var(--muted)] italic">
+                No headings yet. Add H1–H3 blocks to build an outline.
+              </div>
+            ) : (
+              <nav className="space-y-0.5">
+                {ordered.map((heading) => (
+                  <button
+                    key={heading.id}
+                    onClick={() => handleSelectHeading(heading)}
+                    className={`w-full text-left px-2.5 py-2 sm:px-2 sm:py-1 min-h-[44px] sm:min-h-0 text-xs transition truncate flex items-center gap-2 cursor-pointer ${
+                      activeId === heading.id
+                        ? 'bg-[var(--accent)] text-[var(--accent-ink)] font-medium'
+                        : 'text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]'
+                    }`}
+                    style={{ paddingLeft: `${10 + (heading.level - 1) * 12}px` }}
+                  >
+                    <StatusDiamond
+                      color={activeId === heading.id ? 'var(--accent-ink)' : 'var(--muted)'}
+                      size={6}
+                    />
+                    <span className="truncate">{heading.text}</span>
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

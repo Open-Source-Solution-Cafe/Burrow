@@ -76,7 +76,7 @@ function SubtaskRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="group flex items-center gap-2 px-1.5 py-1 min-h-[44px] md:min-h-0 hover:bg-[var(--hi)] transition"
+      className="group flex items-center gap-1.5 sm:gap-2 px-1 py-1 min-h-[40px] md:min-h-0 hover:bg-[var(--hi)] transition"
     >
       <button
         type="button"
@@ -84,7 +84,7 @@ function SubtaskRow({
         {...attributes}
         {...listeners}
         title="Drag to reorder"
-        className="touch-none cursor-grab active:cursor-grabbing text-[var(--muted)] hover:text-[var(--text)] shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center"
+        className="touch-none cursor-grab active:cursor-grabbing text-[var(--muted)] hover:text-[var(--text)] shrink-0 w-7 h-10 md:w-5 md:h-6 flex items-center justify-center"
       >
         <GripVertical className="w-3.5 h-3.5" />
       </button>
@@ -103,12 +103,12 @@ function SubtaskRow({
         }
         title={subtask.completed ? 'Mark incomplete' : 'Mark complete'}
         aria-label={subtask.completed ? 'Mark incomplete' : 'Mark complete'}
-        className={`shrink-0 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center transition ${
+        className={`shrink-0 w-8 h-10 md:w-6 md:h-6 flex items-center justify-center transition cursor-pointer ${
           subtask.completed ? 'text-[var(--c4)]' : 'text-[var(--muted)] hover:text-[var(--c4)]'
         }`}
       >
         {/* Decorative diamond marker; the button itself keeps checkbox toggle behavior. */}
-        <StatusDiamond color={subtask.completed ? 'var(--c4)' : 'var(--muted)'} size={12} />
+        <StatusDiamond color={subtask.completed ? 'var(--c4)' : 'var(--muted)'} size={11} />
       </button>
 
       {editing ? (
@@ -124,15 +124,16 @@ function SubtaskRow({
               setEditing(false);
             }
           }}
-          className="border-none bg-transparent px-0"
+          className="border-none bg-transparent px-0 text-xs py-1 min-h-[36px] md:min-h-0"
         />
       ) : (
         <span
+          onClick={() => setEditing(true)}
           onDoubleClick={() => setEditing(true)}
-          className={`flex-1 min-w-0 text-xs cursor-text ${
+          className={`flex-1 min-w-0 text-xs py-1 cursor-text break-words ${
             subtask.completed ? 'line-through text-[var(--muted)]' : 'text-[var(--text)]'
           }`}
-          title="Double-click to rename"
+          title="Click to rename"
         >
           {subtask.title}
         </span>
@@ -143,7 +144,7 @@ function SubtaskRow({
         onClick={() => deleteSubtask.mutate({ workspaceId, projectId, cardId, boardId, subtaskId: subtask.id })}
         title="Remove subtask"
         aria-label="Remove subtask"
-        className="p-0.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition shrink-0"
+        className="p-1 w-8 h-10 md:w-6 md:h-6 flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shrink-0 cursor-pointer"
       >
         <X className="w-3.5 h-3.5" />
       </button>

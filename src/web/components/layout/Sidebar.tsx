@@ -310,7 +310,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const displayedTasks = taskFilter === 'due' ? dueTasks : myTasks;
 
   const renderAccountMenu = () => (
-    <div className="absolute bottom-full left-0 mb-2 w-60 bg-surface border border-line theme-radius-md p-1 z-50 text-xs">
+    <div className="absolute bottom-full left-0 mb-2 w-60 max-w-[calc(100vw-2rem)] bg-surface border border-line theme-radius-md p-1 z-50 text-xs">
       <div className="px-3 py-2 border-b border-hair">
         <div className="font-semibold text-text truncate">{account?.user?.name || 'Account'}</div>
         {account?.user?.email && (
@@ -916,6 +916,16 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </div>
               <div className="flex items-center gap-0.5 shrink-0">
                 <NotificationsBell workspaceId={workspaceId} projectId={currentProjectId} />
+                {onCloseMobile && (
+                  <button
+                    type="button"
+                    onClick={onCloseMobile}
+                    className="md:hidden flex h-8 w-8 items-center justify-center text-muted hover:text-text hover:bg-hi theme-radius-xs transition cursor-pointer"
+                    aria-label="Close sidebar"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
             <div className="px-3 pt-2 pb-3">

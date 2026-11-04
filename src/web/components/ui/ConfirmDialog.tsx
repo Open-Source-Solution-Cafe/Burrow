@@ -35,17 +35,17 @@ export function ConfirmDialog({
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button
           variant="ghost"
+          size="sm"
           onClick={onCancel}
           disabled={busy}
-          className="min-h-[44px] sm:min-h-0"
         >
           {cancelLabel}
         </Button>
         <Button
           variant={danger ? 'danger' : 'primary'}
+          size="sm"
           onClick={onConfirm}
           disabled={busy}
-          className="min-h-[44px] sm:min-h-0"
         >
           {busy ? 'Working…' : confirmLabel}
         </Button>

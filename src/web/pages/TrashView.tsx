@@ -79,9 +79,9 @@ export function TrashView() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
+      <div className="max-w-4xl mx-auto py-6 px-4 sm:py-8 sm:px-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[var(--hair)] pb-5 flex-wrap gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[var(--hair)] pb-5 gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[var(--text)] flex items-center gap-2.5">
               <Trash2 className="w-6 h-6 text-[var(--danger)]" />
@@ -126,7 +126,7 @@ export function TrashView() {
               notepads.map((item) => (
                 <div
                   key={item.id}
-                  className="p-3.5 bg-[var(--surface)] border border-[var(--line)] border-l-4 border-l-[var(--c1)] flex items-center justify-between gap-3 hover:bg-[var(--hi)] transition"
+                  className="p-3 sm:p-3.5 bg-[var(--surface)] border border-[var(--line)] border-l-4 border-l-[var(--c1)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[var(--hi)] transition"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 bg-[var(--surface2)] border border-[var(--line)] flex items-center justify-center shrink-0 text-base">
@@ -142,11 +142,12 @@ export function TrashView() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center justify-end gap-2 shrink-0 pt-1 sm:pt-0 border-t border-[var(--hair)] sm:border-0">
                     <Button
                       variant="secondary"
+                      size="sm"
                       onClick={() => handleRestoreNotepad(item.id)}
-                      className="px-2.5 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0 flex items-center gap-1.5"
+                      className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
                       title="Restore"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
@@ -154,8 +155,9 @@ export function TrashView() {
                     </Button>
                     <Button
                       variant="danger"
+                      size="sm"
                       onClick={() => handlePermanentDeleteNotepad(item.id, item.title)}
-                      className="px-2.5 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0 flex items-center gap-1.5"
+                      className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
                       title="Permanently Delete"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -170,7 +172,7 @@ export function TrashView() {
               boards.map((b) => (
                 <div
                   key={b.id}
-                  className="p-3.5 bg-[var(--surface)] border border-[var(--line)] border-l-4 border-l-[var(--c2)] flex items-center justify-between gap-3 hover:bg-[var(--hi)] transition"
+                  className="p-3 sm:p-3.5 bg-[var(--surface)] border border-[var(--line)] border-l-4 border-l-[var(--c2)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-[var(--hi)] transition"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 bg-[var(--surface2)] border border-[var(--line)] flex items-center justify-center shrink-0 text-base">
@@ -186,11 +188,12 @@ export function TrashView() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center justify-end gap-2 shrink-0 pt-1 sm:pt-0 border-t border-[var(--hair)] sm:border-0">
                     <Button
                       variant="secondary"
+                      size="sm"
                       onClick={() => handleRestoreBoard(b.id)}
-                      className="px-2.5 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0 flex items-center gap-1.5"
+                      className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
                       title="Restore"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
@@ -198,8 +201,9 @@ export function TrashView() {
                     </Button>
                     <Button
                       variant="danger"
+                      size="sm"
                       onClick={() => handlePermanentDeleteBoard(b.id, b.name)}
-                      className="px-2.5 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0 flex items-center gap-1.5"
+                      className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
                       title="Permanently Delete"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

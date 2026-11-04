@@ -207,9 +207,9 @@ export function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
+    <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
       <Toaster position="bottom-right" richColors />
-      <div className="w-full max-w-sm border border-[var(--line)] chamfer-lg bg-[var(--surface)] p-8 space-y-6">
+      <div className="w-full max-w-sm border border-[var(--line)] chamfer-sm sm:chamfer-lg bg-[var(--surface)] p-5 sm:p-8 space-y-5 sm:space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">Burrow</h1>
           <p className="text-sm text-[var(--muted)]">
@@ -235,7 +235,7 @@ export function Login() {
                   setIsSignUp(false);
                   setError(null);
                 }}
-                className="text-[11px] font-medium text-[var(--accent)] hover:underline cursor-pointer"
+                className="min-h-[44px] min-w-[44px] inline-flex items-center justify-end text-[11px] font-semibold text-[var(--accent)] hover:underline cursor-pointer -my-2.5 -mr-1 px-1.5"
               >
                 Auto-fill
               </button>
@@ -299,7 +299,9 @@ export function Login() {
                 value={bootstrapToken}
                 onChange={(e) => setBootstrapToken(e.target.value)}
                 autoComplete="off"
-                className="w-full px-3 py-2 text-base sm:text-sm"
+                autoCapitalize="none"
+                spellCheck="false"
+                className="w-full px-3 py-2 text-base sm:text-sm font-mono"
               />
               <Button
                 type="submit"
@@ -340,6 +342,8 @@ export function Login() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Ada Lovelace"
+                    autoComplete="name"
+                    autoCapitalize="words"
                     className="w-full px-3 py-2 text-base sm:text-sm"
                   />
                 </div>
@@ -353,6 +357,10 @@ export function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
+                  autoComplete="email"
+                  inputMode="email"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   className="w-full px-3 py-2 text-base sm:text-sm"
                 />
               </div>
@@ -367,6 +375,7 @@ export function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
                   className="w-full px-3 py-2 text-base sm:text-sm"
                 />
               </div>
@@ -383,7 +392,10 @@ export function Login() {
                         value={bootstrapToken}
                         onChange={(e) => setBootstrapToken(e.target.value)}
                         placeholder="Leave blank unless initial server setup"
-                        className="w-full px-3 py-2 text-base sm:text-sm font-mono text-xs"
+                        autoComplete="off"
+                        autoCapitalize="none"
+                        spellCheck="false"
+                        className="w-full px-3 py-2 text-base sm:text-sm font-mono"
                       />
                     </div>
                   )}
@@ -400,7 +412,10 @@ export function Login() {
                       value={inviteToken}
                       onChange={(e) => setInviteToken(e.target.value)}
                       placeholder="Enter invite token"
-                      className="w-full px-3 py-2 text-base sm:text-sm font-mono text-xs"
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      spellCheck="false"
+                      className="w-full px-3 py-2 text-base sm:text-sm font-mono"
                     />
                     <p className="mt-1 text-[11px] text-[var(--muted)]">
                       If you received an invite link like{' '}
@@ -428,7 +443,7 @@ export function Login() {
                   setIsSignUp(!isSignUp);
                   setError(null);
                 }}
-                className="text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px]"
+                className="w-full inline-flex items-center justify-center text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px] py-2 cursor-pointer"
               >
                 {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
               </button>

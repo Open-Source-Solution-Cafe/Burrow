@@ -157,7 +157,7 @@ export function InviteAccept() {
 
   if (accountLoading || inviteLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
+      <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
         <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
           <div className="w-4 h-4 border-2 border-[var(--accent)] border-t-transparent animate-spin keep-round" />
           <span>Loading invitation details…</span>
@@ -169,8 +169,8 @@ export function InviteAccept() {
   // Invalid or expired invite
   if (inviteError || !inviteInfo) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
-        <div className="w-full max-w-md border border-[var(--line)] chamfer-lg bg-[var(--surface)] p-8 text-center space-y-5">
+      <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
+        <div className="w-full max-w-md border border-[var(--line)] chamfer-sm sm:chamfer-lg bg-[var(--surface)] p-5 sm:p-8 text-center space-y-5">
           <div className="mx-auto w-12 h-12 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--danger)] text-[var(--danger)] flex items-center justify-center">
             <AlertCircle className="w-6 h-6" />
           </div>
@@ -191,7 +191,7 @@ export function InviteAccept() {
           <div className="pt-2">
             <Link
               to="/login"
-              className="inline-block w-full py-2 px-4 min-h-[44px] text-sm font-medium bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-110 transition"
+              className="inline-flex items-center justify-center w-full py-2 px-4 min-h-[44px] text-sm font-medium bg-[var(--accent)] text-[var(--accent-ink)] hover:brightness-110 transition"
             >
               Go to Login
             </Link>
@@ -210,8 +210,8 @@ export function InviteAccept() {
     );
 
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
-        <div className="w-full max-w-md border border-[var(--line)] chamfer-lg bg-[var(--surface)] p-8 space-y-6">
+      <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
+        <div className="w-full max-w-md border border-[var(--line)] chamfer-sm sm:chamfer-lg bg-[var(--surface)] p-5 sm:p-8 space-y-5 sm:space-y-6">
           <div className="text-center space-y-2">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[var(--accent)] text-[var(--accent-ink)] mb-1">
               Workspace Invitation
@@ -293,8 +293,8 @@ export function InviteAccept() {
 
   // User is not logged in: Full signup / signin form right on the page!
   return (
-    <div className="flex min-h-screen items-center justify-center p-6 bg-[var(--bg)]">
-      <div className="w-full max-w-md border border-[var(--line)] chamfer-lg bg-[var(--surface)] p-8 space-y-6">
+    <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
+      <div className="w-full max-w-md border border-[var(--line)] chamfer-sm sm:chamfer-lg bg-[var(--surface)] p-5 sm:p-8 space-y-5 sm:space-y-6">
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium bg-[var(--accent)] text-[var(--accent-ink)] mb-1">
             Workspace Invitation
@@ -318,7 +318,7 @@ export function InviteAccept() {
             <button
               type="button"
               onClick={handleCopyToken}
-              className="flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline min-h-[44px] sm:min-h-0"
+              className="min-h-[44px] min-w-[44px] inline-flex items-center justify-end gap-1 text-[11px] font-semibold text-[var(--accent)] hover:underline cursor-pointer -my-2.5 -mr-1 px-1.5"
             >
               {copiedToken ? (
                 <>
@@ -333,7 +333,7 @@ export function InviteAccept() {
               )}
             </button>
           </div>
-          <div className="font-mono text-xs font-medium text-[var(--text)] truncate select-all">
+          <div className="font-mono text-xs font-medium text-[var(--text)] break-all select-all">
             {token}
           </div>
         </div>
@@ -393,6 +393,8 @@ export function InviteAccept() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ada Lovelace"
+                autoComplete="name"
+                autoCapitalize="words"
                 className="w-full px-3 py-2 text-base sm:text-sm"
               />
             </div>
@@ -405,6 +407,10 @@ export function InviteAccept() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck="false"
                 className="w-full px-3 py-2 text-base sm:text-sm"
               />
             </div>
@@ -417,6 +423,7 @@ export function InviteAccept() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="new-password"
                 className="w-full px-3 py-2 text-base sm:text-sm"
               />
             </div>
@@ -440,6 +447,10 @@ export function InviteAccept() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck="false"
                 className="w-full px-3 py-2 text-base sm:text-sm"
               />
             </div>
@@ -452,6 +463,7 @@ export function InviteAccept() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="current-password"
                 className="w-full px-3 py-2 text-base sm:text-sm"
               />
             </div>
@@ -471,7 +483,7 @@ export function InviteAccept() {
           <Link
             to="/login"
             search={{ inviteToken: token, email: inviteInfo.email, mode: inviteInfo.userExists ? 'signin' : 'signup' }}
-            className="inline-flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px]"
+            className="w-full inline-flex items-center justify-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px] py-2"
           >
             Prefer standard login page? Open here <ArrowRight className="w-3 h-3" />
           </Link>

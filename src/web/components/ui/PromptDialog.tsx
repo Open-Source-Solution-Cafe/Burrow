@@ -71,17 +71,17 @@ export function PromptDialog({
           <Button
             type="button"
             variant="ghost"
+            size="sm"
             onClick={onCancel}
             disabled={busy}
-            className="min-h-[44px] sm:min-h-0"
           >
             {cancelLabel}
           </Button>
           <Button
             type="submit"
             variant="primary"
+            size="sm"
             disabled={busy || (!allowEmpty && !value.trim())}
-            className="min-h-[44px] sm:min-h-0"
           >
             {busy ? 'Working…' : confirmLabel}
           </Button>

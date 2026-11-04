@@ -61,9 +61,16 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
 
   if (isLoading || !card) {
     return (
-      <div className="fixed inset-x-0 bottom-0 top-[8dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[540px] md:w-[680px] h-[100dvh] bg-[var(--surface)] border-t-2 border-[var(--line)] sm:border-t-0 sm:border-l sm:border-l-[var(--line)] z-50 p-6 flex flex-col items-center justify-center pb-[env(safe-area-inset-bottom)]">
-        <div className="text-sm text-[var(--muted)]">Loading card…</div>
-      </div>
+      <>
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs"
+          role="presentation"
+        />
+        <div className="fixed inset-x-0 bottom-0 top-[6dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[540px] md:w-[680px] h-[94dvh] sm:h-full bg-[var(--surface)] border-t-2 border-[var(--line)] sm:border-t-0 sm:border-l sm:border-l-[var(--line)] z-50 p-6 flex flex-col items-center justify-center pb-[env(safe-area-inset-bottom)]">
+          <div className="text-sm text-[var(--muted)]">Loading card…</div>
+        </div>
+      </>
     );
   }
 
@@ -211,109 +218,127 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
   const isoDueDate = card.dueDate ? new Date(card.dueDate).toISOString().slice(0, 10) : '';
 
   return (
-    <div className="fixed inset-x-0 bottom-0 top-[8dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[540px] md:w-[680px] h-[100dvh] bg-[var(--surface)] border-t-2 border-[var(--line)] sm:border-t-0 sm:border-l sm:border-l-[var(--line)] z-50 flex flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
-      {/* Top Header */}
-      <div className="p-4 border-b border-[var(--hair)] flex items-center justify-between gap-3 bg-[var(--surface2)]">
-        <div className="flex items-center gap-2">
-          <Select
-            value={card.columnId}
-            onChange={(e) => handleColumnChange(e.target.value)}
-            className="px-2.5 py-1 text-xs font-semibold min-h-[44px] sm:min-h-0"
-          >
-            {columns.length > 0 ? (
-              columns.map((col) => (
-                <option key={col.id} value={col.id}>
-                  {col.name}
-                </option>
-              ))
-            ) : (
-              <option value={card.columnId}>{(card as any).columnName || 'Column'}</option>
-            )}
-          </Select>
+    <>
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-40 bg-black/40 backdrop-blur-xs"
+        role="presentation"
+      />
+      <div className="fixed inset-x-0 bottom-0 top-[6dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[540px] md:w-[680px] h-[94dvh] sm:h-full bg-[var(--surface)] border-t-2 border-[var(--line)] sm:border-t-0 sm:border-l sm:border-l-[var(--line)] z-50 flex flex-col overflow-hidden pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+        {/* Mobile bottom-sheet handle */}
+        <div className="flex sm:hidden justify-center pt-2 pb-1 bg-[var(--surface2)]">
+          <div className="w-10 h-1 bg-[var(--line)]" />
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            onClick={handleDelete}
-            title="Delete card"
-            className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--danger)]"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={onClose}
-            title="Close"
-            className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
+        {/* Top Header */}
+        <div className="px-3.5 py-2.5 sm:p-4 border-b border-[var(--hair)] flex items-center justify-between gap-3 bg-[var(--surface2)]">
+          <div className="flex items-center gap-2">
+            <Select
+              value={card.columnId}
+              onChange={(e) => handleColumnChange(e.target.value)}
+              className="px-2.5 py-1 text-xs font-semibold w-auto"
+            >
+              {columns.length > 0 ? (
+                columns.map((col) => (
+                  <option key={col.id} value={col.id}>
+                    {col.name}
+                  </option>
+                ))
+              ) : (
+                <option value={card.columnId}>{(card as any).columnName || 'Column'}</option>
+              )}
+            </Select>
+          </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Title */}
-        <div>
-          <Input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={handleTitleBlur}
-            placeholder="Card Title"
-            className="w-full text-2xl md:text-2xl font-bold bg-transparent border-none focus:outline-none placeholder:text-[var(--muted)] text-[var(--text)] px-0"
-          />
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="ghost"
+              onClick={handleDelete}
+              title="Delete card"
+              className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--danger)]"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={onClose}
+              title="Close"
+              className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
-        {/* Metadata Properties Grid — flat, angular */}
-        <div className="bg-[var(--surface2)] p-4 border border-[var(--line)] space-y-3 text-xs">
-          {/* Priority — geometric selector */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-[var(--muted)] w-28">
-              <Flag className="w-3.5 h-3.5" />
-              <span>Priority</span>
-            </div>
-            <SegmentedControl
-              value={card.priority ?? ''}
-              onValueChange={(v) =>
-                handlePriorityChange(
-                  card.priority === v ? null : (v as 'low' | 'medium' | 'high' | 'urgent'),
-                )
-              }
-              options={PRIORITIES.map((p) => ({
-                value: p.value,
-                label: (
-                  <span className="inline-flex items-center gap-1.5">
-                    <StatusDiamond color={p.colorVar} size={8} />
-                    {p.label}
-                  </span>
-                ),
-              }))}
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto px-3.5 py-4 sm:p-6 space-y-4 sm:space-y-6">
+          {/* Title */}
+          <div>
+            <Input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleTitleBlur}
+              placeholder="Card Title"
+              className="w-full text-xl sm:text-2xl font-bold bg-transparent border-none focus:outline-none placeholder:text-[var(--muted)] text-[var(--text)] px-0 min-h-[36px] sm:min-h-0"
             />
           </div>
 
+        {/* Metadata Properties Grid — flat, angular */}
+        <div className="bg-[var(--surface2)] p-3 sm:p-4 border border-[var(--line)] space-y-3.5 sm:space-y-3 text-xs">
+          {/* Priority — geometric selector */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 shrink-0">
+              <Flag className="w-3.5 h-3.5" />
+              <span className="font-medium">Priority</span>
+            </div>
+            <div className="w-full sm:w-auto">
+              <SegmentedControl
+                fullWidth
+                className="w-full sm:w-auto"
+                value={card.priority ?? ''}
+                onValueChange={(v) =>
+                  handlePriorityChange(
+                    card.priority === v ? null : (v as 'low' | 'medium' | 'high' | 'urgent'),
+                  )
+                }
+                options={PRIORITIES.map((p) => ({
+                  value: p.value,
+                  label: (
+                    <span className="inline-flex items-center gap-1 sm:gap-1.5">
+                      <StatusDiamond color={p.colorVar} size={7} />
+                      <span>{p.label}</span>
+                    </span>
+                  ),
+                }))}
+              />
+            </div>
+          </div>
+
           {/* Due Date */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2 text-[var(--muted)] w-28">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 shrink-0">
               <Calendar className="w-3.5 h-3.5" />
-              <span>Due Date</span>
+              <span className="font-medium">Due Date</span>
             </div>
             <Input
               type="date"
               value={isoDueDate}
               onChange={handleDueDateChange}
-              className="px-2 py-1 text-xs min-h-[44px] sm:min-h-0 w-auto max-w-[10rem]"
+              className="px-2.5 py-1 text-xs w-auto max-w-[10rem]"
             />
           </div>
 
           {/* Assignees */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-2 text-[var(--muted)] w-28 pt-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 pt-0 sm:pt-1 shrink-0">
               <Users className="w-3.5 h-3.5" />
-              <span>Assignees</span>
+              <span className="font-medium">Assignees</span>
             </div>
-            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <div className="flex items-center gap-1.5 flex-wrap sm:justify-end flex-1">
+              {members.length === 0 && (
+                <span className="text-xs text-[var(--muted)] italic">No workspace members</span>
+              )}
               {members.map((m) => {
                 const isAssigned = assignees.some((a: any) => a.userId === m.userId);
                 return (
@@ -321,7 +346,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                     key={m.userId}
                     type="button"
                     onClick={() => toggleAssignee(m.userId)}
-                    className={`px-2 py-1 min-h-[44px] sm:min-h-0 border text-xs flex items-center gap-1.5 transition ${
+                    className={`px-2 py-1 h-7 min-h-0 border text-xs flex items-center gap-1.5 transition cursor-pointer select-none ${
                       isAssigned
                         ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-ink)] font-medium'
                         : 'border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)]'
@@ -336,12 +361,12 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           </div>
 
           {/* Tags */}
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-2 text-[var(--muted)] w-28 pt-1">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 pt-0 sm:pt-1 shrink-0">
               <Tag className="w-3.5 h-3.5" />
-              <span>Tags</span>
+              <span className="font-medium">Tags</span>
             </div>
-            <div className="flex items-center gap-1.5 flex-wrap justify-end flex-1">
+            <div className="flex items-center gap-1.5 flex-wrap sm:justify-end flex-1">
               {projectTags.length === 0 && !isCreatingTag && (
                 <span className="text-xs text-[var(--muted)] italic">No tags in project</span>
               )}
@@ -352,7 +377,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                     key={pt.id}
                     type="button"
                     onClick={() => toggleTag(pt.id)}
-                    className={`px-2 py-1 min-h-[44px] sm:min-h-0 border text-xs flex items-center gap-1.5 transition cursor-pointer select-none ${
+                    className={`px-2 py-0.5 h-7 min-h-0 border text-xs flex items-center gap-1.5 transition cursor-pointer select-none ${
                       isSelected
                         ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-ink)] font-medium'
                         : 'border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)]'
@@ -366,7 +391,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
               })}
 
               {isCreatingTag ? (
-                <div className="inline-flex items-center gap-1 border border-[var(--accent)] bg-[var(--surface)] px-1.5 py-0.5">
+                <div className="inline-flex items-center gap-1 border border-[var(--accent)] bg-[var(--surface)] px-2 py-0.5 h-7 min-h-0">
                   <span className="text-[var(--muted)] text-xs">#</span>
                   <input
                     type="text"
@@ -385,16 +410,16 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                       }
                     }}
                     placeholder="tag name"
-                    className="bg-transparent border-none text-xs text-[var(--text)] focus:outline-none w-20"
+                    className="bg-transparent border-none text-xs text-[var(--text)] focus:outline-none w-24"
                   />
                   <button
                     type="button"
                     disabled={isSubmittingTag}
                     onClick={handleCreateTag}
-                    className="text-[var(--accent)] hover:opacity-80 p-0.5 cursor-pointer"
+                    className="text-[var(--accent)] hover:opacity-80 p-0.5 min-w-[24px] min-h-[24px] sm:min-w-0 sm:min-h-0 flex items-center justify-center cursor-pointer"
                     title="Save tag"
                   >
-                    <Plus className="w-3 h-3" />
+                    <Plus className="w-3.5 h-3.5" />
                   </button>
                   <button
                     type="button"
@@ -402,20 +427,20 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                       setIsCreatingTag(false);
                       setNewTagName('');
                     }}
-                    className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 cursor-pointer"
+                    className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 min-w-[24px] min-h-[24px] sm:min-w-0 sm:min-h-0 flex items-center justify-center cursor-pointer"
                     title="Cancel"
                   >
-                    <X className="w-3 h-3" />
+                    <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => setIsCreatingTag(true)}
-                  className="px-2 py-1 min-h-[44px] sm:min-h-0 border border-dashed border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] text-xs flex items-center gap-1 transition cursor-pointer select-none"
+                  className="px-2 py-0.5 h-7 min-h-0 border border-dashed border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] text-xs flex items-center gap-1 transition cursor-pointer select-none"
                   title="Create new tag"
                 >
-                  <Plus className="w-3 h-3" />
+                  <Plus className="w-3.5 h-3.5" />
                   <span>New tag</span>
                 </button>
               )}
@@ -446,5 +471,6 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
         <CommentsFeed workspaceId={workspaceId} projectId={projectId} cardId={cardId} />
       </div>
     </div>
+    </>
   );
 }

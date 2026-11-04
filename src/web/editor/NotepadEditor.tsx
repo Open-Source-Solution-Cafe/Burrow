@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Download,
   FileText,
@@ -23,12 +24,13 @@ import {
   Plus,
   Printer,
   Search,
+  Share2,
   Star,
   Tag,
   Trash2,
   X,
 } from 'lucide-react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import { schema } from './schema';
 import { MediaPicker } from './MediaPicker';
@@ -392,7 +394,12 @@ function NotepadEditorInner({
         hasLockRef.current = false;
       },
       onStateChange: (state) => {
-        if (isMountedRef.current) setSaveStatus(state.status);
+        if (isMountedRef.current) {
+          setSaveStatus(state.status);
+          if (state.status === 'error' && state.error && !(state.error instanceof SaveConflictError)) {
+            toast.error(state.error.message || 'Failed to save changes');
+          }
+        }
       },
       onScopeSwitched: (nextScope) => {
         const nextData = pendingDataRef.current;
@@ -932,6 +939,32 @@ function NotepadEditorInner({
           </div>
         </div>
       )}
+
+      {/* Top Banner: Save Error */}
+      {saveStatus === 'error' && !conflictBanner && (
+        <div className="p-3 bg-[var(--surface2)] border border-[var(--danger)]/40 border-l-4 border-l-[var(--danger)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[var(--text)]">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-[var(--danger)] shrink-0" />
+            <span>Could not save changes to server. Your edits are held locally.</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void saveController.retry()}
+              className="px-3 py-1.5 bg-[var(--danger)] text-white text-xs font-medium hover:brightness-110 transition cursor-pointer flex items-center justify-center min-h-[36px] sm:min-h-0"
+            >
+              Retry save
+            </button>
+            <button
+              type="button"
+              onClick={handleDiscardSave}
+              className="px-2.5 py-1.5 text-[var(--muted)] hover:text-[var(--text)] underline text-xs cursor-pointer flex items-center justify-center min-h-[36px] sm:min-h-0"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 
@@ -1029,12 +1062,28 @@ function NotepadEditorInner({
     (pt) => pt.name.toLowerCase() === cleanTagSearch.toLowerCase(),
   );
 
+  const handleShare = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: data.title || 'Untitled Notepad',
+          url: window.location.href,
+        });
+        return;
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+    navigator.clipboard?.writeText(window.location.href);
+    toast.success('Notepad link copied to clipboard');
+  }, [data.title]);
+
   const tagsNode = (
     <div className="flex items-center gap-1.5 flex-wrap">
       {attachedTags.map((tag) => (
         <span
           key={tag.id}
-          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-[var(--surface2)] border border-[var(--line)] text-[var(--text)] select-none"
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs bg-[var(--surface2)] border border-[var(--line)] text-[var(--text)] select-none"
         >
           <span className="text-[var(--muted)]">#</span>
           <span>{tag.name}</span>
@@ -1042,7 +1091,7 @@ function NotepadEditorInner({
             type="button"
             onClick={() => removeTag(tag.id)}
             title={`Remove #${tag.name}`}
-            className="p-0.5 text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
+            className="p-1 min-w-[24px] min-h-[24px] flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
           >
             <X className="w-3 h-3" />
           </button>
@@ -1054,65 +1103,71 @@ function NotepadEditorInner({
           type="button"
           onClick={() => setShowTagMenu((v) => !v)}
           title="Add tag"
-          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs border border-dashed border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] bg-[var(--surface)] transition cursor-pointer select-none"
+          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-dashed border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] bg-[var(--surface)] transition cursor-pointer select-none min-h-[30px]"
         >
           <Plus className="w-3 h-3" />
           <span>Tag</span>
         </button>
 
         {showTagMenu && (
-          <div className="absolute left-0 top-full mt-1 w-52 bg-[var(--surface)] border border-[var(--line)] p-1.5 z-40 text-xs">
-            <div className="mb-1.5">
-              <input
-                type="text"
-                autoFocus
-                value={tagSearch}
-                onChange={(e) => setTagSearch(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    await handleAddOrCreateTag();
-                  } else if (e.key === 'Escape') {
-                    setShowTagMenu(false);
-                  }
-                }}
-                placeholder="Search or new tag…"
-                className="w-full px-2 py-1 text-xs bg-[var(--surface2)] border border-[var(--line)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-              />
-            </div>
-            <div className="max-h-36 overflow-y-auto space-y-0.5">
-              {availableTags.map((pt) => (
-                <button
-                  key={pt.id}
-                  type="button"
-                  onClick={() => {
-                    addTag(pt.id);
-                    setShowTagMenu(false);
-                    setTagSearch('');
+          <>
+            <div
+              onClick={() => setShowTagMenu(false)}
+              className="fixed inset-0 z-30 bg-black/20 sm:hidden"
+            />
+            <div className="absolute left-0 top-full mt-1 w-56 bg-[var(--surface)] border border-[var(--line)] p-1.5 z-40 text-xs">
+              <div className="mb-1.5">
+                <input
+                  type="text"
+                  autoFocus
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      await handleAddOrCreateTag();
+                    } else if (e.key === 'Escape') {
+                      setShowTagMenu(false);
+                    }
                   }}
-                  className="w-full text-left px-2 py-1 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] flex items-center gap-1.5 cursor-pointer transition"
-                >
-                  <Tag className="w-3 h-3 shrink-0" style={{ color: pt.color || 'var(--c4)' }} />
-                  <span>#{pt.name}</span>
-                </button>
-              ))}
-              {cleanTagSearch && !exactTagMatch && (
-                <button
-                  type="button"
-                  onClick={handleAddOrCreateTag}
-                  className="w-full text-left px-2 py-1 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] flex items-center gap-1.5 text-[var(--accent)] hover:text-[var(--accent-ink)] font-medium cursor-pointer transition"
-                >
-                  <Plus className="w-3 h-3 shrink-0" />
-                  <span>Create "#{cleanTagSearch}"</span>
-                </button>
-              )}
-              {!cleanTagSearch && availableTags.length === 0 && (
-                <div className="p-2 text-center text-xs text-[var(--muted)]">
-                  No other tags. Type to create.
-                </div>
-              )}
+                  placeholder="Search or new tag…"
+                  className="w-full px-2 py-1.5 text-base sm:text-xs bg-[var(--surface2)] border border-[var(--line)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              </div>
+              <div className="max-h-36 overflow-y-auto space-y-0.5">
+                {availableTags.map((pt) => (
+                  <button
+                    key={pt.id}
+                    type="button"
+                    onClick={() => {
+                      addTag(pt.id);
+                      setShowTagMenu(false);
+                      setTagSearch('');
+                    }}
+                    className="w-full text-left px-2 py-1.5 min-h-[36px] sm:min-h-0 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] flex items-center gap-1.5 cursor-pointer transition"
+                  >
+                    <Tag className="w-3 h-3 shrink-0" style={{ color: pt.color || 'var(--c4)' }} />
+                    <span>#{pt.name}</span>
+                  </button>
+                ))}
+                {cleanTagSearch && !exactTagMatch && (
+                  <button
+                    type="button"
+                    onClick={handleAddOrCreateTag}
+                    className="w-full text-left px-2 py-1.5 min-h-[36px] sm:min-h-0 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] flex items-center gap-1.5 text-[var(--accent)] hover:text-[var(--accent-ink)] font-medium cursor-pointer transition"
+                  >
+                    <Plus className="w-3 h-3 shrink-0" />
+                    <span>Create "#{cleanTagSearch}"</span>
+                  </button>
+                )}
+                {!cleanTagSearch && availableTags.length === 0 && (
+                  <div className="p-2 text-center text-xs text-[var(--muted)]">
+                    No other tags. Type to create.
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     </div>
@@ -1124,56 +1179,72 @@ function NotepadEditorInner({
         variant="ghost"
         onClick={() => setShowExportMenu((v) => !v)}
         title="Document actions"
-        className="p-1.5 border border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] transition"
+        className="p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 border border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] transition flex items-center justify-center cursor-pointer"
       >
         <MoreHorizontal className="w-4 h-4" />
       </Button>
       {showExportMenu && (
-        <div className="absolute right-0 top-full mt-1 w-56 bg-[var(--surface)] border border-[var(--line)] p-1 z-30 text-xs">
-          <button
-            onClick={() => {
-              setShowExportMenu(false);
-              setDialogState({ type: 'template' });
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--text)] hover:bg-[var(--hi)]"
-          >
-            <LayoutTemplate className="w-3.5 h-3.5" />
-            <span>Apply a template…</span>
-          </button>
-          <button
-            onClick={() => {
-              setShowExportMenu(false);
-              exportMarkdown();
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--text)] hover:bg-[var(--hi)]"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export to Markdown</span>
-          </button>
-          <button
-            onClick={() => {
-              setShowExportMenu(false);
-              window.print();
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--text)] hover:bg-[var(--hi)]"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print / Export as PDF</span>
-          </button>
-          <div className="my-1 border-t border-[var(--line)]" />
-          {data.kind !== 'card' && (
+        <>
+          <div
+            onClick={() => setShowExportMenu(false)}
+            className="fixed inset-0 z-30 bg-black/20 sm:hidden"
+          />
+          <div className="absolute right-0 top-full mt-1 w-56 bg-[var(--surface)] border border-[var(--line)] p-1 z-40 text-xs">
             <button
               onClick={() => {
                 setShowExportMenu(false);
-                setConfirmDeleteOpen(true);
+                void handleShare();
               }}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--danger)] hover:bg-[var(--danger)]/10 cursor-pointer"
+              className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Delete to Trash</span>
+              <Share2 className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span>Share notepad…</span>
             </button>
-          )}
-        </div>
+            <button
+              onClick={() => {
+                setShowExportMenu(false);
+                setDialogState({ type: 'template' });
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
+            >
+              <LayoutTemplate className="w-3.5 h-3.5" />
+              <span>Apply a template…</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowExportMenu(false);
+                exportMarkdown();
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export to Markdown</span>
+            </button>
+            <button
+              onClick={() => {
+                setShowExportMenu(false);
+                window.print();
+              }}
+              className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print / Export as PDF</span>
+            </button>
+            <div className="my-1 border-t border-[var(--line)]" />
+            {data.kind !== 'card' && (
+              <button
+                onClick={() => {
+                  setShowExportMenu(false);
+                  setConfirmDeleteOpen(true);
+                }}
+                className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--danger)] hover:bg-[var(--danger)]/10 min-h-[44px] sm:min-h-0 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete to Trash</span>
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -1457,27 +1528,35 @@ function NotepadEditorInner({
               </Button>
             )}
 
-            <span className="text-xs text-[var(--muted)]">
-              {saveStatus === 'saving' && 'Saving…'}
-              {saveStatus === 'saved' && 'Saved'}
-              {saveStatus === 'conflict' && 'Conflict'}
-              {(saveStatus === 'error' || saveStatus === 'conflict') && (
-                <span className="inline-flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void saveController.retry()}
-                    className="text-rose-500 hover:text-[var(--danger)] underline font-medium cursor-pointer"
-                  >
-                    Retry save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDiscardSave}
-                    className="text-[var(--muted)] hover:text-[var(--text)] underline cursor-pointer"
-                  >
-                    Discard
-                  </button>
-                </span>
+            <span
+              className="flex items-center gap-1.5 text-xs text-[var(--muted)]"
+              title={
+                saveStatus === 'saving'
+                  ? 'Saving changes…'
+                  : saveStatus === 'saved'
+                  ? 'All changes saved'
+                  : 'Save failed — click to retry'
+              }
+            >
+              {saveStatus === 'error' || saveStatus === 'conflict' ? (
+                <button
+                  type="button"
+                  onClick={() => void saveController.retry()}
+                  className="flex items-center gap-1 text-[var(--danger)] hover:underline cursor-pointer"
+                  title="Save failed — click to retry"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Failed</span>
+                </button>
+              ) : (
+                <>
+                  <span
+                    className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
+                  />
+                  <span className="hidden sm:inline">
+                    {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                  </span>
+                </>
               )}
             </span>
 
@@ -1525,8 +1604,8 @@ function NotepadEditorInner({
         disabled={!isEditable}
         className={
           isModern
-            ? 'w-full resize-none overflow-hidden bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-[32px] sm:text-[40px] font-bold tracking-[-0.03em] leading-[1.1] text-[var(--text)] placeholder:text-[var(--muted)]/50 transition-colors disabled:opacity-70 disabled:cursor-not-allowed'
-            : 'w-full resize-none overflow-hidden bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 font-display text-[34px] sm:text-[46px] font-extrabold leading-[1.05] tracking-[-0.02em] text-[var(--text)] placeholder:text-[var(--muted)]/50 transition-colors disabled:opacity-70 disabled:cursor-not-allowed'
+            ? 'w-full resize-none overflow-hidden bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 text-[26px] sm:text-[36px] font-bold tracking-[-0.03em] leading-[1.15] text-[var(--text)] placeholder:text-[var(--muted)]/50 transition-colors disabled:opacity-70 disabled:cursor-not-allowed'
+            : 'w-full resize-none overflow-hidden bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 font-display text-[26px] sm:text-[42px] font-extrabold leading-[1.1] tracking-[-0.02em] text-[var(--text)] placeholder:text-[var(--muted)]/50 transition-colors disabled:opacity-70 disabled:cursor-not-allowed'
         }
       />
     </div>
@@ -1541,42 +1620,50 @@ function NotepadEditorInner({
         className="w-full min-h-full flex flex-col relative"
       >
         {/* Top Header Bar */}
-        <div className="no-print min-h-[46px] py-1 shrink-0 flex items-center justify-between gap-4 px-6 text-[13px] text-[var(--muted)] border-b border-[var(--hair)]">
-          <div className="flex items-center gap-3 min-w-0 flex-wrap">
-            <div className="flex items-center gap-1.5 shrink-0">
+        <div className="no-print min-h-[48px] py-1 shrink-0 flex items-center justify-between gap-2 px-3 sm:px-6 text-[13px] text-[var(--muted)] border-b border-[var(--hair)]">
+          <div className="flex items-center gap-2 min-w-0">
+            <Link
+              {...projectTarget(data.workspaceId, data.projectId)}
+              className="flex items-center gap-1 text-[var(--muted)] hover:text-[var(--text)] transition shrink-0 py-1.5 pr-1 min-h-[44px] sm:min-h-0 font-medium"
+              title="Back to project"
+            >
+              <ChevronLeft className="w-4 h-4 sm:hidden shrink-0" />
               <span>Notepads</span>
-              <span className="opacity-50">/</span>
-              <span className="text-[var(--text)] font-medium truncate max-w-[200px]">
-                {data.title || 'Untitled'}
-              </span>
-            </div>
-            {tagsNode}
+            </Link>
+            <span className="opacity-50 hidden sm:inline">/</span>
+            <span className="text-[var(--text)] font-medium truncate max-w-[200px] hidden sm:inline">
+              {data.title || 'Untitled'}
+            </span>
           </div>
 
-          <div className="flex items-center gap-3.5 shrink-0">
-            <span>
-              {saveStatus === 'saving' && 'Saving…'}
-              {saveStatus === 'saved' && 'Saved'}
-              {saveStatus === 'conflict' && 'Conflict'}
-              {(saveStatus === 'error' || saveStatus === 'conflict') && (
-                <span className="inline-flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void saveController.retry()}
-                    className="text-[var(--danger)] underline cursor-pointer"
-                  >
-                    Retry save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDiscardSave}
-                    className="text-[var(--muted)] underline cursor-pointer"
-                  >
-                    Discard
-                  </button>
+          <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+            {/* Compact Save Status: fixed dot on mobile, text on desktop */}
+            <div className="flex items-center px-1">
+              {saveStatus === 'error' || saveStatus === 'conflict' ? (
+                <button
+                  type="button"
+                  onClick={() => void saveController.retry()}
+                  className="flex items-center gap-1 text-[var(--danger)] hover:opacity-80 transition cursor-pointer p-1"
+                  title="Save failed — click to retry"
+                  aria-label="Save failed, click to retry"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline text-xs font-medium">Failed</span>
+                </button>
+              ) : (
+                <span
+                  className="flex items-center gap-1.5 text-[var(--muted)] text-xs font-medium"
+                  title={saveStatus === 'saving' ? 'Saving changes…' : 'All changes saved'}
+                >
+                  <span
+                    className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
+                  />
+                  <span className="hidden sm:inline">
+                    {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                  </span>
                 </span>
               )}
-            </span>
+            </div>
 
             {!hideFavorite && (
               <button
@@ -1584,7 +1671,7 @@ function NotepadEditorInner({
                 onClick={toggleFavorite}
                 title={data.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
                 aria-label="Favorite"
-                className={`p-1.5 transition cursor-pointer ${
+                className={`p-2 sm:p-1.5 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
                   data.isFavorite
                     ? 'text-[var(--accent)]'
                     : 'text-[var(--muted)] hover:text-[var(--text)]'
@@ -1596,11 +1683,8 @@ function NotepadEditorInner({
 
             <button
               type="button"
-              onClick={() => {
-                navigator.clipboard?.writeText(window.location.href);
-                toast.success('Notepad link copied to clipboard');
-              }}
-              className="h-7 px-3 theme-radius-md bg-[var(--accent)] text-[var(--accent-ink)] font-semibold text-[13px] flex items-center hover:brightness-110 transition cursor-pointer"
+              onClick={() => void handleShare()}
+              className="hidden sm:flex h-7 px-3 theme-radius-md bg-[var(--accent)] text-[var(--accent-ink)] font-semibold text-[13px] items-center hover:brightness-110 transition cursor-pointer"
             >
               Share
             </button>
@@ -1612,9 +1696,10 @@ function NotepadEditorInner({
         </div>
 
         {/* Flat Obsidian Canvas */}
-        <div className="w-full max-w-[780px] pl-6 sm:pl-24 pr-6 pt-11 pb-20 flex flex-col gap-5">
+        <div className="w-full max-w-[780px] pl-4 sm:pl-24 pr-4 sm:pr-6 pt-4 sm:pt-11 pb-20 flex flex-col gap-4 sm:gap-5">
           {bannersNode}
           {titleNode}
+          <div className="w-full flex items-center gap-2 flex-wrap pt-0.5">{tagsNode}</div>
           {starterTemplateNode}
           <div className="w-full pt-2 min-h-[350px]">{blockNoteViewNode}</div>
           {backlinksNode}
@@ -1630,46 +1715,53 @@ function NotepadEditorInner({
       ref={containerRef}
       onFocusCapture={handleFocus}
       onBlurCapture={handleBlur}
-      className="w-full min-h-full flex flex-col px-4 sm:px-5 pb-5 relative"
+      className="w-full min-h-full flex flex-col px-0 sm:px-5 pb-5 relative"
     >
       {/* Top Header Bar */}
-      <div className="no-print min-h-[60px] py-2 shrink-0 flex items-center justify-between gap-4 text-[13px] font-semibold text-[var(--ink-muted)]">
-        <div className="flex items-center gap-3 min-w-0 flex-wrap">
-          <div className="flex items-center gap-1.5 shrink-0">
+      <div className="no-print min-h-[48px] sm:min-h-[60px] py-1.5 sm:py-2 px-3 sm:px-0 shrink-0 flex items-center justify-between gap-2 sm:gap-4 text-[13px] font-semibold text-[var(--ink-muted)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <Link
+            {...projectTarget(data.workspaceId, data.projectId)}
+            className="flex items-center gap-1 text-[var(--ink-muted)] hover:text-[var(--text)] transition shrink-0 py-1.5 pr-2 min-h-[44px] sm:min-h-0"
+            title="Back to project"
+          >
+            <ChevronLeft className="w-4 h-4 sm:hidden shrink-0" />
             <span>Notepads</span>
-            <span className="opacity-50">/</span>
-            <span className="text-[var(--text)] truncate max-w-[200px]">
-              {data.title || 'Untitled'}
-            </span>
-          </div>
-          {tagsNode}
+          </Link>
+          <span className="opacity-50 hidden sm:inline">/</span>
+          <span className="text-[var(--text)] truncate max-w-[200px] hidden sm:inline">
+            {data.title || 'Untitled'}
+          </span>
         </div>
 
-        <div className="flex items-center gap-3.5 shrink-0">
-          <span className="flex items-center gap-2 font-medium text-[var(--ink-muted)]">
-            <span className="diamond-dot" />
-            {saveStatus === 'saving' && 'Saving…'}
-            {saveStatus === 'saved' && 'Saved'}
-            {saveStatus === 'conflict' && 'Conflict'}
-            {(saveStatus === 'error' || saveStatus === 'conflict') && (
-              <span className="inline-flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void saveController.retry()}
-                  className="text-[var(--danger)] underline cursor-pointer"
-                >
-                  Retry save
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDiscardSave}
-                  className="text-[var(--muted)] underline cursor-pointer"
-                >
-                  Discard
-                </button>
+        <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+          {/* Compact Save Status: fixed dot on mobile, text on desktop */}
+          <div className="flex items-center px-1">
+            {saveStatus === 'error' || saveStatus === 'conflict' ? (
+              <button
+                type="button"
+                onClick={() => void saveController.retry()}
+                className="flex items-center gap-1 text-[var(--danger)] hover:opacity-80 transition cursor-pointer p-1"
+                title="Save failed — click to retry"
+                aria-label="Save failed, click to retry"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline text-xs font-medium">Failed</span>
+              </button>
+            ) : (
+              <span
+                className="flex items-center gap-1.5 font-medium text-[var(--ink-muted)] text-xs sm:text-[13px]"
+                title={saveStatus === 'saving' ? 'Saving changes…' : 'All changes saved'}
+              >
+                <span
+                  className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
+                />
+                <span className="hidden sm:inline">
+                  {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                </span>
               </span>
             )}
-          </span>
+          </div>
 
           <div className="hidden sm:flex items-center">
             <Avatar
@@ -1692,7 +1784,7 @@ function NotepadEditorInner({
               onClick={toggleFavorite}
               title={data.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
               aria-label="Favorite"
-              className={`p-1.5 transition cursor-pointer ${
+              className={`p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
                 data.isFavorite
                   ? 'text-[var(--accent)]'
                   : 'text-[var(--ink-muted)] hover:text-[var(--text)]'
@@ -1704,11 +1796,8 @@ function NotepadEditorInner({
 
           <button
             type="button"
-            onClick={() => {
-              navigator.clipboard?.writeText(window.location.href);
-              toast.success('Notepad link copied to clipboard');
-            }}
-            className="h-8 px-[18px] chamfer-btn bg-[var(--accent)] text-[var(--accent-ink)] flex items-center text-[12px] font-display uppercase tracking-[0.08em] hover:brightness-110 transition cursor-pointer"
+            onClick={() => void handleShare()}
+            className="hidden sm:flex h-8 px-[18px] chamfer-btn bg-[var(--accent)] text-[var(--accent-ink)] items-center text-[12px] font-display uppercase tracking-[0.08em] hover:brightness-110 transition cursor-pointer"
           >
             Share
           </button>
@@ -1721,11 +1810,12 @@ function NotepadEditorInner({
         </div>
       </div>
 
-      {/* Elevated Chamfered Surface Card */}
-      <div className="flex-1 chamfer-lg bg-[var(--surface)] px-6 sm:pl-10 sm:pr-9 pt-11 pb-24 flex gap-7 min-h-[calc(100vh-84px)]">
-        <div className="flex-1 min-w-0 flex flex-col gap-5">
+      {/* Surface Card: full-bleed on mobile, elevated chamfered on desktop */}
+      <div className="flex-1 chamfer-none sm:chamfer-lg bg-[var(--surface)] px-4 sm:pl-10 sm:pr-9 pt-4 sm:pt-11 pb-24 flex gap-7 min-h-[calc(100vh-84px)] border-0 sm:border border-[var(--line)]">
+        <div className="flex-1 min-w-0 flex flex-col gap-4 sm:gap-5">
           {bannersNode}
           {titleNode}
+          <div className="w-full flex items-center gap-2 flex-wrap pt-0.5">{tagsNode}</div>
           {starterTemplateNode}
           <div className="w-full border-t border-[var(--hair)] pt-4 min-h-[350px]">
             {blockNoteViewNode}

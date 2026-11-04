@@ -46,9 +46,9 @@ export function SegmentedControl({
             type="button"
             onClick={() => onValueChange(opt.value)}
             className={cn(
-              'inline-flex min-h-[44px] items-center justify-center gap-1.5 px-4 text-[12px] font-bold uppercase tracking-[0.05em] transition-colors md:min-h-0 md:px-3 md:py-1.5',
-              size === 'sm' && 'px-2.5 text-[11px]',
-              fullWidth && 'flex-1',
+              'inline-flex h-8 items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 text-[11px] sm:text-[12px] font-bold uppercase tracking-[0.05em] transition-colors',
+              size === 'sm' && 'h-7 px-2 text-[10px] sm:text-[11px]',
+              fullWidth && 'flex-1 px-1 sm:px-2.5',
               active
                 ? 'bg-[var(--accent)] text-[var(--accent-ink)]'
                 : 'bg-transparent text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--hi-ink)]',

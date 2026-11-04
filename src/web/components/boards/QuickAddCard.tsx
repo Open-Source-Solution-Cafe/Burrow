@@ -473,7 +473,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
               type="button"
               onClick={() => setChips((c) => ({ ...c, notepad: undefined }))}
               aria-label="Remove notepad"
-              className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center hover:text-[var(--danger)]"
+              className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
             </button>
@@ -488,7 +488,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
               type="button"
               onClick={() => setChips((c) => ({ ...c, priority: undefined }))}
               aria-label="Remove priority"
-              className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center"
+              className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
             </button>
@@ -503,7 +503,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
               type="button"
               onClick={() => setChips((c) => ({ ...c, dueDate: undefined }))}
               aria-label="Remove due date"
-              className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center"
+              className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
             </button>
@@ -526,7 +526,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
                 }))
               }
               aria-label={`Remove ${a.name}`}
-              className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center"
+              className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
             </button>
@@ -554,7 +554,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
                   tags: c.tags.filter((x) => x.tagId !== t.tagId),
                 }))
               }
-              className="min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center"
+              className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
             </button>
@@ -570,7 +570,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
         placeholder="Type a title, / for commands, @ for members, # for tags…"
-        className="border-none bg-transparent px-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0"
+        className="border-none bg-transparent px-0 text-base md:text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[38px] md:min-h-0"
       />
 
       {/* Slash Menu Popup */}

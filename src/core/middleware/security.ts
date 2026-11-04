@@ -67,10 +67,22 @@ export const csrfProtection = createMiddleware(async (c, next) => {
   const origin = c.req.header('origin');
   if (origin) {
     try {
-      const originHost = new URL(origin).host;
-      const requestHost = new URL(c.req.url).host;
+      const originUrl = new URL(origin);
+      const originHost = originUrl.host;
+      const forwardedHost = c.req.header('x-forwarded-host');
+      const requestHost = forwardedHost || new URL(c.req.url).host;
+
       if (originHost !== requestHost) {
-        return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);
+        // Allow loopback / localhost cross-port requests in local development (e.g. Vite on 3005 proxying to API on 8787)
+        const isLoopbackOrigin =
+          originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1';
+        const requestHostname = requestHost.split(':')[0];
+        const isLoopbackRequest =
+          requestHostname === 'localhost' || requestHostname === '127.0.0.1';
+
+        if (!isLoopbackOrigin || !isLoopbackRequest) {
+          return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);
+        }
       }
     } catch {
       return c.json({ error: { code: 'forbidden', message: 'Cross-site request blocked' } }, 403);

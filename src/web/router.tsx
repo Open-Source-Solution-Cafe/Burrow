@@ -105,7 +105,7 @@ function AccountHome() {
     return (
       <form
         onSubmit={create}
-        className="mx-auto flex h-full w-full max-w-lg flex-col justify-center gap-4 p-8"
+        className="mx-auto flex min-h-[100dvh] w-full max-w-lg flex-col justify-center gap-4 px-4 py-6 sm:p-8"
       >
         <h1 className="text-2xl font-bold text-[var(--text)]">Create a workspace</h1>
         <p className="text-sm text-muted">
@@ -115,7 +115,7 @@ function AccountHome() {
           Workspace name
           <input
             id="first-workspace-name"
-            className="min-h-11 border border-line bg-surface px-3 text-sm"
+            className="min-h-11 border border-line bg-surface px-3 text-base sm:text-sm"
             value={workspaceName}
             onChange={(event) => setWorkspaceName(event.target.value)}
             maxLength={100}
@@ -130,7 +130,7 @@ function AccountHome() {
         <button
           type="submit"
           disabled={!workspaceName.trim() || createWorkspace.isPending}
-          className="min-h-11 bg-accent px-4 text-sm font-semibold text-accent-ink disabled:opacity-50"
+          className="min-h-11 bg-accent px-4 text-sm font-semibold text-accent-ink disabled:opacity-50 cursor-pointer"
         >
           {createWorkspace.isPending ? 'Creating…' : 'Create workspace'}
         </button>
@@ -139,7 +139,7 @@ function AccountHome() {
   }
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-4 overflow-y-auto p-8">
+    <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-4 overflow-y-auto px-4 py-6 sm:p-8">
       <h1 className="text-2xl font-bold text-[var(--text)]">Choose a workspace</h1>
       <div className="grid gap-2">
         {account.workspaces.map((workspace) => (

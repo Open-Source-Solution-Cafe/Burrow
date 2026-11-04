@@ -132,7 +132,7 @@ export function MembersSettings() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-8 px-6 space-y-8">
+      <div className="max-w-4xl mx-auto py-6 px-4 sm:py-8 sm:px-6 space-y-6 sm:space-y-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">
             Workspace Members
@@ -150,23 +150,27 @@ export function MembersSettings() {
 
         {/* Invite Member Section (Owner only) */}
         {isOwner && (
-          <div className="border border-[var(--line)] chamfer-sm bg-[var(--surface)] p-5 space-y-4">
-            <h2 className="text-sm font-semibold flex items-center gap-2 text-[var(--text)]">
+          <div className="border border-[var(--line)] chamfer-sm bg-[var(--surface)] p-4 sm:p-5 space-y-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-2 text-[var(--text)]">
               <UserPlus className="w-4 h-4 text-[var(--accent)]" /> Invite a teammate
             </h2>
-            <form onSubmit={handleCreateInvite} className="flex flex-wrap gap-2">
+            <form onSubmit={handleCreateInvite} className="flex flex-col sm:flex-row gap-2">
               <Input
                 type="email"
                 required
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="colleague@example.com"
-                className="flex-1 min-w-[200px] px-3 py-1.5 text-base sm:text-sm min-h-[44px] sm:min-h-0"
+                autoComplete="email"
+                inputMode="email"
+                autoCapitalize="none"
+                spellCheck="false"
+                className="flex-1 min-w-[200px]"
               />
               <Select
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as 'editor' | 'viewer')}
-                className="px-3 py-1.5 text-sm min-h-[44px] sm:min-h-0"
+                className="w-auto"
               >
                 <option value="editor">Editor</option>
                 <option value="viewer">Viewer</option>
@@ -174,15 +178,16 @@ export function MembersSettings() {
               <Button
                 type="submit"
                 variant="primary"
+                size="md"
                 disabled={createInvite.isPending}
-                className="px-4 py-1.5 text-sm font-medium min-h-[44px] sm:min-h-0"
+                className="px-4 font-medium"
               >
                 {createInvite.isPending ? 'Inviting…' : 'Generate Invite'}
               </Button>
             </form>
 
             {createdInvite && (
-              <div className="p-4 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--c4)] space-y-3">
+              <div className="p-3.5 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--c4)] space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text)]">
                     <Check className="w-4 h-4 text-[var(--c4)]" />
@@ -193,7 +198,7 @@ export function MembersSettings() {
                   <button
                     type="button"
                     onClick={() => setCreatedInvite(null)}
-                    className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0"
+                    className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 cursor-pointer"
                     title="Dismiss"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -215,14 +220,14 @@ export function MembersSettings() {
                       Open link <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
-                  <div className="p-2.5 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
+                  <div className="p-2 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
                     <span className="truncate font-mono text-[var(--text)]">
                       {createdInvite.url}
                     </span>
                     <button
                       type="button"
                       onClick={handleCopyUrl}
-                      className="flex items-center gap-1.5 shrink-0 px-2.5 py-1 min-h-[44px] sm:min-h-0 text-xs font-medium bg-[var(--surface2)] border border-[var(--line)] hover:bg-[var(--hi)] text-[var(--text)] transition"
+                      className="flex items-center gap-1.5 shrink-0 px-2 py-1 h-7 border text-xs font-medium bg-[var(--surface2)] border-[var(--line)] hover:bg-[var(--hi)] text-[var(--text)] transition cursor-pointer"
                     >
                       {copiedUrl ? (
                         <Check className="w-3.5 h-3.5 text-[var(--c4)]" />
@@ -240,14 +245,14 @@ export function MembersSettings() {
                     <KeyRound className="w-3 h-3 text-[var(--muted)]" /> Invite Token (for manual
                     entry on registration page)
                   </span>
-                  <div className="p-2.5 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
+                  <div className="p-2 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
                     <code className="font-mono font-semibold text-[var(--text)] select-all tracking-wider">
                       {createdInvite.token}
                     </code>
                     <button
                       type="button"
                       onClick={handleCopyToken}
-                      className="flex items-center gap-1.5 shrink-0 px-2.5 py-1 min-h-[44px] sm:min-h-0 text-xs font-medium bg-[var(--surface2)] border border-[var(--line)] hover:bg-[var(--hi)] text-[var(--text)] transition"
+                      className="flex items-center gap-1.5 shrink-0 px-2 py-1 h-7 border text-xs font-medium bg-[var(--surface2)] border-[var(--line)] hover:bg-[var(--hi)] text-[var(--text)] transition cursor-pointer"
                     >
                       {copiedToken ? (
                         <Check className="w-3.5 h-3.5 text-[var(--c4)]" />
@@ -269,28 +274,28 @@ export function MembersSettings() {
         )}
 
         {/* Members List */}
-        <div className="border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
-          <div className="px-5 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
+        <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
+          <div className="px-4 py-2.5 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
             Members ({members.length})
           </div>
 
           {members.map((member) => (
             <div
               key={member.userId}
-              className="px-5 py-3.5 flex items-center justify-between gap-4"
+              className="px-4 py-3 flex items-center justify-between gap-3 sm:gap-4"
             >
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
                 <Avatar name={member.name} size="sm" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-[var(--text)] truncate flex items-center gap-2">
-                    <span>{member.name}</span>
-                    {member.userId === account?.user?.id && <Badge>You</Badge>}
+                    <span className="truncate">{member.name}</span>
+                    {member.userId === account?.user?.id && <Badge className="shrink-0">You</Badge>}
                   </div>
                   <div className="text-xs text-[var(--muted)] truncate">{member.email}</div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 shrink-0">
                 {isOwner && member.userId !== account?.user?.id ? (
                   <Select
                     value={member.role}
@@ -300,7 +305,7 @@ export function MembersSettings() {
                         e.target.value as 'owner' | 'editor' | 'viewer',
                       )
                     }
-                    className="text-xs px-2.5 py-1 min-h-[44px] sm:min-h-0"
+                    className="text-xs px-2 py-1 w-auto"
                   >
                     <option value="owner">Owner</option>
                     <option value="editor">Editor</option>
@@ -313,11 +318,12 @@ export function MembersSettings() {
                 {isOwner && member.userId !== account?.user?.id && (
                   <Button
                     variant="ghost"
+                    size="sm"
                     onClick={() => setMemberToRemove({ id: member.userId, name: member.name })}
-                    className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--danger)]"
+                    className="p-1.5 text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
                     title="Remove member"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 )}
               </div>
@@ -327,13 +333,13 @@ export function MembersSettings() {
 
         {/* Pending Invites List */}
         {isOwner && invites.length > 0 && (
-          <div className="border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
-            <div className="px-5 py-3 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
+          <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
+            <div className="px-4 py-2.5 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
               Pending Invites ({invites.length})
             </div>
 
             {invites.map((inv) => (
-              <div key={inv.id} className="px-5 py-3 flex items-center justify-between text-sm">
+              <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm">
                 <div>
                   <span className="font-medium text-[var(--text)]">{inv.email}</span>
                   <span className="ml-2 text-xs text-[var(--muted)] capitalize">({inv.role})</span>
@@ -345,7 +351,7 @@ export function MembersSettings() {
                       onError: (err: any) => toast.error(err?.message || 'Failed to revoke invite'),
                     })
                   }
-                  className="text-xs text-[var(--danger)] hover:underline min-h-[44px] sm:min-h-0 cursor-pointer"
+                  className="text-xs text-[var(--danger)] hover:underline cursor-pointer py-1 px-1.5"
                 >
                   Revoke
                 </button>

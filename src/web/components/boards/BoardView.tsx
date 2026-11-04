@@ -176,9 +176,9 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg)] text-[var(--text)]">
       {/* Board Header Bar */}
-      <div className="p-4 px-4 md:px-6 border-b border-[var(--line)] flex items-center justify-between gap-4 bg-[var(--surface)]">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-2xl shrink-0">{board.icon || '📋'}</span>
+      <div className="px-3.5 py-2.5 sm:px-6 sm:py-3.5 border-b border-[var(--line)] flex items-center justify-between gap-3 bg-[var(--surface)]">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <span className="text-xl sm:text-2xl shrink-0">{board.icon || '📋'}</span>
           {isEditingBoardName ? (
             <input
               type="text"
@@ -190,7 +190,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
                 if (e.key === 'Enter') handleBoardNameSave();
                 if (e.key === 'Escape') setIsEditingBoardName(false);
               }}
-              className="text-xl bg-transparent border-b-2 border-[var(--accent)] focus:outline-none text-[var(--text)] min-w-0 text-[16px]"
+              className="text-lg sm:text-xl md:text-2xl bg-transparent border-b-2 border-[var(--accent)] focus:outline-none text-[var(--text)] min-w-0 text-[16px] w-full"
               style={{
                 fontFamily: 'Archivo, sans-serif',
                 fontVariationSettings: "'wdth' 122, 'wght' 800",
@@ -202,7 +202,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
                 setBoardName(board.name);
                 setIsEditingBoardName(true);
               }}
-              className="text-xl md:text-2xl text-[var(--text)] cursor-pointer hover:opacity-80 truncate tracking-tight"
+              className="text-lg sm:text-xl md:text-2xl text-[var(--text)] cursor-pointer hover:opacity-80 truncate tracking-tight font-bold"
               style={{
                 fontFamily: 'Archivo, sans-serif',
                 fontVariationSettings: "'wdth' 122, 'wght' 800",
@@ -215,28 +215,57 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           {viewMode === 'kanban' && (
-            <Button variant="primary" size="sm" onClick={() => setIsAddingColumn(true)}>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setIsAddingColumn(true)}
+              className="px-2.5 sm:px-3 min-h-[38px] sm:min-h-0"
+              title="Add Column"
+              aria-label="Add Column"
+            >
               <Plus className="w-3.5 h-3.5" />
-              <span>Add Column</span>
+              <span className="hidden sm:inline">Add Column</span>
             </Button>
           )}
           <Button
             variant="ghost"
             size="sm"
             onClick={() => setConfirmDeleteOpen(true)}
-            className="text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
+            className="p-1.5 text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer min-h-[38px] sm:min-h-0"
             title="Delete board to Trash"
+            aria-label="Delete board to Trash"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4" />
           </Button>
         </div>
       </div>
 
-      {/* Filter Bar + View Switcher — horizontally scrollable chip track on mobile */}
+      {/* Mobile View Switcher (Kanban | List | Calendar) */}
+      <div className="flex md:hidden items-center justify-between px-3.5 py-1.5 border-b border-[var(--hair)] bg-[var(--surface2)]">
+        <SegmentedControl
+          value={viewMode}
+          onValueChange={(v) => changeView(v as BoardViewMode)}
+          ariaLabel="Board view"
+          size="sm"
+          className="w-full"
+          fullWidth
+          options={VIEW_TABS.map((tab) => ({
+            value: tab.mode,
+            label: (
+              <span className="flex items-center gap-1.5">
+                <tab.icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </span>
+            ),
+          }))}
+        />
+      </div>
+
+      {/* Filter Bar + Desktop View Switcher — horizontally scrollable chip track */}
       <div className="border-b border-[var(--line)] bg-[var(--surface2)]">
-        <div className="px-4 md:px-6 py-2 flex items-center gap-2 md:gap-3 md:flex-wrap text-xs overflow-x-auto no-scrollbar whitespace-nowrap snap-x">
+        <div className="px-3.5 md:px-6 py-2 flex items-center gap-2 md:gap-3 md:flex-wrap text-xs overflow-x-auto no-scrollbar whitespace-nowrap snap-x">
           <div className="flex items-center gap-1.5 text-[var(--muted)] shrink-0">
             <Filter className="w-3.5 h-3.5" />
             <span className="font-semibold uppercase tracking-wider text-[10px]">Filter:</span>
@@ -251,7 +280,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
               onChange={(e) => setFilterSearch(e.target.value)}
               placeholder="Search cards…"
               aria-label="Search cards"
-              className="pl-7 pr-2 w-32 focus:w-44 transition-all"
+              className="pl-7 pr-2 w-28 sm:w-32 focus:w-40 sm:focus:w-44 transition-all text-xs"
             />
           </div>
 
@@ -260,7 +289,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
             aria-label="Filter by priority"
-            className="shrink-0 w-auto"
+            className="shrink-0 w-auto text-xs"
           >
             <option value="all">All Priorities</option>
             <option value="urgent">Urgent</option>
@@ -274,7 +303,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
             value={filterAssignee}
             onChange={(e) => setFilterAssignee(e.target.value)}
             aria-label="Filter by assignee"
-            className="shrink-0 w-auto"
+            className="shrink-0 w-auto text-xs"
           >
             <option value="all">All Assignees</option>
             {members.map((m) => (
@@ -289,7 +318,7 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
             value={filterTag}
             onChange={(e) => setFilterTag(e.target.value)}
             aria-label="Filter by tag"
-            className="shrink-0 w-auto"
+            className="shrink-0 w-auto text-xs"
           >
             <option value="all">All Tags</option>
             {tags.map((t) => (
@@ -309,19 +338,19 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
                 setFilterAssignee('all');
                 setFilterTag('all');
               }}
-              className="shrink-0"
+              className="shrink-0 text-xs"
             >
               <X className="w-3 h-3" />
               <span>Reset filters</span>
             </Chip>
           )}
 
-          {/* View Switcher (persisted per board) */}
+          {/* Desktop View Switcher (persisted per board) */}
           <SegmentedControl
             value={viewMode}
             onValueChange={(v) => changeView(v as BoardViewMode)}
             ariaLabel="Board view"
-            className="ml-auto shrink-0"
+            className="hidden md:flex ml-auto shrink-0"
             options={VIEW_TABS.map((tab) => ({
               value: tab.mode,
               label: (

@@ -13,7 +13,7 @@ export const Chip = React.forwardRef<HTMLButtonElement, ChipProps>(
       type={type}
       aria-pressed={active}
       className={cn(
-        'chamfer-sm inline-flex min-h-[44px] items-center gap-1.5 whitespace-nowrap border px-4 text-[13px] font-semibold transition-colors focus-visible:[clip-path:none] md:min-h-0 md:px-3 md:py-1.5 md:text-xs',
+        'chamfer-sm inline-flex h-8 items-center gap-1.5 whitespace-nowrap border px-2.5 text-xs font-semibold transition-colors focus-visible:[clip-path:none]',
         active
           ? 'border-transparent bg-[var(--accent)] text-[var(--accent-ink)]'
           : 'border-[var(--line)] bg-[var(--surface2)] text-[var(--text)] hover:bg-[var(--hi)] hover:text-[var(--hi-ink)]',

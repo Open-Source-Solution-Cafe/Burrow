@@ -378,28 +378,28 @@ export function SettingsView() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-8 px-6 space-y-8">
+      <div className="max-w-4xl mx-auto py-5 px-3.5 sm:py-8 sm:px-6 space-y-5 sm:space-y-8">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">Settings</h1>
-          <p className="text-sm text-[var(--muted)]">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text)]">Settings</h1>
+          <p className="text-xs sm:text-sm text-[var(--muted)]">
             Manage your profile, project preferences, and workflow tags.
           </p>
         </div>
 
         {/* Section 1: Profile Details */}
-        <div className="border border-[var(--line)] bg-[var(--surface)] p-6 space-y-5">
+        <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
           <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
             <User className="w-4 h-4 text-[var(--accent)]" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text)]">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
               Profile & Account
             </h2>
           </div>
 
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">
-              <Avatar name={account?.user?.name || 'User'} size="lg" />
+              <Avatar name={account?.user?.name || 'User'} size="md" />
               <div>
-                <div className="text-base font-semibold text-[var(--text)]">
+                <div className="text-sm font-semibold text-[var(--text)]">
                   {account?.user?.name || 'User'}
                 </div>
                 <div className="text-xs text-[var(--muted)]">{account?.user?.email}</div>
@@ -414,8 +414,9 @@ export function SettingsView() {
 
             <Button
               variant="danger"
+              size="sm"
               onClick={() => setConfirmSignOut(true)}
-              className="flex items-center gap-2 min-h-[44px] sm:min-h-0"
+              className="flex items-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Log out</span>
@@ -424,15 +425,15 @@ export function SettingsView() {
         </div>
 
         {workspaceId && currentWorkspace && (
-          <div className="border border-[var(--line)] bg-[var(--surface)] p-6 space-y-5">
+          <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
               <Users className="w-4 h-4 text-[var(--accent)]" />
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text)]">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
                 Workspace
               </h2>
             </div>
-            <form onSubmit={handleRenameWorkspace} className="flex flex-wrap items-end gap-3">
-              <label className="min-w-56 flex-1 space-y-1 text-xs font-medium text-[var(--text)]">
+            <form onSubmit={handleRenameWorkspace} className="flex flex-col sm:flex-row sm:items-end gap-2.5">
+              <label className="w-full sm:min-w-56 sm:flex-1 space-y-1 text-xs font-medium text-[var(--text)]">
                 Workspace name
                 <Input
                   value={workspaceName}
@@ -444,6 +445,8 @@ export function SettingsView() {
               <Button
                 type="submit"
                 variant="primary"
+                size="md"
+                className="w-full sm:w-auto"
                 disabled={
                   role !== 'owner' ||
                   !workspaceName.trim() ||
@@ -453,16 +456,16 @@ export function SettingsView() {
               >
                 {renameWorkspace.isPending ? 'Saving…' : 'Save workspace name'}
               </Button>
-              <Badge className="uppercase text-[10px] tracking-wider font-mono">
+              <Badge className="uppercase text-[10px] tracking-wider font-mono self-start sm:self-center">
                 {role || 'member'}
               </Badge>
             </form>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--hair)] pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--hair)] pt-3">
               <p className="max-w-xl text-xs text-[var(--muted)]">
                 A workspace owner must promote another owner before leaving if they are the last
                 owner.
               </p>
-              <Button type="button" variant="danger" onClick={() => setConfirmLeaveWorkspace(true)}>
+              <Button type="button" variant="danger" size="sm" onClick={() => setConfirmLeaveWorkspace(true)}>
                 Leave workspace
               </Button>
             </div>
@@ -470,11 +473,11 @@ export function SettingsView() {
         )}
 
         {/* Section 2: Project Settings */}
-        <div className="border border-[var(--line)] bg-[var(--surface)] p-6 space-y-5">
+        <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-4 border-b border-[var(--hair)] pb-3 flex-wrap">
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-[var(--accent)]" />
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text)]">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
                 Project Settings
               </h2>
             </div>
@@ -491,7 +494,7 @@ export function SettingsView() {
                     setTagToDelete(null);
                     setDraftScope(null);
                   }}
-                  className="px-2.5 py-1 text-xs font-medium min-h-[44px] sm:min-h-0"
+                  className="w-auto text-xs font-medium"
                 >
                   {!selectedProject && <option value="">Select a project</option>}
                   {projects.map((p) => (
@@ -523,7 +526,7 @@ export function SettingsView() {
                   value={projectName}
                   onChange={(e) => setProjectName(e.target.value)}
                   disabled={isViewer}
-                  className="w-full text-sm"
+                  className="w-full"
                   placeholder="e.g. Core App"
                 />
               </div>
@@ -537,7 +540,7 @@ export function SettingsView() {
                     value={projectIcon}
                     onChange={(e) => setProjectIcon(e.target.value)}
                     disabled={isViewer}
-                    className="w-20 text-center text-lg"
+                    className="w-16 text-center text-base"
                     maxLength={4}
                   />
                   <div className="flex items-center gap-1 flex-wrap">
@@ -547,7 +550,7 @@ export function SettingsView() {
                         type="button"
                         onClick={() => setProjectIcon(icon)}
                         disabled={isViewer}
-                        className={`w-8 h-8 flex items-center justify-center text-base border transition ${
+                        className={`w-7 h-7 flex items-center justify-center text-sm border transition cursor-pointer ${
                           projectIcon === icon
                             ? 'border-[var(--accent)] bg-[var(--hi)]'
                             : 'border-[var(--line)] bg-[var(--surface2)] hover:border-[var(--muted)]'
@@ -572,13 +575,13 @@ export function SettingsView() {
                         type="button"
                         onClick={() => setProjectColor(isSelected ? null : color)}
                         disabled={isViewer}
-                        className={`w-7 h-7 flex items-center justify-center border transition ${
+                        className={`w-6 h-6 flex items-center justify-center border transition cursor-pointer ${
                           isSelected ? 'border-[var(--text)] scale-110' : 'border-transparent'
                         }`}
                         style={{ backgroundColor: color }}
                         title={color}
                       >
-                        {isSelected && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                        {isSelected && <Check className="w-3 h-3 text-white stroke-[3]" />}
                       </button>
                     );
                   })}
@@ -587,7 +590,7 @@ export function SettingsView() {
                       type="button"
                       onClick={() => setProjectColor(null)}
                       disabled={isViewer}
-                      className="text-xs text-[var(--muted)] hover:text-[var(--text)] underline ml-2"
+                      className="text-xs text-[var(--muted)] hover:text-[var(--text)] underline ml-2 cursor-pointer"
                     >
                       Clear
                     </button>
@@ -610,12 +613,12 @@ export function SettingsView() {
                   <Button
                     type="submit"
                     variant="primary"
+                    size="md"
                     disabled={
                       updateProjectMutation.isPending ||
                       draftScope !== scopeKey ||
                       !projectName.trim()
                     }
-                    className="min-h-[44px] sm:min-h-0"
                   >
                     {updateProjectMutation.isPending ? 'Saving…' : 'Save Changes'}
                   </Button>
@@ -624,14 +627,15 @@ export function SettingsView() {
 
               {/* Danger Zone: Archive / Delete */}
               {!isViewer && (
-                <div className="pt-6 border-t border-[var(--hair)] space-y-3">
+                <div className="pt-5 border-t border-[var(--hair)] space-y-3">
                   <h3 className="text-xs font-semibold text-[var(--danger)] uppercase tracking-wider">
                     Danger Zone
                   </h3>
-                  <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     <Button
                       type="button"
                       variant="ghost"
+                      size="sm"
                       onClick={() =>
                         scopeKey &&
                         setArchiveTarget({
@@ -641,7 +645,7 @@ export function SettingsView() {
                           archived: isArchived,
                         })
                       }
-                      className="flex items-center gap-2 border border-[var(--line)] min-h-[44px] sm:min-h-0 text-xs"
+                      className="flex items-center gap-2 border border-[var(--line)]"
                     >
                       <Archive className="w-3.5 h-3.5" />
                       <span>{isArchived ? 'Unarchive Project' : 'Archive Project'}</span>
@@ -649,6 +653,7 @@ export function SettingsView() {
                     <Button
                       type="button"
                       variant="danger"
+                      size="sm"
                       onClick={() =>
                         scopeKey &&
                         setDeleteTarget({
@@ -657,7 +662,7 @@ export function SettingsView() {
                           name: selectedProject.name,
                         })
                       }
-                      className="flex items-center gap-2 min-h-[44px] sm:min-h-0 text-xs"
+                      className="flex items-center gap-2"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                       <span>Delete Project…</span>
@@ -670,10 +675,10 @@ export function SettingsView() {
         </div>
 
         {/* Section 3: Tag Management */}
-        <div className="border border-[var(--line)] bg-[var(--surface)] p-6 space-y-5">
+        <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
           <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
             <Tag className="w-4 h-4 text-[var(--accent)]" />
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-[var(--text)]">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
               Tag Management
             </h2>
           </div>
@@ -685,22 +690,22 @@ export function SettingsView() {
 
           {/* New Tag Form */}
           {!isViewer && selectedProject && (
-            <form onSubmit={handleCreateTag} className="flex items-center gap-2 flex-wrap">
+            <form onSubmit={handleCreateTag} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <Input
                 type="text"
                 required
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
                 placeholder="New tag name (e.g. bug, urgent)"
-                className="flex-1 min-w-[200px] text-xs px-3 py-1.5 min-h-[44px] sm:min-h-0"
+                className="flex-1 min-w-[180px]"
               />
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 self-start sm:self-center">
                 {COLOR_PRESETS.map((c) => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setNewTagColor(c)}
-                    className={`w-6 h-6 flex items-center justify-center border transition ${
+                    className={`w-6 h-6 flex items-center justify-center border transition cursor-pointer ${
                       newTagColor === c ? 'border-[var(--text)] scale-110' : 'border-transparent'
                     }`}
                     style={{ backgroundColor: c }}
@@ -713,8 +718,9 @@ export function SettingsView() {
               <Button
                 type="submit"
                 variant="primary"
+                size="md"
                 disabled={createTagMutation.isPending || !newTagName.trim()}
-                className="flex items-center gap-1.5 min-h-[44px] sm:min-h-0 text-xs"
+                className="flex items-center justify-center gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>{createTagMutation.isPending ? 'Adding…' : 'Add Tag'}</span>
@@ -725,7 +731,7 @@ export function SettingsView() {
           {/* Existing Tags List */}
           <div className="space-y-2 pt-2">
             {projectTags.length === 0 ? (
-              <div className="text-xs text-[var(--muted)] italic py-2">
+              <div className="text-xs text-[var(--muted)] italic py-1">
                 No tags created for this project yet.
               </div>
             ) : (
@@ -733,9 +739,9 @@ export function SettingsView() {
                 {projectTags.map((tag) => (
                   <div
                     key={tag.id}
-                    className="flex items-center gap-2 px-2.5 py-1.5 border border-[var(--line)] bg-[var(--surface2)] text-xs font-medium text-[var(--text)] select-none"
+                    className="flex items-center gap-1.5 px-2 py-1 h-7 border border-[var(--line)] bg-[var(--surface2)] text-xs font-medium text-[var(--text)] select-none"
                   >
-                    <StatusDiamond color={tag.color || '#6366f1'} size={8} />
+                    <StatusDiamond color={tag.color || '#6366f1'} size={7} />
                     <span>#{tag.name}</span>
                     {!isViewer && (
                       <button
@@ -751,7 +757,7 @@ export function SettingsView() {
                             scope: scopeKey,
                           })
                         }
-                        className="text-[var(--muted)] hover:text-[var(--danger)] transition ml-1"
+                        className="text-[var(--muted)] hover:text-[var(--danger)] transition ml-1 p-0.5 cursor-pointer"
                         title={`Delete tag #${tag.name}`}
                       >
                         <Trash2 className="w-3 h-3" />

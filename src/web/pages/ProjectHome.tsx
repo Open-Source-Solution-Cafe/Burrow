@@ -81,7 +81,7 @@ export function ProjectHome() {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto py-8 px-6 space-y-8">
+      <div className="max-w-4xl mx-auto py-6 px-4 sm:py-8 sm:px-6 space-y-6 sm:space-y-8">
         {/* Project Banner / Title */}
         <div className="space-y-2 border-b border-[var(--hair)] pb-6">
           <div className="text-4xl mb-2">{project?.icon || '📁'}</div>
@@ -101,7 +101,7 @@ export function ProjectHome() {
 
         {/* Quick Action Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Card className="p-5 space-y-3">
+          <Card className="p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium text-sm text-[var(--text)]">
                 <FileText className="w-4 h-4 text-[var(--accent)]" />
@@ -109,9 +109,10 @@ export function ProjectHome() {
               </div>
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={handleCreateNotepad}
                 disabled={createNotepadPending}
-                className="p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
+                className="p-1 min-w-[32px] min-h-[32px] text-[var(--muted)] hover:text-[var(--text)]"
                 title="Add Notepad"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -130,7 +131,7 @@ export function ProjectHome() {
                   <Link
                     key={np.id}
                     {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
-                    className="flex items-center gap-2 text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition min-h-[44px] sm:min-h-0"
+                    className="flex items-center gap-2 text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition py-1"
                   >
                     <span>{np.icon || '📄'}</span>
                     <span className="truncate">{np.title || 'Untitled'}</span>
@@ -140,7 +141,7 @@ export function ProjectHome() {
             </div>
           </Card>
 
-          <Card className="p-5 space-y-3">
+          <Card className="p-4 sm:p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium text-sm text-[var(--text)]">
                 <Kanban className="w-4 h-4 text-emerald-500" />
@@ -148,8 +149,9 @@ export function ProjectHome() {
               </div>
               <Button
                 variant="ghost"
+                size="sm"
                 onClick={handleCreateBoard}
-                className="p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
+                className="p-1 min-w-[32px] min-h-[32px] text-[var(--muted)] hover:text-[var(--text)]"
                 title="Add Board"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -168,7 +170,7 @@ export function ProjectHome() {
                   <Link
                     key={b.id}
                     {...boardTarget(workspaceId!, currentProjectId!, b.id)}
-                    className="block text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition min-h-[44px] sm:min-h-0"
+                    className="block text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition py-1"
                   >
                     {b.icon || '📋'} {b.name}
                   </Link>

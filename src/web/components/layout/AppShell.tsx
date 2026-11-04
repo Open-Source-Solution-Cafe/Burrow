@@ -38,9 +38,9 @@ export function AppShell() {
         />
       )}
 
-      {/* Mobile Drawer: flush --side panel, viewport edges stay square (0px) */}
+      {/* Mobile Drawer: flush --side panel, constrained to viewport width */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 transform md:hidden transition-transform duration-200 ease-in-out bg-side ${
+        className={`fixed inset-y-0 left-0 z-50 transform md:hidden transition-transform duration-200 ease-in-out bg-side max-w-[min(320px,85vw)] w-full overflow-hidden ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -50,17 +50,25 @@ export function AppShell() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile header bar (--side) */}
-        <header className="md:hidden h-12 border-b border-line flex items-center justify-between px-4 shrink-0 bg-side">
-          <div className="flex items-center gap-2">
+        <header className="md:hidden min-h-12 pt-[env(safe-area-inset-top)] border-b border-line flex items-center justify-between px-3 shrink-0 bg-side">
+          <div className="flex items-center gap-1 min-w-0">
             <button
               onClick={() => setMobileOpen(true)}
-              className="md:hidden flex h-11 w-11 items-center justify-center text-muted hover:text-text hover:bg-hi transition"
+              className="flex h-11 w-11 shrink-0 items-center justify-center text-muted hover:text-text hover:bg-hi transition cursor-pointer"
               aria-label="Open sidebar"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <span className="font-semibold text-sm tracking-tight">Burrow</span>
+            <span className="font-semibold text-sm tracking-tight truncate">Burrow</span>
           </div>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('burrow:open-palette'))}
+            className="flex h-11 w-11 items-center justify-center text-muted hover:text-text hover:bg-hi transition cursor-pointer"
+            aria-label="Search"
+          >
+            <span className="text-xs">⌘K</span>
+          </button>
         </header>
 
         {/* Dynamic Page Content */}

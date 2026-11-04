@@ -142,7 +142,7 @@ function TaskRow({
           <button
             onClick={onSnooze}
             title="Snooze to tomorrow"
-            className="p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--c2)] hover:bg-[var(--hi)] opacity-0 group-hover:opacity-100 transition"
+            className="p-1 min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--c2)] hover:bg-[var(--hi)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition cursor-pointer"
           >
             <AlarmClock className="w-3.5 h-3.5" />
           </button>
@@ -310,17 +310,19 @@ export function MyTasksView() {
 
   return (
     <div className="h-full overflow-y-auto bg-[var(--bg)]">
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-4">
+      <div className="max-w-4xl mx-auto px-3.5 py-4 sm:px-6 sm:py-8 space-y-4">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-2.5">
             <Inbox className="w-6 h-6 text-[var(--accent)]" />
-            <h1 className="text-2xl font-bold text-[var(--text)]">My Tasks</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-[var(--text)]">My Tasks</h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             {/* Status tabs — geometric segmented control */}
             <SegmentedControl
+              fullWidth
+              className="w-full sm:w-auto"
               value={status}
               onValueChange={(v) => setStatus(v as StatusFilter)}
               options={[
@@ -334,7 +336,7 @@ export function MyTasksView() {
             <Select
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-              className="px-2.5 py-1.5 text-xs min-h-[44px] sm:min-h-0"
+              className="w-full sm:w-auto"
             >
               <option value="all">All Projects</option>
               {projects.map((p) => (
