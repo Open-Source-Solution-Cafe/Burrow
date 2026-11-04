@@ -15,9 +15,10 @@ import {
   run,
   smoke,
   step,
+  normalizeDomain,
 } from './lib.mjs';
 
-const domain = argValue('--domain') || argValue('--domains');
+const domain = normalizeDomain(argValue('--domain') || argValue('--domains'));
 
 async function main() {
   printTargetBanner('Production Deploy', true);

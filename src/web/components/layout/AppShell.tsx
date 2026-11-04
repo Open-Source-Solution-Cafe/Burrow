@@ -40,7 +40,7 @@ export function AppShell() {
 
       {/* Mobile Drawer: flush --side panel, constrained to viewport width */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 transform md:hidden transition-transform duration-200 ease-in-out bg-side max-w-[min(320px,85vw)] w-full overflow-hidden ${
+        className={`fixed inset-y-0 left-0 z-50 transform md:hidden transition-transform duration-200 ease-in-out bg-side max-w-[min(320px,85vw)] w-full overflow-hidden flex flex-col h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

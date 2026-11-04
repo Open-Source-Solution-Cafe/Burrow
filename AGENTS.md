@@ -42,6 +42,17 @@
 - **Refactor to pure, functional single implementations.** Extract shared logic into pure, functional modules (deterministic inputs/outputs, minimal side effects) that serve as the single source of truth across all call sites.
 - **Eliminate divergent behavior and delete old code.** Never leave legacy or redundant implementations in place when unifying. All entry points (`pnpm dev`, `pnpm start`, `pnpm dev:worker`, CLI scripts, tests) must consume the exact same canonical code.
 
+## Mobile UI Design & Compact Controls (learned 2026-11-03)
+
+- **Slim, proportional controls over arbitrary 44px blocks.** Do not apply indiscriminate `min-h-[44px]` to small buttons, tag chips, assignee pills, or segmented tabs. Let shared UI components define sizes (`sm: h-7`, `md: h-8`).
+- **No artificial mobile wrapping or internal line dividers.** Keep list item rows (such as team member lists or card action rows) continuous and side-by-side (`flex items-center justify-between`) rather than breaking actions onto stacked, divider-separated lines on mobile.
+- **Palette & selection styling contrast.** Never use solid saturated highlight backgrounds for entire selection cards that clash with badges or child elements. Use elevated surfaces (`bg-[var(--surface2)]`) with sharp accent outlines (`border-[var(--accent)]`), styling query match `<mark>` tags explicitly for crisp contrast.
+
+## Internal Routing & Canonical Links (learned 2026-11-03)
+
+- **Zero hardcoded route paths in anchors.** Never use plain `<a href="...">` for internal app navigation, and never synthesize path strings (e.g., `${path}/notepads`) that do not exist in the TanStack router tree.
+- **Always use `workspaceRoutes.ts` targets.** All internal links must use TanStack Router's `<Link>` or `navigate()` paired with canonical route helpers from `src/web/lib/workspaceRoutes.ts` (`projectTarget`, `notepadTarget`, `boardTarget`, `trashTarget`, `workspaceSettingsTarget`, etc.) to guarantee workspace isolation and prevent 404 "Not Found" errors.
+
 ## Parallel Subagent Instruction
 
 - **Ongoing multi-workspace work:** Read and update `docs/MULTI_WORKSPACE_PROGRESS.md`

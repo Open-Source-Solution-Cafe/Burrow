@@ -34,6 +34,21 @@ export function bin(pkg, sub) {
   return path.join(root, 'node_modules', pkg, b[key]);
 }
 
+export function normalizeDomain(rawDomain) {
+  if (!rawDomain) return undefined;
+  let cleaned = String(rawDomain).trim();
+  // Strip protocol if provided (e.g. https:// or http://)
+  cleaned = cleaned.replace(/^https?:\/\//i, '');
+  // Strip trailing path/query/fragment (e.g. / or /api/...)
+  cleaned = cleaned.replace(/\/.*$/, '').replace(/[?#].*$/, '');
+  // Strip trailing slashes or whitespace
+  cleaned = cleaned.replace(/\/+$/, '').trim();
+  if (cleaned && cleaned !== rawDomain) {
+    console.log(`  normalized domain: "${rawDomain}" -> "${cleaned}"`);
+  }
+  return cleaned || undefined;
+}
+
 export function argValue(flag, fallback = undefined) {
   const args = process.argv.slice(2);
   const i = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));

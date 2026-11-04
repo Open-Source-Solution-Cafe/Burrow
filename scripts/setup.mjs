@@ -32,12 +32,13 @@ import {
   loadEnv,
   getWranglerConfigArgs,
   parseJsonc,
+  normalizeDomain,
 } from './lib.mjs';
 
 const dryRun = hasFlag('--dry-run');
 const target = getDatabaseTarget();
 const isRemote = target.kind === 'remote';
-const domain = argValue('--domain');
+const domain = normalizeDomain(argValue('--domain'));
 const workerName = argValue('--name');
 const WRANGLER_ARGS = workerName ? ['--name', workerName] : [];
 

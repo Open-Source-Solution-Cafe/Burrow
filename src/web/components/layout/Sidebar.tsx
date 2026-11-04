@@ -389,7 +389,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   return (
     <>
       {isModern ? (
-        <aside className="w-[232px] h-screen flex flex-col bg-side text-side-text border-r border-hair py-3.5 px-2 gap-0.5 select-none">
+        <aside className="w-full md:w-[232px] h-full md:h-screen flex flex-col bg-side text-side-text border-r border-hair py-3.5 px-2 gap-0.5 select-none overflow-hidden">
           {/* Workspace header */}
           <div className="flex items-center justify-between px-2.5 pt-0.5 pb-3 gap-1">
             <div className="flex-1 min-w-0">
@@ -703,7 +703,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           </div>
         </aside>
       ) : (
-        <aside className="h-screen flex bg-side text-side-text select-none">
+        <aside className="w-full md:w-auto h-full md:h-screen flex bg-side text-side-text select-none overflow-hidden">
           {/* ================================================================= */}
           {/* Tier 1: 64px Left Icon Rail                                      */}
           {/* ================================================================= */}
