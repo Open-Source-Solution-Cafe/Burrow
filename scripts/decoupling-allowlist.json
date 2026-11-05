@@ -1,0 +1,57 @@
+[
+  {
+    "path": "src/web/components/boards/views/KanbanView.tsx",
+    "pattern": "stripe",
+    "reason": "Visual UI styling referring to card color accent stripe"
+  },
+  {
+    "path": "src/core/infrastructure/types.ts",
+    "pattern": "tenant",
+    "reason": "Infrastructure interface documentation referring to generic actor and tenant scope"
+  },
+  {
+    "path": "migrations/0011_scope_write_guards.sql",
+    "pattern": "tenant",
+    "reason": "SQL migration comments discussing tenant relationships in scope write guards"
+  },
+  {
+    "path": "migrations/postgres/0007_scope_write_guards.sql",
+    "pattern": "tenant",
+    "reason": "PostgreSQL migration comments discussing tenant relationships in scope write guards"
+  },
+  {
+    "path": "tests/api/d1-atomicity.test.ts",
+    "pattern": "tenant",
+    "reason": "Test comments discussing tenant-scope trigger isolation"
+  },
+  {
+    "path": "tests/api/search-trash.test.ts",
+    "pattern": "organization",
+    "reason": "Test suite name referring to content organization (search, tags, trash)"
+  },
+  {
+    "path": "docs/plan/PLAN.md",
+    "pattern": "organization",
+    "reason": "Historical product plan section title referring to note organization"
+  },
+  {
+    "path": "docs/DATABASE_ADAPTER_PLAN.md",
+    "pattern": "tenant",
+    "reason": "Database architecture documentation describing tenant isolation invariants"
+  },
+  {
+    "path": "docs/MULTI_WORKSPACE_PROGRESS.md",
+    "pattern": "tenant",
+    "reason": "Progress checklist discussing multi-workspace and tenant scoping"
+  },
+  {
+    "path": "scripts/check-decoupling.mjs",
+    "pattern": ".*",
+    "reason": "Decoupling scanner script defining vocabulary terms and patterns"
+  },
+  {
+    "path": "tests/unit/check-decoupling.test.ts",
+    "pattern": ".*",
+    "reason": "Unit tests verifying decoupling guard behavior with forbidden vocabulary fixtures"
+  }
+]

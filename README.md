@@ -135,6 +135,84 @@ Burrow unifies local development on a single SQLite database (`./data/burrow.db`
 
 ---
 
+## Self-Hosting with PostgreSQL
+
+Burrow supports running as a standalone Node.js server backed by PostgreSQL and local disk or S3 object storage.
+
+### 1. One-Command Turnkey Deployment (Docker Compose)
+
+The fastest way to self-host Burrow is with Docker Compose, which boots Burrow and a dedicated PostgreSQL database with persistent storage volumes:
+
+```bash
+docker compose up -d
+```
+
+This starts:
+
+- **Burrow application**: Listening on `http://localhost:3005` (or your configured `$PORT`).
+- **PostgreSQL 16**: Connected on the private internal Docker network.
+- **Persistent storage**: Named volumes `postgres_data` (database records) and `burrow_uploads` (uploaded images and attachments).
+
+To customize secrets for your instance, provide a `.env` file or export environment variables:
+
+```bash
+# Public URL where Burrow is accessed
+BETTER_AUTH_URL=https://notes.example.com
+
+# Secure 32+ character auth encryption secret
+BETTER_AUTH_SECRET=a-secure-random-string-at-least-32-chars-long
+
+# One-time bootstrap token (16+ chars) for initial owner workspace creation
+BOOTSTRAP_TOKEN=a-secure-random-bootstrap-token-16-chars-min
+```
+
+Open your configured URL and create the initial owner account using the `BOOTSTRAP_TOKEN`.
+
+### 2. Running Standalone on PostgreSQL (Direct Node.js)
+
+To run Burrow directly on a host or VM connected to an existing PostgreSQL database:
+
+1. **Configure Environment Variables (`.env` or process environment):**
+
+   ```bash
+   # Database connection (postgres:// or postgresql://)
+   DATABASE_URL=postgres://burrow:password@localhost:5432/burrow
+
+   # Server and auth settings
+   PORT=3005
+   BETTER_AUTH_URL=https://notes.example.com
+   BETTER_AUTH_SECRET=a-secure-random-string-at-least-32-chars-long
+   BOOTSTRAP_TOKEN=a-secure-random-bootstrap-token-16-chars-min
+
+   # Persistent storage directory for uploads
+   LOCAL_STORAGE_PATH=./data/uploads
+
+   # Optional: disable auto-migration if handled in a separate pipeline
+   DATABASE_MIGRATE=true
+   ```
+
+2. **Database Migrations:**
+   By default, Burrow automatically applies all unapplied PostgreSQL migrations on startup from `migrations/postgres/`.
+
+   To execute database migrations in an isolated pre-flight or release step without starting the HTTP web listener:
+
+   ```bash
+   node dist/server.mjs --migrate
+   ```
+
+   The migration command connects, applies pending migrations atomically, and exits with code `0` on success or code `1` on failure.
+
+3. **Build & Start Server:**
+   ```bash
+   # Build web SPA and bundle Node server
+   pnpm run build
+
+   # Start production Node server
+   pnpm start
+   ```
+
+---
+
 ## Deployment & Cloudflare Setup
 
 Burrow deploys entirely on Cloudflare Workers, Cloudflare D1 (SQLite), and Cloudflare R2 using the Wrangler CLI. All scripts auto-discover remote resources and output generated credentials directly to the console—no `.env` or `.dev.vars` files are written or required.

@@ -186,9 +186,7 @@ export function normalizePackages(input) {
         for (const pkg of pkgs) {
           if (!pkg || typeof pkg !== 'object') continue;
           const lic = pkg.license || licenseKey;
-          const versions = Array.isArray(pkg.versions)
-            ? pkg.versions
-            : [pkg.version || '0.0.0'];
+          const versions = Array.isArray(pkg.versions) ? pkg.versions : [pkg.version || '0.0.0'];
           for (const v of versions) {
             list.push({
               name: pkg.name || '',
@@ -237,8 +235,7 @@ export function evaluateLicenses(packages, allowList = []) {
       const entry = allowListArray[i];
       if (!entry || typeof entry !== 'object') continue;
       const nameMatch = entry.name === pkg.name;
-      const versionMatch =
-        !entry.version || entry.version === '*' || entry.version === pkg.version;
+      const versionMatch = !entry.version || entry.version === '*' || entry.version === pkg.version;
       const licenseMatch =
         !entry.license || entry.license.toLowerCase() === pkg.license.toLowerCase();
       if (nameMatch && versionMatch && licenseMatch) {
@@ -289,6 +286,7 @@ export function evaluateLicenses(packages, allowList = []) {
 
 export function runCli() {
   const res = spawnSync('pnpm', ['licenses', 'list', '--json'], {
+    cwd: root,
     shell: process.platform === 'win32',
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,

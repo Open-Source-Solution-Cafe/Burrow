@@ -1,16 +1,10 @@
 # Agent Rules & Guidelines
 
-## Current media-support workstream
+## First-Class Database Runtimes & Test Gates
 
-- Scope this work to the SQLite development/runtime implementation. Do not
-  implement or verify PostgreSQL or D1 deployment changes as part of this media
-  upgrade. SQLite's shared canonical schema/repositories live under `db/d1`;
-  edits there are permitted for the Node SQLite runtime. Use `pnpm check:sqlite`
-  as this workstream's required gate; PostgreSQL suites are deferred.
-- Preserve existing files and legacy implementations; do not delete files for
-  this workstream. Additive SQLite migrations and code are acceptable.
-- Track cross-session decisions and checklist progress in
-  `docs/MEDIA_SUPPORT_PLAN.md`.
+- SQLite, Cloudflare D1, and PostgreSQL are all first-class supported database engines.
+- The required standard gate is `pnpm check`, verifying both SQLite and PostgreSQL persistence suites (supported locally via Docker or `BURROW_TEST_POSTGRES_URL`, with `pnpm check:sqlite` available for SQLite-only local iterations).
+- Repository and schema parity must be maintained across both engines. Any repository modification must ship with corresponding migrations (`migrations/` and `migrations/postgres/`) and shared contract test cases executed against both database adapters.
 
 ## UI Testing Instruction
 

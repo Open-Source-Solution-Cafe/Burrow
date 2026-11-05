@@ -1,10 +1,9 @@
-# Media support plan (SQLite)
+# Media support plan (SQLite & PostgreSQL)
 
-Status: A, B, and C implemented; SQLite gate and production build passed.
-Scope: SQLite development/runtime only. PostgreSQL and deployment work are deferred.
-SQLite's canonical schema/repositories live under `db/d1` and are shared by the
-Node runtime; changes there support SQLite. No PostgreSQL implementation changed
-and no existing files were deleted.
+Status: Phases A, B, and C closed and verified across both SQLite and PostgreSQL.
+Scope: Media foundation complete across SQLite and PostgreSQL runtimes. Schema parity
+is verified (PostgreSQL migration 0008), repository parity verified across both engines,
+and the full verification gate passes on both adapters.
 
 ## Existing foundation
 
@@ -32,43 +31,44 @@ and no existing files were deleted.
 
 ## Implementation checklist
 
-### A. Editor upload (first slice)
+### A. Editor upload (first slice) [CLOSED & VERIFIED]
 
 - [x] Configure BlockNote's `uploadFile` using the current workspace/project route.
 - [x] Use multipart `FormData`; do not set the multipart content type manually.
 - [x] Return the API's project-scoped file URL and show a toast on failure.
 - [x] Add unit/API coverage for editor upload request shape where feasible; retain
-  the existing API tests for authentication, size, MIME, bytes, and scope.
+      the existing API tests for authentication, size, MIME, bytes, and scope.
 
-### B. SQLite project library
+### B. SQLite & PostgreSQL project library [CLOSED & VERIFIED]
 
 - [x] Add a project-scoped list endpoint over `project_files`, with deterministic
-  ordering and editor/viewer read semantics consistent with project access.
+      ordering and editor/viewer read semantics consistent with project access.
 - [x] Add filename and byte size to SQLite file metadata via
-  an additive migration. Keep existing rows readable with nullable/defaulted
-  metadata; update the SQLite adapter contract cases.
+      an additive migration. Keep existing rows readable with nullable/defaulted
+      metadata; update the SQLite adapter contract cases.
 - [x] Build a picker that previews, searches, and inserts existing images. Reuse
-  each registered key; don't copy or cross-link project files.
+      each registered key; don't copy or cross-link project files.
 - [x] Defer deletion until references can be tracked and safe orphan cleanup is
-  explicit.
+      explicit.
+- [x] Add PostgreSQL migration 0008 and repository implementation for parity.
 
-### C. External video links
+### C. External video links [CLOSED & VERIFIED]
 
 - [x] Add a pure URL normalizer/parser with tests for supported URL variants,
-  malformed values, and hostile schemes/hosts.
+      malformed values, and hostile schemes/hosts.
 - [x] Store normalized provider identity and video ID in a custom content block (or
-  canonical URL only if BlockNote content compatibility makes that simpler).
+      canonical URL only if BlockNote content compatibility makes that simpler).
 - [x] Initially allow YouTube; add other providers only after explicit review.
 - [x] Render with a restrictive iframe policy (`youtube-nocookie.com` where
-  supported, `title`, `allow`, `referrerPolicy`, and sandbox/permissions as
-  compatible). Keep a normal outbound link fallback.
+      supported, `title`, `allow`, `referrerPolicy`, and sandbox/permissions as
+      compatible). Keep a normal outbound link fallback.
 
 ### D. Broader media types (later)
 
 - [ ] Decide supported audio/video/document formats, per-type size limits, storage
-  delivery and download behavior, and preview strategy before enabling upload.
+      delivery and download behavior, and preview strategy before enabling upload.
 - [ ] Extend SQLite validation and metadata deliberately; do not trust browser MIME
-  declarations or file extensions.
+      declarations or file extensions.
 
 ## Acceptance criteria
 
@@ -80,8 +80,8 @@ and no existing files were deleted.
 - Existing image and cover content remains readable.
 - Library selection inserts an existing asset without a second upload.
 - Only supported video URLs produce embeds; unsupported URLs remain safe links.
-- SQLite migrations, API/unit/adapter coverage, `pnpm check:sqlite`, and production
-  build pass. No browser/UI automation unless explicitly requested.
+- SQLite and PostgreSQL migrations, API/unit/adapter coverage, full `pnpm check`, and production
+  build pass. Both engines verified. No browser/UI automation unless explicitly requested.
 
 ## Handoff
 
@@ -130,20 +130,20 @@ and no existing files were deleted.
 ### Media controls and dedicated library follow-up (2026-11-01)
 
 - [x] Give YouTube blocks keyboard-accessible width controls in a compact
-  options popover. Persist `widthPercent`; legacy videos default to 100%.
+      options popover. Persist `widthPercent`; legacy videos default to 100%.
 - [x] Add Remove video with in-app confirmation, editor undo, error toasts, and
-  current edit-permission checks. Invalid video blocks are removable too.
+      current edit-permission checks. Invalid video blocks are removable too.
 - [x] Add the scoped `/w/:workspaceId/p/:projectId/library` page and a persistent
-  Project library link below the project selector in both sidebar layouts.
+      Project library link below the project selector in both sidebar layouts.
 - [x] Link to the library from project overview. Reuse the same upload control,
-  gallery, account-scoped query key, and project invalidation with the picker.
+      gallery, account-scoped query key, and project invalidation with the picker.
 - [x] Support filename search, image previews/open links, upload progress,
-  empty/error/retry states, and viewer browsing with editor-only upload.
+      empty/error/retry states, and viewer browsing with editor-only upload.
 - [x] Add width boundary/invalid-value unit cases and the library route helper
-  contract. Targeted tests passed; production build passed.
+      contract. Targeted tests passed; production build passed.
 - [x] Combined `pnpm check:sqlite` passed typecheck, Basalt, lint (seven existing
-  warnings), and 50 test files / 278 tests. SQLite selection skipped two files
-  and 62 tests. Production build passed with the existing large-chunk warning.
+      warnings), and 50 test files / 278 tests. SQLite selection skipped two files
+      and 62 tests. Production build passed with the existing large-chunk warning.
 
 Native image blocks retain BlockNote's existing hover resize handles and block
 menu removal. YouTube now has explicit controls because its custom iframe block

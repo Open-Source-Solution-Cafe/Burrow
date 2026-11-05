@@ -12,6 +12,9 @@ run('./scripts/check-basalt.mjs', []);
 console.log('check: licenses');
 run('node', ['./scripts/check-licenses.mjs']);
 
+console.log('check: decoupling');
+run('node', ['./scripts/check-decoupling.mjs']);
+
 console.log('check: lint');
 run(bin('eslint'), ['.']);
 

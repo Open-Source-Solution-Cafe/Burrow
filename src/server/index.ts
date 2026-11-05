@@ -11,16 +11,53 @@ import { loadEnv } from './env';
 import type { ServerConfig } from './config';
 
 loadEnv();
+
+// Migration jobs only require database access; supply fallbacks for auth validation
+if (process.argv.includes('--migrate')) {
+  if (
+    !process.env.BETTER_AUTH_SECRET ||
+    process.env.BETTER_AUTH_SECRET === 'dev-secret-change-me-32-bytes-minimum!!' ||
+    process.env.BETTER_AUTH_SECRET === 'local-dev-secret-change-me'
+  ) {
+    process.env.BETTER_AUTH_SECRET = 'migration-secret-must-be-32-chars-long!!';
+  }
+  if (!process.env.BETTER_AUTH_URL || process.env.BETTER_AUTH_URL.includes('localhost')) {
+    process.env.BETTER_AUTH_URL = 'http://burrow.migration.internal';
+  }
+  if (!process.env.BOOTSTRAP_TOKEN) {
+    process.env.BOOTSTRAP_TOKEN = 'migration-bootstrap-token';
+  }
+}
+
 const config = loadConfig();
 
 function isPostgresUrl(url?: string): boolean {
   return typeof url === 'string' && url.startsWith('postgres');
 }
 
+// Migrate-only CLI entry point (runs migrations and exits without starting the HTTP server)
+if (process.argv.includes('--migrate')) {
+  try {
+    if (isPostgresUrl(config.DATABASE_URL)) {
+      const { createPostgresInfrastructure } = await import('../core/adapters/db/postgres');
+      await createPostgresInfrastructure(config, { runMigrations: true });
+    } else {
+      const { sqlite } = openNodeDb(config.SQLITE_PATH, `${process.cwd()}/migrations`);
+      sqlite.close();
+    }
+    console.warn('Migrations applied successfully');
+    process.exit(0);
+  } catch (error) {
+    console.error('Migration failed:', error);
+    process.exit(1);
+  }
+}
+
 async function buildInfrastructure(config: ServerConfig) {
   if (isPostgresUrl(config.DATABASE_URL)) {
     const { createPostgresInfrastructure } = await import('../core/adapters/db/postgres');
-    return createPostgresInfrastructure(config);
+    const runMigrations = process.env.DATABASE_MIGRATE !== 'false';
+    return createPostgresInfrastructure(config, { runMigrations });
   }
   const { db } = openNodeDb(config.SQLITE_PATH, `${process.cwd()}/migrations`);
   const { createD1Infrastructure } = await import('../core/adapters/db/d1');
