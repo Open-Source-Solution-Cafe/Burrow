@@ -8,6 +8,7 @@ import type {
 } from '../infrastructure/types';
 import { notFound, badRequest } from './errors';
 import { hashToken } from '../shared/crypto';
+import type { AccessPolicy } from '../policy';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -18,6 +19,7 @@ export class InviteService {
       members: IMemberRepository;
       workspaces: IWorkspaceRepository;
     },
+    private readonly policy?: AccessPolicy,
   ) {}
 
   async createInvite(
@@ -26,6 +28,11 @@ export class InviteService {
     email: string,
     role: 'editor' | 'viewer',
   ): Promise<{ invite: Invite; token: string; url: string }> {
+    await this.policy?.authorize({
+      action: 'invite.create',
+      userId,
+      workspaceId,
+    });
     const rawToken = nanoid(32);
     const tokenHash = await hashToken(rawToken);
     const id = nanoid();
@@ -89,8 +96,20 @@ export class InviteService {
     userId: string,
     token: string,
   ): Promise<{ workspaceId: string; role: 'owner' | 'editor' | 'viewer' }> {
+    const tokenHash = await hashToken(token);
+    const invite = await this.repos.invites.findByTokenHash(tokenHash);
+    if (!invite || invite.acceptedAt !== null || invite.expiresAt <= Date.now()) {
+      throw badRequest('invalid_invite', 'Invalid or expired invite');
+    }
+
+    await this.policy?.authorize({
+      action: 'member.add',
+      userId,
+      workspaceId: invite.workspaceId,
+    });
+
     const result = await this.repos.invites.acceptForUser(
-      await hashToken(token),
+      tokenHash,
       userId,
       Date.now(),
     );

@@ -26,6 +26,7 @@ import { createWorkspaceRoutes } from './routes/workspaces';
 import { createProjectResourceRoutes } from './routes/project-resources';
 import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
+import { type AccessPolicy, SelfHostedPolicy } from './policy';
 
 // Type for Hono context with our custom variables
 export interface Env {
@@ -41,7 +42,11 @@ export interface Env {
  * Create the core Hono app with all routes registered.
  * This factory can be called from both Worker and Node entrypoints.
  */
-export function createCoreApp(infra: Infrastructure) {
+export function createCoreApp(
+  infra: Infrastructure,
+  options: { policy?: AccessPolicy } = {},
+) {
+  const policy = options.policy ?? new SelfHostedPolicy();
   const {
     repositories,
     storage,
@@ -59,6 +64,7 @@ export function createCoreApp(infra: Infrastructure) {
       members: repositories.members,
     },
     storage,
+    policy,
   );
   const projectRoutes = createProjectRoutes(projects, repositories.members);
   const notepads = new NotepadService(
@@ -90,11 +96,14 @@ export function createCoreApp(infra: Infrastructure) {
   });
   const notifications = repositories.notifications;
   const tags = new TagService({ tags: repositories.tags });
-  const invites = new InviteService({
-    invites: repositories.invites,
-    members: repositories.members,
-    workspaces: repositories.workspaces,
-  });
+  const invites = new InviteService(
+    {
+      invites: repositories.invites,
+      members: repositories.members,
+      workspaces: repositories.workspaces,
+    },
+    policy,
+  );
   const workspaceRoutes = createWorkspaceRoutes({
     workspaces: repositories.workspaces,
     members: repositories.members,
@@ -102,6 +111,7 @@ export function createCoreApp(infra: Infrastructure) {
     invites,
     email: emailProvider,
     appUrl: infra.appUrl,
+    policy,
   });
   const projectResourceRoutes = createProjectResourceRoutes({
     repositories,
@@ -123,6 +133,7 @@ export function createCoreApp(infra: Infrastructure) {
     members: repositories.members,
     files: repositories.projectFiles,
     storage,
+    policy,
   });
 
   const signUpSchema = z.object({
@@ -149,6 +160,8 @@ export function createCoreApp(infra: Infrastructure) {
       .use('/api/*', csrfProtection)
       .use('/api/*', createIdentityMiddleware(auth))
       .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
+      .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
+      .get('/api/auth/config', (c) => c.json({ signupMode: policy.signupMode() }))
 
       .get('/api/account', async (c) => {
         const identity = c.get('identity');
@@ -214,49 +227,17 @@ export function createCoreApp(infra: Infrastructure) {
         const providedBootstrapToken = body.bootstrapToken;
         const inviteToken = body.inviteToken;
 
-        // Check if this is the first workspace
-        const workspaceCount = await repositories.workspaces.count();
-        const isFirstWorkspace = workspaceCount === 0;
+        const forwardToAuth = async () => {
+          const { bootstrapToken: _b, inviteToken: _i, ...betterAuthBody } = body;
+          const forwardReq = new Request(c.req.url, {
+            method: 'POST',
+            headers: c.req.raw.headers,
+            body: JSON.stringify(betterAuthBody),
+          });
+          return auth.handler(forwardReq);
+        };
 
-        let inviteToAccept: string | null = null;
-
-        if (isFirstWorkspace) {
-          const isTokenValid =
-            Boolean(bootstrapToken && bootstrapToken.length >= 16) &&
-            typeof providedBootstrapToken === 'string' &&
-            (await timingSafeEqualString(providedBootstrapToken, bootstrapToken));
-
-          if (!isTokenValid) {
-            return c.json(
-              {
-                error: {
-                  code: 'invalid_bootstrap_token',
-                  message: 'Valid bootstrap token required for initial sign-up',
-                },
-              },
-              403,
-            );
-          }
-          if (!(await repositories.workspaces.claimBootstrap(body.email.trim().toLowerCase()))) {
-            throw httpError(
-              409,
-              'bootstrap_unavailable',
-              'Bootstrap is already reserved or complete',
-            );
-          }
-        } else {
-          if (!inviteToken || typeof inviteToken !== 'string') {
-            return c.json(
-              {
-                error: {
-                  code: 'invite_required',
-                  message: 'Invite token is required to register',
-                },
-              },
-              403,
-            );
-          }
-
+        if (inviteToken && typeof inviteToken === 'string') {
           const tokenHash = await hashToken(inviteToken);
           const now = Date.now();
           const invite = await repositories.invites.findByTokenHash(tokenHash);
@@ -277,22 +258,93 @@ export function createCoreApp(infra: Infrastructure) {
             throw httpError(400, 'email_mismatch', 'Sign-up email does not match invited email');
           }
 
-          inviteToAccept = inviteToken;
+          const authRes = await forwardToAuth();
+          if (!authRes.ok) {
+            return authRes;
+          }
+
+          const authData = (await authRes.clone().json()) as { user?: { id: string } };
+          const userId = authData.user?.id;
+          if (!userId) {
+            throw httpError(500, 'signup_incomplete', 'Account creation could not be completed');
+          }
+
+          await invites.acceptInvite(userId, inviteToken);
+          return authRes;
         }
 
-        // Forward sanitized request to Better Auth
-        const { bootstrapToken: _b, inviteToken: _i, ...betterAuthBody } = body;
-        const forwardReq = new Request(c.req.url, {
-          method: 'POST',
-          headers: c.req.raw.headers,
-          body: JSON.stringify(betterAuthBody),
-        });
-
-        const authRes = await auth.handler(forwardReq);
-        if (!authRes.ok) {
-          if (isFirstWorkspace) {
-            await repositories.workspaces.releaseBootstrap?.(body.email.trim().toLowerCase());
+        if (policy.signupMode() === 'open') {
+          const authRes = await forwardToAuth();
+          if (!authRes.ok) {
+            return authRes;
           }
+
+          const authData = (await authRes.clone().json()) as { user?: { id: string } };
+          const userId = authData.user?.id;
+          if (!userId) {
+            throw httpError(500, 'signup_incomplete', 'Account creation could not be completed');
+          }
+
+          await policy.authorize({ action: 'workspace.create', userId });
+
+          await repositories.workspaces.create(
+            createWorkspacePlan({
+              userId,
+              name: 'My Workspace',
+              workspaceId: nanoid(),
+              projectId: nanoid(),
+              notepadId: nanoid(),
+              now: Date.now(),
+            }),
+          );
+
+          return authRes;
+        }
+
+        // policy.signupMode() === 'bootstrap-or-invite'
+        const workspaceCount = await repositories.workspaces.count();
+        const isFirstWorkspace = workspaceCount === 0;
+
+        if (!isFirstWorkspace) {
+          return c.json(
+            {
+              error: {
+                code: 'invite_required',
+                message: 'Invite token is required to register',
+              },
+            },
+            403,
+          );
+        }
+
+        const isTokenValid =
+          Boolean(bootstrapToken && bootstrapToken.length >= 16) &&
+          typeof providedBootstrapToken === 'string' &&
+          (await timingSafeEqualString(providedBootstrapToken, bootstrapToken));
+
+        if (!isTokenValid) {
+          return c.json(
+            {
+              error: {
+                code: 'invalid_bootstrap_token',
+                message: 'Valid bootstrap token required for initial sign-up',
+              },
+            },
+            403,
+          );
+        }
+
+        if (!(await repositories.workspaces.claimBootstrap(body.email.trim().toLowerCase()))) {
+          throw httpError(
+            409,
+            'bootstrap_unavailable',
+            'Bootstrap is already reserved or complete',
+          );
+        }
+
+        const authRes = await forwardToAuth();
+        if (!authRes.ok) {
+          await repositories.workspaces.releaseBootstrap?.(body.email.trim().toLowerCase());
           return authRes;
         }
 
@@ -302,25 +354,19 @@ export function createCoreApp(infra: Infrastructure) {
           throw httpError(500, 'signup_incomplete', 'Account creation could not be completed');
         }
 
-        const now = Date.now();
-
-        if (isFirstWorkspace) {
-          const workspace = await repositories.workspaces.completeBootstrap(
-            body.email.trim().toLowerCase(),
-            createWorkspacePlan({
-              userId,
-              name: 'My Workspace',
-              workspaceId: nanoid(),
-              projectId: nanoid(),
-              notepadId: nanoid(),
-              now,
-            }),
-          );
-          if (!workspace) {
-            throw httpError(409, 'bootstrap_unavailable', 'Bootstrap could not be completed');
-          }
-        } else if (inviteToAccept) {
-          await invites.acceptInvite(userId, inviteToAccept);
+        const workspace = await repositories.workspaces.completeBootstrap(
+          body.email.trim().toLowerCase(),
+          createWorkspacePlan({
+            userId,
+            name: 'My Workspace',
+            workspaceId: nanoid(),
+            projectId: nanoid(),
+            notepadId: nanoid(),
+            now: Date.now(),
+          }),
+        );
+        if (!workspace) {
+          throw httpError(409, 'bootstrap_unavailable', 'Bootstrap could not be completed');
         }
 
         return authRes;
@@ -419,6 +465,10 @@ export function createCoreApp(infra: Infrastructure) {
       .onError((err, c) => {
         if (isHttpError(err)) {
           return c.json({ error: { code: err.code, message: err.message } }, err.status as any);
+        }
+        const mapped = policy.mapError?.(err);
+        if (mapped) {
+          return c.json({ error: { code: mapped.code, message: mapped.message } }, mapped.status as any);
         }
         console.error('unhandled error', err);
         return c.json({ error: { code: 'internal_error', message: 'Internal server error' } }, 500);

@@ -11,6 +11,7 @@ import type {
 import { notFound, badRequest, forbidden, conflict } from './errors';
 import { positionAfterLast, positionBetween } from './utils/ordering';
 import type { IStorageAdapter } from '../adapters/storage/types';
+import type { AccessPolicy } from '../policy';
 
 export interface CreateProjectArgs {
   workspaceId: string;
@@ -55,6 +56,7 @@ export class ProjectService {
   constructor(
     private readonly repos: Repositories,
     private readonly storage?: IStorageAdapter,
+    private readonly policy?: AccessPolicy,
   ) {}
 
   async listProjects(workspaceId: string): Promise<Project[]> {
@@ -68,6 +70,11 @@ export class ProjectService {
   }
 
   async createProject(args: CreateProjectArgs): Promise<{ id: string; position: string }> {
+    await this.policy?.authorize({
+      action: 'project.create',
+      userId: args.actorUserId,
+      workspaceId: args.workspaceId,
+    });
     const id = nanoid();
     const now = Date.now();
     for (let attempt = 0; attempt < 4; attempt++) {

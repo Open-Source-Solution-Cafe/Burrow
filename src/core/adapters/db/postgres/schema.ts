@@ -191,6 +191,8 @@ export const projectFiles = pgTable(
       .references(() => projects.id, { onDelete: 'cascade' }),
     storageKey: text('storage_key').notNull(),
     contentType: text('content_type').notNull(),
+    filename: text('filename'),
+    byteSize: integer('byte_size'),
     createdBy: text('created_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },

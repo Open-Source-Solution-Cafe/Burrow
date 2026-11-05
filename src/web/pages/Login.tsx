@@ -62,9 +62,23 @@ export function Login() {
   const [name, setName] = useState('');
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
+  const [signupMode, setSignupMode] = useState<'bootstrap-or-invite' | 'open'>('bootstrap-or-invite');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [withoutWorkspace, setWithoutWorkspace] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/auth/config', { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { signupMode?: 'bootstrap-or-invite' | 'open' } | null) => {
+        if (data?.signupMode) {
+          setSignupMode(data.signupMode);
+        }
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   // Redirect to app if already authenticated
   useEffect(() => {
@@ -382,7 +396,7 @@ export function Login() {
 
               {isSignUp && (
                 <>
-                  {!inviteToken.trim() && (
+                  {signupMode !== 'open' && !inviteToken.trim() && (
                     <div>
                       <label className="block text-xs font-medium text-[var(--text)] mb-1">
                         Bootstrap Token (First user setting up Burrow only)

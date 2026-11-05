@@ -1,6 +1,7 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import type { AuthProvider } from '../infrastructure/types';
+import type { SignupMode } from '../policy';
 
 export interface AuthEnv {
   BETTER_AUTH_SECRET: string;
@@ -9,16 +10,18 @@ export interface AuthEnv {
   GITHUB_CLIENT_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  signupMode?: SignupMode;
 }
 
-const oauth = (clientId?: string, clientSecret?: string) =>
-  clientId && clientSecret ? { clientId, clientSecret, disableImplicitSignUp: true } : undefined;
+const oauth = (clientId?: string, clientSecret?: string, disableImplicitSignUp = true) =>
+  clientId && clientSecret ? { clientId, clientSecret, disableImplicitSignUp } : undefined;
 
 /** Auth resolves account identity; workspace membership supplies permissions. */
 export function createAuthProvider(
   db: Parameters<typeof drizzleAdapter>[0],
   adapter: Parameters<typeof drizzleAdapter>[1],
   env: AuthEnv,
+  signupMode?: SignupMode,
 ): AuthProvider {
   const isProd =
     (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') ||
@@ -49,6 +52,8 @@ export function createAuthProvider(
     }
   }
   const config = { ...(typeof process === 'undefined' ? {} : process.env), ...env };
+  const effectiveSignupMode = signupMode ?? env.signupMode;
+  const disableImplicitSignUp = effectiveSignupMode !== 'open';
   const auth = betterAuth({
     database: drizzleAdapter(db, adapter),
     secret: env.BETTER_AUTH_SECRET,
@@ -65,8 +70,8 @@ export function createAuthProvider(
     },
     emailAndPassword: { enabled: true },
     socialProviders: {
-      github: oauth(config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET),
-      google: oauth(config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET),
+      github: oauth(config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET, disableImplicitSignUp),
+      google: oauth(config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET, disableImplicitSignUp),
     },
     session: {
       // Preserve Better Auth's database-session defaults on every backend.

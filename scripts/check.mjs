@@ -9,6 +9,9 @@ run(bin('typescript', 'tsc'), ['-b']);
 console.log('check: basalt');
 run('./scripts/check-basalt.mjs', []);
 
+console.log('check: licenses');
+run('node', ['./scripts/check-licenses.mjs']);
+
 console.log('check: lint');
 run(bin('eslint'), ['.']);
 

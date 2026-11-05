@@ -10,6 +10,7 @@ import { createWorkspacePlan } from '../entities/workspace';
 import { createExplicitWorkspaceMiddleware, requireRole } from '../middleware/session';
 import { inviteEmail } from '../services/email-templates';
 import { forbidden } from '../services/errors';
+import type { AccessPolicy } from '../policy';
 
 const createWorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -31,8 +32,9 @@ export function createWorkspaceRoutes(args: {
   invites: InviteService;
   email: IEmailProvider;
   appUrl?: string;
+  policy?: AccessPolicy;
 }) {
-  const { workspaces, members, memberService, invites } = args;
+  const { workspaces, members, memberService, invites, policy } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const route = new Hono<Env>();
 
@@ -61,6 +63,14 @@ export function createWorkspaceRoutes(args: {
       notepadId: `${workspaceId}-welcome`,
       now: Date.now(),
     });
+
+    const existing = await workspaces.findById(workspaceId);
+    if (existing && (existing.createdBy === identity.userId || (await members.findByUserId(workspaceId, identity.userId)))) {
+      return c.json({ workspace: existing, project: plan.project }, 201);
+    }
+
+    await policy?.authorize({ action: 'workspace.create', userId: identity.userId });
+
     const workspace = await workspaces.create(plan);
     return c.json({ workspace, project: plan.project }, 201);
   });

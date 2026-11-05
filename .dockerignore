@@ -1,0 +1,10 @@
+node_modules
+.git
+data
+.deploy-log
+.wrangler
+tests
+.env
+.env.*
+dist
+*.log

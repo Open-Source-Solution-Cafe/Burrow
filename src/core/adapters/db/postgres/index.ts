@@ -30,7 +30,10 @@ export type PostgresDb = PostgresJsDatabase<typeof schema>;
  * Create the full PostgreSQL infrastructure bundle for the core app.
  * Opens pg connection, runs migrations, returns Infrastructure with all adapters.
  */
-export async function createPostgresInfrastructure(config: ServerConfig): Promise<Infrastructure> {
+export async function createPostgresInfrastructure(
+  config: ServerConfig,
+  options: { runMigrations?: boolean; migrationsDir?: string } = {},
+): Promise<Infrastructure> {
   if (!config.DATABASE_URL?.match(/^postgres(ql)?:\/\//)) {
     throw new Error('PostgreSQL requires a postgres:// or postgresql:// DATABASE_URL');
   }
@@ -39,11 +42,15 @@ export async function createPostgresInfrastructure(config: ServerConfig): Promis
     idle_timeout: 30,
     connect_timeout: 10,
   });
-  try {
-    await applyPostgresMigrations(client);
-  } catch (error) {
-    await client.end();
-    throw error;
+  const runMigrations = options.runMigrations ?? true;
+  const migrationsDir = options.migrationsDir ?? join(process.cwd(), 'migrations/postgres');
+  if (runMigrations) {
+    try {
+      await applyPostgresMigrations(client, migrationsDir);
+    } catch (error) {
+      await client.end();
+      throw error;
+    }
   }
   const db = drizzle(client, { schema });
 

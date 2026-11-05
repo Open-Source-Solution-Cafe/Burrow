@@ -15,6 +15,7 @@ import { httpError } from '../services/errors';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { DEFAULT_UPLOAD_POLICY, MAX_UPLOAD_BYTES, UPLOAD_FILE_TYPES, getUploadFileType, uploadPolicyStorageKey } from '../../shared/uploadPolicy';
+import type { AccessPolicy } from '../policy';
 
 const policySchema = z.object({
   maxFileSizeBytes: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
@@ -26,8 +27,9 @@ export function createProjectFileRoutes(args: {
   members: IMemberRepository;
   files: IProjectFileRepository;
   storage: IStorageAdapter;
+  policy?: AccessPolicy;
 }) {
-  const { projects, members, files, storage } = args;
+  const { projects, members, files, storage, policy } = args;
   const route = new Hono<Env>();
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const readPolicy = async (workspaceId: string, projectId: string) => {
@@ -82,17 +84,25 @@ export function createProjectFileRoutes(args: {
       if (!file || !(file instanceof File)) {
         throw httpError(400, 'invalid_file', 'No file provided in form field "file"');
       }
-      const policy = await readPolicy(c.get('workspaceId'), c.req.param('pid'));
+      const uploadPolicy = await readPolicy(c.get('workspaceId'), c.req.param('pid'));
       const fileType = getUploadFileType(file);
-      if (!fileType || !policy.allowedMimeTypes.includes(fileType.mimeType)) {
+      if (!fileType || !uploadPolicy.allowedMimeTypes.includes(fileType.mimeType)) {
         throw httpError(400, 'invalid_mime_type', `File type ${file.type} not allowed`);
       }
-      if (file.size > policy.maxFileSizeBytes) {
-        throw httpError(413, 'payload_too_large', `File exceeds the project's ${policy.maxFileSizeBytes / (1024 * 1024)} MB limit`);
+      if (file.size > uploadPolicy.maxFileSizeBytes) {
+        throw httpError(413, 'payload_too_large', `File exceeds the project's ${uploadPolicy.maxFileSizeBytes / (1024 * 1024)} MB limit`);
       }
 
       const workspaceId = c.get('workspaceId');
       const projectId = c.req.param('pid');
+
+      await policy?.authorize({
+        action: 'file.upload',
+        userId: c.get('userId'),
+        workspaceId,
+        bytes: file.size,
+      });
+
       const key = `${workspaceId}/${projectId}/${nanoid()}.${fileType.extension}`;
       const bytes = new Uint8Array(await file.arrayBuffer());
       if (fileType.mimeType.startsWith('image/') && !isAllowedImageContent(fileType.mimeType, bytes)) {

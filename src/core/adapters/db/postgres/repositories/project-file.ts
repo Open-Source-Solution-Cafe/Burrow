@@ -9,7 +9,15 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
   async register(file: ProjectFile): Promise<boolean> {
     const rows = await this.db
       .insert(projectFiles)
-      .values(file)
+      .values({
+        projectId: file.projectId,
+        storageKey: file.storageKey,
+        contentType: file.contentType,
+        filename: file.filename ?? null,
+        byteSize: file.byteSize ?? null,
+        createdBy: file.createdBy,
+        createdAt: file.createdAt,
+      })
       .onConflictDoNothing({
         target: [projectFiles.projectId, projectFiles.storageKey],
       })
@@ -18,14 +26,20 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
   }
 
   async findByProjectAndKey(projectId: string, storageKey: string): Promise<ProjectFile | null> {
-    const rows = await this.db
+    const [row] = await this.db
       .select()
       .from(projectFiles)
       .where(
         and(eq(projectFiles.projectId, projectId), eq(projectFiles.storageKey, storageKey)),
       )
       .limit(1);
-    return rows[0] ?? null;
+    if (!row) return null;
+    const { filename, byteSize, ...registration } = row;
+    return {
+      ...registration,
+      ...(filename === null ? {} : { filename }),
+      ...(byteSize === null ? {} : { byteSize }),
+    };
   }
 
   async countByStorageKey(storageKey: string): Promise<number> {

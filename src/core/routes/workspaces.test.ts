@@ -6,7 +6,7 @@ import { InviteService } from '../services/invites';
 import { MemberService } from '../services/members';
 import { createWorkspaceRoutes } from './workspaces';
 
-function createApp(role: 'owner' | 'viewer' = 'owner') {
+function createApp(role: 'owner' | 'viewer' = 'owner', initialCreated = false) {
   const workspace = {
     id: 'workspace-request-123',
     name: 'Personal workspace',
@@ -23,10 +23,14 @@ function createApp(role: 'owner' | 'viewer' = 'owner') {
     createdAt: 100,
     updatedAt: 100,
   };
+  let exists = initialCreated;
   const workspaces = {
     listByUser: vi.fn().mockResolvedValue([]),
-    findById: vi.fn().mockImplementation(async (id: string) => id === workspace.id ? workspace : null),
-    create: vi.fn().mockResolvedValue(workspace),
+    findById: vi.fn().mockImplementation(async (id: string) => (exists && id === workspace.id ? workspace : null)),
+    create: vi.fn().mockImplementation(async () => {
+      exists = true;
+      return workspace;
+    }),
     rename: vi.fn().mockResolvedValue(true),
   } as unknown as IWorkspaceRepository;
   const members = {
@@ -116,7 +120,7 @@ it('creates a workspace from a stable request ID and scopes context to current m
 });
 
 it('requires owner role for rename and relies on the repository to recheck it atomically', async () => {
-  const { app, workspaces, workspace } = createApp('viewer');
+  const { app, workspaces, workspace } = createApp('viewer', true);
   const response = await app.request(`http://localhost/api/workspaces/${workspace.id}`, {
     method: 'PATCH',
     headers: { 'X-Account': 'account-1', 'Content-Type': 'application/json' },

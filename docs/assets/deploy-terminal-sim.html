@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Burrow - Cloudflare 3-Step Deploy Terminal Simulation</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #090d13;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #e6edf3;
+      padding: 24px;
+    }
+    .container {
+      width: 100%;
+      max-width: 920px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(243, 128, 32, 0.15);
+      border: 1px solid rgba(243, 128, 32, 0.35);
+      color: #f38020;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      background: #30363d;
+      color: #fff;
+    }
+    .btn-orange {
+      background: #f38020;
+      border-color: #f38020;
+      color: #fff;
+      font-weight: 600;
+    }
+    .btn-orange:hover {
+      background: #e07116;
+    }
+
+    /* Terminal Frame */
+    .terminal-window {
+      background: #0b0f17;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 560px;
+    }
+    .terminal-titlebar {
+      background: #161b22;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #30363d;
+      position: relative;
+    }
+    .dots {
+      display: flex;
+      gap: 8px;
+    }
+    .dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ff5f56; }
+    .dot-yellow { background: #ffbd2e; }
+    .dot-green { background: #27c93f; }
+    .title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 12px;
+      color: #8b949e;
+      font-family: monospace;
+    }
+
+    .terminal-body {
+      flex: 1;
+      padding: 16px 20px;
+      overflow-y: auto;
+      font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #c9d1d9;
+    }
+    .terminal-body::-webkit-scrollbar {
+      width: 6px;
+    }
+    .terminal-body::-webkit-scrollbar-thumb {
+      background: #30363d;
+      border-radius: 3px;
+    }
+
+    /* Styling */
+    .prompt-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+    .p-dir { color: #58a6ff; font-weight: 600; }
+    .p-arrow { color: #f38020; font-weight: bold; }
+    .typed-cmd { color: #56d364; font-weight: bold; }
+    .cursor {
+      display: inline-block;
+      width: 7px;
+      height: 15px;
+      background: #56d364;
+      animation: blink 0.8s infinite;
+      vertical-align: middle;
+    }
+    @keyframes blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
+
+    .cf-banner { color: #f38020; font-weight: 600; }
+    .step-header {
+      color: #58a6ff;
+      font-weight: 700;
+      margin-top: 6px;
+      margin-bottom: 2px;
+    }
+    .target-banner {
+      border: 1px solid #30363d;
+      background: #111827;
+      color: #58a6ff;
+      padding: 6px 12px;
+      margin: 6px 0;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .banner-box {
+      border: 1px solid #30363d;
+      background: #161b22;
+      padding: 10px 14px;
+      border-radius: 6px;
+      margin: 8px 0;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    .token-highlight {
+      color: #58a6ff;
+      font-weight: bold;
+      background: rgba(88, 166, 255, 0.12);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .log-success { color: #3fb950; font-weight: 600; }
+    .log-dim { color: #6e7681; }
+    .log-white { color: #f0f6fc; }
+    .table-art {
+      color: #8b949e;
+      font-family: monospace;
+      white-space: pre;
+      margin: 4px 0;
+    }
+
+    .progress-bar {
+      height: 3px;
+      background: #21262d;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #f38020, #3fb950);
+      transition: width 0.1s linear;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header-row">
+    <div class="badge">☁️ Cloudflare 3-Step Setup & Deploy</div>
+    <div class="controls">
+      <button class="btn" id="replayBtn">↻ Replay (10s)</button>
+      <button class="btn btn-orange" id="copyBtn">Copy Voiceover Script</button>
+    </div>
+  </div>
+
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+
+  <div class="terminal-window">
+    <div class="terminal-titlebar">
+      <div class="dots">
+        <div class="dot dot-red"></div>
+        <div class="dot dot-yellow"></div>
+        <div class="dot dot-green"></div>
+      </div>
+      <div class="title">burrow-deploy — bash</div>
+    </div>
+    <div class="terminal-body" id="termBody"></div>
+  </div>
+</div>
+
+<script>
+  const termBody = document.getElementById("termBody");
+  const progressFill = document.getElementById("progressFill");
+  const replayBtn = document.getElementById("replayBtn");
+  const copyBtn = document.getElementById("copyBtn");
+
+  const SIMULATION = [
+    // 1. wrangler login
+    { type: "prompt", dir: "burrow", cmd: "wrangler login", typeDelay: 22 },
+    { type: "log", html: '<span class="cf-banner">⛅️ wrangler 4.137.0</span>', delay: 150 },
+    { type: "log", html: '<span class="log-dim">Attempting to open browser session...</span>', delay: 120 },
+    { type: "log", html: '<span class="log-success">✔ Successfully logged in as teelo@cloudflare.account</span>', delay: 240 },
+
+    // 2. pnpm run setup -r
+    { type: "prompt", dir: "burrow", cmd: "pnpm run setup -r", typeDelay: 22, delay: 180 },
+    { type: "log", html: '<div class="target-banner">ACTION: SETUP &nbsp;|&nbsp; TARGET: ☁️ REMOTE (Cloudflare Production)</div>', delay: 160 },
+    { type: "log", html: '<div class="step-header">==> Provision or discover Cloudflare D1 database & R2 bucket</div>', delay: 140 },
+    { type: "log", html: '  ✔ Bound D1 Database: <span class="log-white">burrow</span> <span class="log-dim">(5c94-8bf2-411a-8217)</span>\n  ✔ Bound R2 Bucket:   <span class="log-white">burrow-files</span>', delay: 180 },
+    
+    // Exact D1 migrations table
+    { type: "log", html: '<div class="step-header">==> Apply migrations to remote D1</div>', delay: 160 },
+    { type: "log", html: 
+`<div class="table-art">┌──────────────────────────────────────────┐
+│ Name                                     │
+├──────────────────────────────────────────┤
+│ 0000_motionless_legion.sql               │
+│ 0001_fts.sql                             │
+│ 0002_card_subtasks_comments_wip.sql      │
+│ 0003_notepads_tree_ordering_idx.sql      │
+│ 0004_bootstrap_state.sql                 │
+│ 0005_deletion_operation.sql              │
+│ 0006_multi_workspace_memberships.sql     │
+│ 0007_workspace_membership_lookup.sql     │
+│ 0008_scope_cascade_guards.sql            │
+│ 0009_project_file_registry.sql           │
+│ 0010_legacy_cover_file_registrations.sql │
+│ 0011_scope_write_guards.sql              │
+│ 0012_project_file_details.sql            │
+└──────────────────────────────────────────┘</div>`, delay: 300 },
+    { type: "log", html: '<span class="log-success">✔ 13 migrations applied successfully.</span>', delay: 160 },
+
+    // Real Authentic Remote Setup Complete Banner with BOOTSTRAP_TOKEN
+    { type: "log", html: 
+`<div class="banner-box">======================================================
+<span class="log-success">✅ Remote Cloudflare Setup complete!</span>
+  Production URL:     <span style="color:#f38020; font-weight:bold;">https://burrow.workers.dev</span>
+  D1 Database:        burrow (5c94-8bf2-411a-8217)
+  R2 Bucket:          burrow-files
+  BETTER_AUTH_URL:    https://burrow.workers.dev
+  BETTER_AUTH_SECRET: [configured]
+  <span style="color:#f0f6fc; font-weight:bold;">BOOTSTRAP_TOKEN:    <span class="token-highlight">580d81dc6778f423550fe80470aac5d1</span></span>
+======================================================
+<span class="log-dim">Open the Production URL above and register the initial Owner account with BOOTSTRAP_TOKEN.</span></div>`, delay: 350 },
+
+    // 3. pnpm run deploy
+    { type: "prompt", dir: "burrow", cmd: "pnpm run deploy", typeDelay: 22, delay: 200 },
+    { type: "log", html: '<div class="step-header">==> Preflight check & D1 Time Travel bookmark</div>', delay: 140 },
+    { type: "log", html: '  bookmark saved to .deploy-log/rollbacks.log: {"bookmark":"0000004f-00000002-..."}', delay: 140 },
+    { type: "log", html: '<div class="step-header">==> Check (typecheck, lint, tests) & Vite Build</div>', delay: 150 },
+    { type: "log", html: '  dist/index.html                     1.21 kB\n  dist/assets/index-D8x2a.js        142.40 kB (gzip: 44.8 kB)', delay: 160 },
+    { type: "log", html: '<div class="step-header">==> Deploy to Cloudflare Workers</div>', delay: 150 },
+    { type: "log", html: '  Uploaded (0.84 sec)\n  deployed: <span style="color:#f38020; font-weight:bold;">https://burrow.workers.dev</span>\n<div class="step-header">==> Smoke test</div>\n  GET https://burrow.workers.dev/api/health [200 OK]\n\n<span class="log-success">deploy complete</span>', delay: 250 }
+  ];
+
+  let timeouts = [];
+
+  function clearState() {
+    timeouts.forEach(t => clearTimeout(t));
+    timeouts = [];
+    termBody.innerHTML = "";
+    progressFill.style.width = "0%";
+  }
+
+  function scrollBottom() {
+    termBody.scrollTop = termBody.scrollHeight;
+  }
+
+  function typeText(targetEl, text, speed) {
+    return new Promise(resolve => {
+      let idx = 0;
+      function step() {
+        if (idx < text.length) {
+          targetEl.textContent += text.charAt(idx);
+          idx++;
+          timeouts.push(setTimeout(step, speed));
+        } else {
+          resolve();
+        }
+      }
+      step();
+    });
+  }
+
+  async function startSimulation() {
+    clearState();
+    const duration = 10500;
+    const start = Date.now();
+
+    const ticker = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const pct = Math.min(100, (elapsed / duration) * 100);
+      progressFill.style.width = pct + "%";
+      if (pct >= 100) clearInterval(ticker);
+    }, 50);
+    timeouts.push(ticker);
+
+    for (const item of SIMULATION) {
+      if (item.delay) {
+        await new Promise(r => timeouts.push(setTimeout(r, item.delay)));
+      }
+
+      if (item.type === "prompt") {
+        const row = document.createElement("div");
+        row.className = "prompt-line";
+        row.innerHTML = `<span class="p-dir">${item.dir}</span> <span class="p-arrow">❯</span> <span class="typed-cmd"></span><span class="cursor"></span>`;
+        termBody.appendChild(row);
+        scrollBottom();
+
+        const typedEl = row.querySelector(".typed-cmd");
+        const cursor = row.querySelector(".cursor");
+        await typeText(typedEl, item.cmd, item.typeDelay || 22);
+        cursor.remove();
+      } else if (item.type === "log") {
+        const div = document.createElement("div");
+        div.innerHTML = item.html;
+        termBody.appendChild(div);
+        scrollBottom();
+      }
+    }
+  }
+
+  replayBtn.addEventListener("click", startSimulation);
+  copyBtn.addEventListener("click", () => {
+    navigator.clipboard.writeText("Best part? You can deploy it to Cloudflare in three easy steps: log in with Wrangler, run p-n-p-m run setup, and p-n-p-m run deploy for updates. It runs completely free on Cloudflare Workers.");
+    copyBtn.textContent = "✔ Copied!";
+    setTimeout(() => copyBtn.textContent = "Copy Voiceover Script", 2000);
+  });
+
+  // Start on load
+  startSimulation();
+</script>
+</body>
+</html>
