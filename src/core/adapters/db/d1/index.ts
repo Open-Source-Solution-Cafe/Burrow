@@ -42,8 +42,8 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
   const search = new SqliteFtsSearchAdapter(db);
   const locks = new SqlLockAdapter(db);
   const storage = createStorageFromEnv(env);
-  const auth = createAuthProviderWithDB(db, env);
   const email = createEmailFromEnv(env);
+  const auth = createAuthProviderWithDB(db, { ...env, emailProvider: email }, email);
 
   // Create repositories (stateless, can be shared)
   const repositories = {
@@ -68,6 +68,7 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     email,
     bootstrapToken: env.BOOTSTRAP_TOKEN,
     appUrl: env.BETTER_AUTH_URL,
+    env,
   };
 }
 

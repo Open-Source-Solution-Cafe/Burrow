@@ -48,6 +48,7 @@ export interface Infrastructure {
   email: IEmailProvider;
   bootstrapToken: string;
   appUrl?: string;
+  env?: Record<string, any>;
 }
 
 /** Explicit project boundary for repository traversal and resource relationships. */

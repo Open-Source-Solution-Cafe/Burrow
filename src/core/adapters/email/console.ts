@@ -7,6 +7,7 @@ import type { IEmailProvider, SendEmailParams } from '../email';
  */
 export function createConsoleEmailProvider(): IEmailProvider {
   return {
+    provider: 'console',
     async send({ to, subject }: SendEmailParams) {
       // eslint-disable-next-line no-console
       console.log(`[email:console] Fallback delivery (RESEND_API_KEY unset in environment)`);

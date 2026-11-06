@@ -78,6 +78,11 @@ async function buildInfrastructure(config: ServerConfig) {
     BOOTSTRAP_TOKEN: config.BOOTSTRAP_TOKEN,
     RESEND_API_KEY: config.RESEND_API_KEY,
     EMAIL_FROM: config.EMAIL_FROM,
+    GOOGLE_CLIENT_ID: config.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: config.GOOGLE_CLIENT_SECRET,
+    GITHUB_CLIENT_ID: config.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: config.GITHUB_CLIENT_SECRET,
+    SELF_UPDATE_WEBHOOK_URL: config.SELF_UPDATE_WEBHOOK_URL,
   } as any;
   return createD1Infrastructure(d1Db as any, env);
 }

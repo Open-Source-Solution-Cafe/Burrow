@@ -95,6 +95,16 @@ export async function createPostgresInfrastructure(
     db,
     authSecret,
     config.BETTER_AUTH_URL ?? 'http://localhost:3005',
+    email,
+    undefined,
+    {
+      RESEND_API_KEY: config.RESEND_API_KEY,
+      EMAIL_FROM: config.EMAIL_FROM,
+      GOOGLE_CLIENT_ID: (config as any).GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: (config as any).GOOGLE_CLIENT_SECRET,
+      GITHUB_CLIENT_ID: (config as any).GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: (config as any).GITHUB_CLIENT_SECRET,
+    },
   );
 
   return {
@@ -106,6 +116,9 @@ export async function createPostgresInfrastructure(
     email,
     bootstrapToken: config.BOOTSTRAP_TOKEN,
     appUrl: config.BETTER_AUTH_URL,
+    env: {
+      ...config,
+    },
   };
 }
 

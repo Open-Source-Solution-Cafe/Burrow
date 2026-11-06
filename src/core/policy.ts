@@ -46,6 +46,12 @@ export interface AccessPolicy {
    * @returns An `HttpError` if the error maps to a known quota/policy violation, or `null` otherwise.
    */
   mapError?(error: unknown): HttpError | null;
+
+  /**
+   * Whether the instance permits in-place self-updates triggered by workspace owners.
+   * Defaults to true in self-hosted deployments.
+   */
+  allowSelfUpdate?(): boolean;
 }
 
 /**
@@ -55,6 +61,7 @@ export interface AccessPolicy {
  * - Requires bootstrap token for the initial account, invites thereafter (`bootstrap-or-invite`).
  * - Permits all domain actions without quota constraints.
  * - No custom database error mappings.
+ * - Enables self-updates.
  */
 export class SelfHostedPolicy implements AccessPolicy {
   signupMode(): SignupMode {
@@ -67,5 +74,9 @@ export class SelfHostedPolicy implements AccessPolicy {
 
   mapError(_error: unknown): HttpError | null {
     return null;
+  }
+
+  allowSelfUpdate(): boolean {
+    return true;
   }
 }

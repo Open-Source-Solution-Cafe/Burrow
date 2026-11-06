@@ -27,4 +27,8 @@ describe('SelfHostedPolicy', () => {
     expect(policy.mapError({ code: 'SQLITE_CONSTRAINT' })).toBeNull();
     expect(policy.mapError(null)).toBeNull();
   });
+
+  it('permits self-update by default in self-hosted deployments', () => {
+    expect(policy.allowSelfUpdate()).toBe(true);
+  });
 });

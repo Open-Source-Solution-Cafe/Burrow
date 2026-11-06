@@ -6,6 +6,7 @@ import type { IEmailProvider, SendEmailParams } from '../email';
  */
 export function createResendEmailProvider(apiKey: string, from: string): IEmailProvider {
   return {
+    provider: 'resend',
     async send({ to, subject, html, text }: SendEmailParams) {
       // eslint-disable-next-line no-console
       console.log(`[email:resend] Attempting delivery via Resend:`);

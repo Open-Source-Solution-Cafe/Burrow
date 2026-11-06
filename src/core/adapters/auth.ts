@@ -1,7 +1,10 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { magicLink } from 'better-auth/plugins';
 import type { AuthProvider } from '../infrastructure/types';
 import type { SignupMode } from '../policy';
+import type { IEmailProvider } from './email';
+import { createEmailFromEnv } from './email/factory';
 
 export interface AuthEnv {
   BETTER_AUTH_SECRET: string;
@@ -10,7 +13,10 @@ export interface AuthEnv {
   GITHUB_CLIENT_SECRET?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  RESEND_API_KEY?: string;
+  EMAIL_FROM?: string;
   signupMode?: SignupMode;
+  emailProvider?: IEmailProvider;
 }
 
 const oauth = (clientId?: string, clientSecret?: string, disableImplicitSignUp = true) =>
@@ -22,6 +28,7 @@ export function createAuthProvider(
   adapter: Parameters<typeof drizzleAdapter>[1],
   env: AuthEnv,
   signupMode?: SignupMode,
+  emailProvider?: IEmailProvider,
 ): AuthProvider {
   const isProd =
     (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') ||
@@ -54,6 +61,13 @@ export function createAuthProvider(
   const config = { ...(typeof process === 'undefined' ? {} : process.env), ...env };
   const effectiveSignupMode = signupMode ?? env.signupMode;
   const disableImplicitSignUp = effectiveSignupMode !== 'open';
+  const effectiveEmailProvider =
+    emailProvider ??
+    env.emailProvider ??
+    (env.RESEND_API_KEY || config.RESEND_API_KEY
+      ? createEmailFromEnv(config)
+      : createEmailFromEnv({}));
+
   const auth = betterAuth({
     database: drizzleAdapter(db, adapter),
     secret: env.BETTER_AUTH_SECRET,
@@ -69,6 +83,18 @@ export function createAuthProvider(
       },
     },
     emailAndPassword: { enabled: true },
+    plugins: [
+      magicLink({
+        sendMagicLink: async ({ email, url }) => {
+          await effectiveEmailProvider.send({
+            to: email,
+            subject: 'Sign in to Burrow',
+            html: `<p>Click the link below to sign in to your Burrow account:</p><p><a href="${url}">Sign in to Burrow</a></p><p>If you didn't request this email, you can safely ignore it.</p>`,
+          });
+        },
+        disableSignUp: disableImplicitSignUp,
+      }),
+    ],
     socialProviders: {
       github: oauth(config.GITHUB_CLIENT_ID, config.GITHUB_CLIENT_SECRET, disableImplicitSignUp),
       google: oauth(config.GOOGLE_CLIENT_ID, config.GOOGLE_CLIENT_SECRET, disableImplicitSignUp),

@@ -142,6 +142,26 @@ export function useAccount() {
   });
 }
 
+export interface SystemVersionInfo {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  allowSelfUpdate: boolean;
+}
+
+export function useSystemVersion() {
+  return useQuery({
+    queryKey: ['system', 'version'],
+    queryFn: async () => {
+      const res = await fetch('/api/system/version');
+      if (!res.ok) return null;
+      return (await res.json()) as SystemVersionInfo;
+    },
+    staleTime: 1000 * 60 * 30,
+    retry: false,
+  });
+}
+
 export interface CreatedWorkspace {
   workspace: AccountWorkspace;
   project: { id: string; workspaceId: string; name: string };

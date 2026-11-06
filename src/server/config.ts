@@ -21,6 +21,11 @@ const configSchema = z.object({
   S3_ACCESS_KEY: z.string().optional(),
   S3_SECRET_KEY: z.string().optional(),
   S3_FORCE_PATH_STYLE: z.string().optional(),
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  SELF_UPDATE_WEBHOOK_URL: z.string().optional(),
 });
 
 export type ServerConfig = z.infer<typeof configSchema>;
@@ -85,5 +90,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     S3_ACCESS_KEY: env.S3_ACCESS_KEY,
     S3_SECRET_KEY: env.S3_SECRET_KEY,
     S3_FORCE_PATH_STYLE: env.S3_FORCE_PATH_STYLE,
+    GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
+    GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
+    SELF_UPDATE_WEBHOOK_URL: env.SELF_UPDATE_WEBHOOK_URL,
   });
 }

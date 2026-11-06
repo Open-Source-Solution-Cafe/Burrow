@@ -7,6 +7,22 @@ import { useAccount, useSignOut } from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Badge } from '../components/ui/Badge';
+import { LanguageSelector } from '../components/ui/LanguageSelector';
+import { useTranslation } from '../lib/i18n';
+import { APP_VERSION } from '../../core/version';
+
+interface OAuthProviderConfig {
+  id: string;
+  name: string;
+  kind: 'social';
+}
+
+interface AuthConfig {
+  signupMode: 'bootstrap-or-invite' | 'open';
+  emailPasswordEnabled: boolean;
+  magicLinkEnabled: boolean;
+  oauthProviders: OAuthProviderConfig[];
+}
 
 async function hasAccountSession(signal?: AbortSignal): Promise<boolean> {
   const res = await fetch('/api/auth/get-session', { signal });
@@ -34,6 +50,7 @@ export function Login() {
   const queryClient = useQueryClient();
   const { data: account, isLoading: accountLoading, isError: accountError } = useAccount();
   const signOut = useSignOut();
+  const { t } = useTranslation();
 
   const searchParams =
     typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
@@ -50,6 +67,8 @@ export function Login() {
   const [isSignUp, setIsSignUp] = useState(() =>
     queryMode ? queryMode === 'signup' : Boolean(queryInviteToken),
   );
+  const [useMagicLink, setUseMagicLink] = useState(false);
+  const [magicLinkSent, setMagicLinkSent] = useState(false);
   const [email, setEmail] = useState(() => {
     if (queryEmail) return queryEmail;
     if (isDemoHost && !queryInviteToken) return 'demo@osscafe.com';
@@ -62,7 +81,12 @@ export function Login() {
   const [name, setName] = useState('');
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
-  const [signupMode, setSignupMode] = useState<'bootstrap-or-invite' | 'open'>('bootstrap-or-invite');
+  const [authConfig, setAuthConfig] = useState<AuthConfig>({
+    signupMode: 'bootstrap-or-invite',
+    emailPasswordEnabled: true,
+    magicLinkEnabled: false,
+    oauthProviders: [],
+  });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [withoutWorkspace, setWithoutWorkspace] = useState(false);
@@ -71,9 +95,14 @@ export function Login() {
     const controller = new AbortController();
     fetch('/api/auth/config', { signal: controller.signal })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { signupMode?: 'bootstrap-or-invite' | 'open' } | null) => {
-        if (data?.signupMode) {
-          setSignupMode(data.signupMode);
+      .then((data: Partial<AuthConfig> | null) => {
+        if (data) {
+          setAuthConfig({
+            signupMode: data.signupMode ?? 'bootstrap-or-invite',
+            emailPasswordEnabled: data.emailPasswordEnabled ?? true,
+            magicLinkEnabled: Boolean(data.magicLinkEnabled),
+            oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
+          });
         }
       })
       .catch(() => {});
@@ -120,7 +149,9 @@ export function Login() {
       const payload: Record<string, string> = { email, password };
       if (isSignUp) {
         payload.name = name;
-        if (bootstrapToken.trim()) payload.bootstrapToken = bootstrapToken.trim();
+        if (bootstrapToken.trim() && authConfig.signupMode !== 'open') {
+          payload.bootstrapToken = bootstrapToken.trim();
+        }
         if (inviteToken.trim()) payload.inviteToken = inviteToken.trim();
       }
 
@@ -178,6 +209,63 @@ export function Login() {
     }
   };
 
+  const handleMagicLinkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    setMagicLinkSent(false);
+
+    try {
+      const res = await fetch('/api/auth/sign-in/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), callbackURL: '/' }),
+      });
+
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: { message?: string };
+          message?: string;
+        };
+        throw new Error(data.error?.message || data.message || 'Failed to send magic link');
+      }
+
+      setMagicLinkSent(true);
+      toast.success(t('login.magicLinkSent'));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to send magic link';
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOAuthSignIn = async (providerId: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: providerId, callbackURL: '/' }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(data.message || 'Failed to initiate provider sign-in');
+      }
+      const data = (await res.json()) as { url?: string };
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Social sign-in failed';
+      setError(message);
+      toast.error(message);
+      setLoading(false);
+    }
+  };
+
   const handleRecover = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -224,14 +312,21 @@ export function Login() {
     <div className="flex min-h-[100dvh] items-center justify-center px-4 py-6 sm:p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-[calc(1.5rem+env(safe-area-inset-top))] bg-[var(--bg)]">
       <Toaster position="bottom-right" richColors />
       <div className="w-full max-w-sm border border-[var(--line)] chamfer-sm sm:chamfer-lg bg-[var(--surface)] p-5 sm:p-8 space-y-5 sm:space-y-6">
+        <div className="flex items-center justify-between pb-1">
+          <span className="text-[11px] font-mono text-[var(--muted)]">v{APP_VERSION}</span>
+          <LanguageSelector />
+        </div>
+
         <div className="text-center space-y-2">
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">Burrow</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">
+            {t('login.burrow')}
+          </h1>
           <p className="text-sm text-[var(--muted)]">
             {withoutWorkspace
-              ? 'Finish workspace setup'
+              ? t('login.finishWorkspaceSetup')
               : isSignUp
-                ? 'Create your account'
-                : 'Sign in to your workspace'}
+                ? t('login.createAccount')
+                : t('login.signInToWorkspace')}
           </p>
         </div>
 
@@ -239,7 +334,7 @@ export function Login() {
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--accent)] space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-[var(--text)] flex items-center gap-1.5">
-                <span>✨</span> Demo Credentials
+                <span>✨</span> {t('login.demoCredentials')}
               </span>
               <button
                 type="button"
@@ -247,47 +342,51 @@ export function Login() {
                   setEmail('demo@osscafe.com');
                   setPassword('demopassword123');
                   setIsSignUp(false);
+                  setUseMagicLink(false);
                   setError(null);
                 }}
                 className="min-h-[44px] min-w-[44px] inline-flex items-center justify-end text-[11px] font-semibold text-[var(--accent)] hover:underline cursor-pointer -my-2.5 -mr-1 px-1.5"
               >
-                Auto-fill
+                {t('login.autoFill')}
               </button>
             </div>
             <div className="space-y-0.5 text-[var(--muted)] font-mono text-[11px]">
               <div>
-                <span className="text-[var(--text)] font-sans">Email:</span> demo@osscafe.com
+                <span className="text-[var(--text)] font-sans">{t('login.email')}:</span>{' '}
+                demo@osscafe.com
               </div>
               <div>
-                <span className="text-[var(--text)] font-sans">Password:</span> demopassword123
+                <span className="text-[var(--text)] font-sans">{t('login.password')}:</span>{' '}
+                demopassword123
               </div>
             </div>
-            <p className="text-[10px] text-[var(--muted)]">
-              The demo database automatically wipes and resets every 2 hours.
-            </p>
+            <p className="text-[10px] text-[var(--muted)]">{t('login.demoNotice')}</p>
           </div>
         )}
 
         {(error || accountError) && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--danger)]">
-            {error || 'Could not load your account. Please try again.'}
+            {error || t('common.error')}
+          </div>
+        )}
+
+        {magicLinkSent && (
+          <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--c4)] flex items-center gap-2">
+            <Check className="w-4 h-4 text-[var(--c4)] shrink-0" />
+            <span>{t('login.magicLinkSent')}</span>
           </div>
         )}
 
         {queryInviteToken && !withoutWorkspace && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--c4)] flex items-center gap-2">
             <Check className="w-4 h-4 text-[var(--c4)] shrink-0" />
-            <span>Workspace invitation detected. Complete registration below to join.</span>
+            <span>{t('login.invitationDetected')}</span>
           </div>
         )}
 
         {withoutWorkspace ? (
           <>
-            <p className="text-sm text-[var(--muted)]">
-              You are signed in, but this account has no workspace. If your initial setup was
-              interrupted, enter the bootstrap token to finish. Otherwise, ask an owner for an
-              invitation link.
-            </p>
+            <p className="text-sm text-[var(--muted)]">{t('login.withoutWorkspaceNotice')}</p>
             {(queryInviteToken || inviteToken.trim()) && (
               <Button
                 type="button"
@@ -296,7 +395,7 @@ export function Login() {
                 onClick={() => void handleJoin()}
                 className="w-full min-h-[44px]"
               >
-                {loading ? 'Please wait…' : 'Accept invitation'}
+                {loading ? t('common.pleaseWait') : t('login.acceptInvitation')}
               </Button>
             )}
             <form onSubmit={handleRecover} className="space-y-4">
@@ -304,7 +403,7 @@ export function Login() {
                 className="block text-xs font-medium text-[var(--text)]"
                 htmlFor="recover-bootstrap-token"
               >
-                Bootstrap token
+                {t('login.bootstrapToken')}
               </label>
               <Input
                 id="recover-bootstrap-token"
@@ -323,7 +422,7 @@ export function Login() {
                 disabled={loading}
                 className="w-full min-h-[44px]"
               >
-                {loading ? 'Please wait…' : 'Finish setup'}
+                {loading ? t('common.pleaseWait') : t('login.finishSetup')}
               </Button>
             </form>
             <Button
@@ -333,133 +432,226 @@ export function Login() {
               onClick={() => void navigate({ to: '/' })}
               className="w-full min-h-[44px]"
             >
-              Create a workspace instead
+              {t('login.createWorkspaceInstead')}
             </Button>
             <button
               type="button"
               onClick={() => signOut.mutate()}
               disabled={loading || signOut.isPending}
-              className="w-full text-xs text-[var(--muted)] hover:text-[var(--text)] min-h-[44px]"
+              className="w-full text-xs text-[var(--muted)] hover:text-[var(--text)] min-h-[44px] cursor-pointer"
             >
-              Sign out
+              {t('common.signOut')}
             </button>
           </>
         ) : (
           <>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {isSignUp && (
+            {authConfig.magicLinkEnabled && !isSignUp && (
+              <div className="flex theme-radius-md bg-[var(--surface2)] p-1 border border-[var(--line)]">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseMagicLink(false);
+                    setError(null);
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-medium theme-radius-xs transition cursor-pointer ${
+                    !useMagicLink
+                      ? 'bg-[var(--surface)] text-[var(--text)] font-semibold'
+                      : 'text-[var(--muted)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {t('login.signInWithPassword')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUseMagicLink(true);
+                    setError(null);
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-medium theme-radius-xs transition cursor-pointer ${
+                    useMagicLink
+                      ? 'bg-[var(--surface)] text-[var(--text)] font-semibold'
+                      : 'text-[var(--muted)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {t('login.signInWithMagicLink')}
+                </button>
+              </div>
+            )}
+
+            {useMagicLink && !isSignUp ? (
+              <form onSubmit={handleMagicLinkSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-medium text-[var(--text)] mb-1">Name</label>
+                  <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                    {t('login.email')}
+                  </label>
                   <Input
-                    type="text"
+                    type="email"
                     required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Ada Lovelace"
-                    autoComplete="name"
-                    autoCapitalize="words"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={t('login.emailPlaceholder')}
+                    autoComplete="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     className="w-full px-3 py-2 text-base sm:text-sm"
                   />
                 </div>
-              )}
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={loading}
+                  className="w-full py-2 px-4 text-sm font-medium min-h-[44px]"
+                >
+                  {loading ? t('common.pleaseWait') : t('login.sendMagicLink')}
+                </Button>
+              </form>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {isSignUp && (
+                  <div>
+                    <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                      {t('login.name')}
+                    </label>
+                    <Input
+                      type="text"
+                      required
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder={t('login.namePlaceholder')}
+                      autoComplete="name"
+                      autoCapitalize="words"
+                      className="w-full px-3 py-2 text-base sm:text-sm"
+                    />
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--text)] mb-1">Email</label>
-                <Input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  autoComplete="email"
-                  inputMode="email"
-                  autoCapitalize="none"
-                  spellCheck="false"
-                  className="w-full px-3 py-2 text-base sm:text-sm"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                    {t('login.email')}
+                  </label>
+                  <Input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={t('login.emailPlaceholder')}
+                    autoComplete="email"
+                    inputMode="email"
+                    autoCapitalize="none"
+                    spellCheck="false"
+                    className="w-full px-3 py-2 text-base sm:text-sm"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-medium text-[var(--text)] mb-1">
-                  Password
-                </label>
-                <Input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
-                  className="w-full px-3 py-2 text-base sm:text-sm"
-                />
-              </div>
+                <div>
+                  <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                    {t('login.password')}
+                  </label>
+                  <Input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={t('login.passwordPlaceholder')}
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    className="w-full px-3 py-2 text-base sm:text-sm"
+                  />
+                </div>
 
-              {isSignUp && (
-                <>
-                  {signupMode !== 'open' && !inviteToken.trim() && (
+                {isSignUp && (
+                  <>
+                    {authConfig.signupMode !== 'open' && !inviteToken.trim() && (
+                      <div>
+                        <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                          {t('login.bootstrapTokenLabel')}
+                        </label>
+                        <Input
+                          type="text"
+                          value={bootstrapToken}
+                          onChange={(e) => setBootstrapToken(e.target.value)}
+                          placeholder={t('login.bootstrapTokenPlaceholder')}
+                          autoComplete="off"
+                          autoCapitalize="none"
+                          spellCheck="false"
+                          className="w-full px-3 py-2 text-base sm:text-sm font-mono"
+                        />
+                      </div>
+                    )}
+
                     <div>
-                      <label className="block text-xs font-medium text-[var(--text)] mb-1">
-                        Bootstrap Token (First user setting up Burrow only)
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-medium text-[var(--text)]">
+                          {t('login.inviteTokenLabel')}
+                        </label>
+                        {queryInviteToken && <Badge>{t('login.invitePreFilled')}</Badge>}
+                      </div>
                       <Input
                         type="text"
-                        value={bootstrapToken}
-                        onChange={(e) => setBootstrapToken(e.target.value)}
-                        placeholder="Leave blank unless initial server setup"
+                        value={inviteToken}
+                        onChange={(e) => setInviteToken(e.target.value)}
+                        placeholder={t('login.inviteTokenPlaceholder')}
                         autoComplete="off"
                         autoCapitalize="none"
                         spellCheck="false"
                         className="w-full px-3 py-2 text-base sm:text-sm font-mono"
                       />
+                      <p className="mt-1 text-[11px] text-[var(--muted)]">{t('login.inviteHelp')}</p>
                     </div>
-                  )}
+                  </>
+                )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-medium text-[var(--text)]">
-                        Invite Token (Teammate invitations)
-                      </label>
-                      {queryInviteToken && <Badge>Pre-filled from link</Badge>}
-                    </div>
-                    <Input
-                      type="text"
-                      value={inviteToken}
-                      onChange={(e) => setInviteToken(e.target.value)}
-                      placeholder="Enter invite token"
-                      autoComplete="off"
-                      autoCapitalize="none"
-                      spellCheck="false"
-                      className="w-full px-3 py-2 text-base sm:text-sm font-mono"
-                    />
-                    <p className="mt-1 text-[11px] text-[var(--muted)]">
-                      If you received an invite link like{' '}
-                      <code className="font-mono">/invite/TOKEN</code>, the token is the code at the
-                      end of the URL.
-                    </p>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={loading}
+                  className="w-full py-2 px-4 text-sm font-medium min-h-[44px]"
+                >
+                  {loading ? t('common.pleaseWait') : isSignUp ? t('login.signUp') : t('login.signIn')}
+                </Button>
+              </form>
+            )}
+
+            {authConfig.oauthProviders && authConfig.oauthProviders.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-[var(--line)]" />
                   </div>
-                </>
-              )}
-
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={loading}
-                className="w-full py-2 px-4 text-sm font-medium min-h-[44px]"
-              >
-                {loading ? 'Please wait…' : isSignUp ? 'Sign up' : 'Sign in'}
-              </Button>
-            </form>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-[var(--surface)] px-2 text-[var(--muted)]">
+                      {t('login.orContinueWith')}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {authConfig.oauthProviders.map((provider) => (
+                    <Button
+                      key={provider.id}
+                      type="button"
+                      variant="secondary"
+                      disabled={loading}
+                      onClick={() => void handleOAuthSignIn(provider.id)}
+                      className="w-full min-h-[44px] flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>{t('login.continueWith', { provider: provider.name })}</span>
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="text-center pt-2">
               <button
                 type="button"
                 onClick={() => {
                   setIsSignUp(!isSignUp);
+                  setUseMagicLink(false);
                   setError(null);
                 }}
                 className="w-full inline-flex items-center justify-center text-xs text-[var(--muted)] hover:text-[var(--text)] transition min-h-[44px] py-2 cursor-pointer"
               >
-                {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+                {isSignUp ? t('login.haveAccount') : t('login.needAccount')}
               </button>
             </div>
           </>

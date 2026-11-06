@@ -25,6 +25,7 @@ describe('check-decoupling: unit tests', () => {
       'organization',
       'org_id',
       'tenant',
+      'coolify',
     ]);
   });
 
@@ -37,6 +38,7 @@ describe('check-decoupling: unit tests', () => {
       ['organization', 'const organizationName = "Acme Corp";'],
       ['org_id', 'SELECT * FROM users WHERE org_id = $1;'],
       ['tenant', 'function getTenantConfig(tenantId: string) {}'],
+      ['coolify', 'const coolifyUrl = "http://localhost:8000";'],
     ])('detects "%s" in code', (term: string, code: string) => {
       const violations = findViolationsInText('src/sample.ts', code);
       expect(violations.length).toBeGreaterThanOrEqual(1);
@@ -53,6 +55,7 @@ describe('check-decoupling: unit tests', () => {
         const CurrentOrganization = 'Acme';
         const ORG_ID = '123';
         const CurrentTenant = 't1';
+        const COOLIFY_TOKEN = 'secret';
       `;
       const violations = findViolationsInText('src/case.ts', sample);
       const detectedTerms = new Set(violations.map((v: any) => v.term));

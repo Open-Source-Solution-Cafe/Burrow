@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ThemeToggle } from './ThemeToggle';
+import { LanguageSelector } from '../ui/LanguageSelector';
 import { Badge } from '../ui/Badge';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { Avatar } from '../ui/Avatar';
@@ -38,6 +39,7 @@ import {
   useProjectTags,
   useSignOut,
   useTrash,
+  useSystemVersion,
 } from '../../lib/queries';
 import { THEME_LABELS, useTheme, type BurrowTheme } from '../../lib/theme';
 import { NotepadTree } from '../notepads/NotepadTree';
@@ -103,6 +105,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const { data: myTasks = [] } = useMyTasks({ status: 'open' }, workspaceId);
   const { data: members = [] } = useMembers(workspaceId);
   const { data: trashData } = useTrash(workspaceId, currentProjectId);
+  const { data: systemVersion } = useSystemVersion();
 
   const createBoardMutation = useCreateBoard();
   const deleteBoardMutation = useDeleteBoard();
@@ -350,6 +353,28 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             <span>Workspace Members</span>
           </button>
         )}
+      </div>
+
+      {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
+        <div className="border-t border-hair py-1">
+          <a
+            href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 theme-radius-xs transition"
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
+              <span>Update available</span>
+            </span>
+            <span className="font-mono text-[10px]">v{systemVersion.latestVersion}</span>
+          </a>
+        </div>
+      )}
+
+      <div className="border-t border-hair py-1 px-3 flex items-center justify-between">
+        <span className="text-[10px] font-eyebrow text-muted">Language</span>
+        <LanguageSelector />
       </div>
 
       <div className="border-t border-hair py-1">
@@ -667,6 +692,21 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             </Link>
           )}
 
+          {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
+            <a
+              href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mx-2 mb-1 px-2.5 py-1.5 theme-radius-md text-xs bg-accent/15 text-accent border border-accent/30 flex items-center justify-between gap-1.5 transition hover:bg-accent/25"
+              title={`Update available: v${systemVersion.latestVersion}`}
+            >
+              <span className="flex items-center gap-1.5 font-medium truncate">
+                <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
+                <span>Update available (v{systemVersion.latestVersion})</span>
+              </span>
+            </a>
+          )}
+
           {/* User footer */}
           <div
             className="flex items-center justify-between gap-2 pt-3 mt-2 border-t border-hair px-2.5 text-[13px] relative"
@@ -687,7 +727,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               />
               <span className="truncate font-medium">{account?.user?.name || 'Account'}</span>
             </button>
-            <div className="flex items-center gap-0.5">
+            <div className="flex items-center gap-1">
+              <LanguageSelector className="hidden sm:inline-flex" />
               <ThemeToggle />
               <button
                 type="button"
@@ -854,6 +895,21 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               >
                 <Trash2 className="w-[18px] h-[18px]" />
               </button>
+            )}
+
+            {/* Update available indicator */}
+            {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
+              <a
+                href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-10 h-10 flex items-center justify-center transition cursor-pointer text-accent relative hover:bg-hi theme-radius-md"
+                title={`Update available (v${systemVersion.latestVersion})`}
+                aria-label={`Update available (v${systemVersion.latestVersion})`}
+              >
+                <span className="w-2 h-2 theme-radius-xs bg-accent absolute top-2 right-2 animate-pulse" />
+                <Clock className="w-[18px] h-[18px]" />
+              </a>
             )}
 
             {/* Theme Toggle */}

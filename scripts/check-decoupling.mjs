@@ -12,6 +12,7 @@ export const DEFAULT_VOCABULARY = [
   'organization',
   'org_id',
   'tenant',
+  'coolify',
 ];
 
 export const VOCABULARY_REGEXPS = [
@@ -22,6 +23,7 @@ export const VOCABULARY_REGEXPS = [
   { term: 'organization', regex: /(?:\b|_|[a-z])organizat\w*/i },
   { term: 'org_id', regex: /(?:\b|_)org_id\w*/i },
   { term: 'tenant', regex: /(?:\b|_|[a-z])(?:tenant|tenancy)\w*|multitenant/i },
+  { term: 'coolify', regex: /(?:\b|_|[a-z])coolify\w*/i },
 ];
 
 export const DEFAULT_TARGET_DIRS = ['src', 'migrations', 'tests', 'scripts', 'docs'];

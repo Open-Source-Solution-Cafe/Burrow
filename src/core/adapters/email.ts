@@ -12,6 +12,8 @@ export interface SendEmailParams {
 }
 
 export interface IEmailProvider {
+  /** Optional provider tag distinguishing simulated console logs from live delivery services. */
+  readonly provider?: 'console' | 'resend' | string;
   /** Send a single transactional email. Returns the provider's message ID. */
   send(params: SendEmailParams): Promise<{ id: string }>;
 }

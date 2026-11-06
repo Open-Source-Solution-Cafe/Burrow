@@ -26,6 +26,7 @@ import { createWorkspaceRoutes } from './routes/workspaces';
 import { createProjectResourceRoutes } from './routes/project-resources';
 import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
+import { createSystemRoutes } from './routes/system';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
 
 // Type for Hono context with our custom variables
@@ -135,6 +136,11 @@ export function createCoreApp(
     storage,
     policy,
   });
+  const systemRoutes = createSystemRoutes({
+    policy,
+    workspaces: repositories.workspaces,
+    env: infra.env,
+  });
 
   const signUpSchema = z.object({
     email: z.string().email().max(254),
@@ -161,12 +167,42 @@ export function createCoreApp(
       .use('/api/*', createIdentityMiddleware(auth))
       .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
       .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
-      .get('/api/auth/config', (c) => c.json({ signupMode: policy.signupMode() }))
+      .get('/api/auth/config', (c) => {
+        const env = (infra.env ?? (typeof process !== 'undefined' ? process.env : {})) ?? {};
+        const magicLinkEnabled = Boolean(
+          (infra.email && infra.email.provider !== 'console') || env.RESEND_API_KEY,
+        );
+        c.header('Cache-Control', 'no-store');
+        return c.json({
+          signupMode: policy.signupMode(),
+          emailPasswordEnabled: true,
+          magicLinkEnabled,
+          oauthProviders: [
+            ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
+            ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
+          ],
+        });
+      })
 
       .get('/api/account', async (c) => {
         const identity = c.get('identity');
         if (!identity) {
           return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+        }
+        let workspaces = await repositories.workspaces.listByUser(identity.userId);
+        if (workspaces.length === 0 && policy.signupMode() === 'open') {
+          await policy.authorize({ action: 'workspace.create', userId: identity.userId });
+          await repositories.workspaces.create(
+            createWorkspacePlan({
+              userId: identity.userId,
+              name: 'My Workspace',
+              workspaceId: nanoid(),
+              projectId: nanoid(),
+              notepadId: nanoid(),
+              now: Date.now(),
+            }),
+          );
+          workspaces = await repositories.workspaces.listByUser(identity.userId);
         }
         c.header('Cache-Control', 'private, no-store');
         return c.json({
@@ -176,7 +212,7 @@ export function createCoreApp(
             email: identity.email ?? '',
             image: identity.image ?? null,
           },
-          workspaces: await repositories.workspaces.listByUser(identity.userId),
+          workspaces,
         });
       })
 
@@ -205,6 +241,7 @@ export function createCoreApp(
 
       .route('/api/workspaces', workspaceRoutes)
       .route('/api/workspaces/:wid/projects', projectRoutes)
+      .route('/api/system', systemRoutes)
       .route('/api', workspaceViewRoutes)
       .route('/api', projectResourceRoutes)
       .route('/api', projectFileRoutes)

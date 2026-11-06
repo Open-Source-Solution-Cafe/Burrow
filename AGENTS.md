@@ -1,5 +1,13 @@
 # Agent Rules & Guidelines
 
+## #1 Priority: Standalone Self-Hosted Purity & Permissive Dependency Licensing
+
+- **100% standalone self-hosted architecture.** When planning or implementing any feature in this repository, the #1 consideration is keeping `Burrow` completely self-contained, generic, and free of any external hosted-service dependencies or proprietary coupling.
+- **Zero hosted-platform vocabulary.** Never introduce hosted-service, payment, or multi-account control-plane concepts or terminology into `src/`, `migrations/`, `tests/`, `scripts/`, or `docs/`. The automated decoupling guard (`node scripts/check-decoupling.mjs`) must always pass with 0 violations.
+- **Zero-friction default configuration.** Self-hosted deployments must work out of the box with Email & Password alone (`docker compose up`). Optional integrations (Magic Link when `RESEND_API_KEY` is configured; OAuth when provider credentials like `GOOGLE_CLIENT_ID` are configured) must remain completely hidden in the UI when their environment variables are not set.
+- **Permissive third-party dependencies only.** All npm dependencies must pass `node scripts/check-licenses.mjs` (no copyleft or unknown dependency licenses outside `scripts/license-allowlist.json`).
+- **Workspace is always top-level.** `Workspace` (`/w/:workspaceId`) is the top-level container in the application UI and data model.
+
 ## First-Class Database Runtimes & Test Gates
 
 - SQLite, Cloudflare D1, and PostgreSQL are all first-class supported database engines.
