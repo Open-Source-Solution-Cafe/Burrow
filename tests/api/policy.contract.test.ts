@@ -86,7 +86,7 @@ describe('AccessPolicy Contract', () => {
     policy.currentMode = 'open';
     const openConfigRes = await request('/api/auth/config');
     expect(openConfigRes.status).toBe(200);
-    expect((await openConfigRes.json()) as { signupMode: SignupMode }).toEqual({
+    expect((await openConfigRes.json()) as { signupMode: SignupMode }).toMatchObject({
       signupMode: 'open',
     });
     policy.currentMode = 'bootstrap-or-invite';

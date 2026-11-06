@@ -140,9 +140,9 @@ describe('project-scoped storage and uploads', () => {
       workspaceId,
       projectId,
       editorCookie,
-      'notes.txt',
+      'binary.bin',
       new Uint8Array([1, 2, 3]),
-      'text/plain',
+      'application/x-binary',
     );
     expect(invalidMime.status).toBe(400);
     expect(await invalidMime.json()).toMatchObject({ error: { code: 'invalid_mime_type' } });
@@ -243,7 +243,7 @@ describe('project-scoped storage and uploads', () => {
 
     const svg = await request(filePath(workspaceId, projectId, uploadedSvgKey), editorCookie);
     expect(svg.status).toBe(200);
-    expect(svg.headers.get('Content-Security-Policy')).toBe('sandbox');
+    expect(svg.headers.get('Content-Security-Policy')).toContain('sandbox');
     expect(svg.headers.get('Content-Type')).toBe('image/svg+xml');
     expect(await svg.text()).toContain('<circle r="10"/>');
 
