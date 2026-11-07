@@ -63,6 +63,23 @@ describe('canonical SQLite migration execution', () => {
     }
   });
 
+  it('strictly rejects foreign key violations on Node SQLite database', () => {
+    const { migrations, filename } = temporaryDatabase();
+    fs.writeFileSync(
+      path.join(migrations, '0000_create.sql'),
+      `CREATE TABLE parents (id TEXT PRIMARY KEY);
+       CREATE TABLE children (id TEXT PRIMARY KEY, parent_id TEXT NOT NULL REFERENCES parents(id) ON DELETE CASCADE);`,
+    );
+    const db = openSqliteDatabase(filename, migrations);
+    try {
+      expect(() => {
+        db.prepare("INSERT INTO children (id, parent_id) VALUES ('c1', 'missing-parent')").run();
+      }).toThrow(/FOREIGN KEY constraint failed/);
+    } finally {
+      db.close();
+    }
+  });
+
   it('rolls back failed schema changes and their ledger while keeping prior migrations', () => {
     const { migrations, filename } = temporaryDatabase();
     fs.writeFileSync(path.join(migrations, '0000_create.sql'), 'CREATE TABLE notes (title TEXT);');
