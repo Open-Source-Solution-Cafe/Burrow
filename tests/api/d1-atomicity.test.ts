@@ -59,6 +59,12 @@ async function seedWorkspace(): Promise<WorkspaceSeed> {
   const now = Date.now();
   await env.DB.batch([
     env.DB.prepare(
+      `INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'User 1', ? || '@test.com', 0, ?, ?)`,
+    ).bind(userId, userId, now, now),
+    env.DB.prepare(
+      `INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'User 2', ? || '@test.com', 0, ?, ?)`,
+    ).bind(member2Id, member2Id, now, now),
+    env.DB.prepare(
       `INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, 'Spike workspace', ?, ?)`,
     ).bind(workspaceId, userId, now),
     env.DB.prepare(

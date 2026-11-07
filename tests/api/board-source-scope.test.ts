@@ -50,16 +50,10 @@ it('never returns a board whose workspace disagrees with its project', async () 
     createdAt: now,
     updatedAt: now,
   });
-  // Model inconsistent legacy relationships with existing individual foreign keys.
-  // Bypass only the board scope insert guard and restore its exact definition.
-  const guard = await env.DB.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
-  ).bind('boards_scope_insert_guard').first<{ sql: string }>();
-  expect(guard?.sql).toBeTruthy();
-  await env.DB.prepare('DROP TRIGGER boards_scope_insert_guard').run();
-  try {
-    await db.insert(schema.boards).values([
-    {
+  // With composite foreign keys (project_id, workspace_id) enforced in D1,
+  // cross-scope boards whose workspace disagrees with their project are rejected at the DB level.
+  await expect(
+    db.insert(schema.boards).values({
       id: foreignProjectBoard,
       workspaceId,
       projectId: foreignProject,
@@ -67,8 +61,11 @@ it('never returns a board whose workspace disagrees with its project', async () 
       position: 'a0',
       createdAt: now,
       updatedAt: now,
-    },
-    {
+    }),
+  ).rejects.toThrow();
+
+  await expect(
+    db.insert(schema.boards).values({
       id: foreignWorkspaceBoard,
       workspaceId: foreignWorkspace,
       projectId,
@@ -76,8 +73,11 @@ it('never returns a board whose workspace disagrees with its project', async () 
       position: 'a1',
       createdAt: now,
       updatedAt: now,
-    },
-    {
+    }),
+  ).rejects.toThrow();
+
+  await expect(
+    db.insert(schema.boards).values({
       id: foreignWorkspaceTrash,
       workspaceId: foreignWorkspace,
       projectId,
@@ -86,7 +86,11 @@ it('never returns a board whose workspace disagrees with its project', async () 
       deletedAt: now,
       createdAt: now,
       updatedAt: now,
-    },
+    }),
+  ).rejects.toThrow();
+
+  // Valid local boards insert cleanly
+  await db.insert(schema.boards).values([
     {
       id: localBoard,
       workspaceId,
@@ -106,10 +110,7 @@ it('never returns a board whose workspace disagrees with its project', async () 
       createdAt: now,
       updatedAt: now,
     },
-    ]);
-  } finally {
-    await env.DB.prepare(guard!.sql!).run();
-  }
+  ]);
 
   expect((await request(`/api/workspaces/${workspaceId}/projects/${projectId}/boards/${foreignProjectBoard}`)).status).toBe(404);
   expect((await request(`/api/workspaces/${workspaceId}/projects/${projectId}/boards/${foreignWorkspaceBoard}`)).status).toBe(404);

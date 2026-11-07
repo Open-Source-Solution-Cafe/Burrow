@@ -50,16 +50,10 @@ it('never returns a note whose workspace disagrees with its project', async () =
     createdAt: now,
     updatedAt: now,
   });
-  // Simulate corrupt legacy rows whose individual foreign keys still exist.
-  // Bypass only the notepad scope insert guard and restore its exact definition.
-  const guard = await env.DB.prepare(
-    "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?",
-  ).bind('notepads_scope_insert_guard').first<{ sql: string }>();
-  expect(guard?.sql).toBeTruthy();
-  await env.DB.prepare('DROP TRIGGER notepads_scope_insert_guard').run();
-  try {
-    await db.insert(schema.notepads).values([
-    {
+  // With composite foreign keys (project_id, workspace_id) enforced in D1,
+  // cross-scope notes whose workspace disagrees with their project are rejected at the DB level.
+  await expect(
+    db.insert(schema.notepads).values({
       id: wrongProjectNote,
       workspaceId,
       projectId: foreignProject,
@@ -69,8 +63,11 @@ it('never returns a note whose workspace disagrees with its project', async () =
       createdBy: scope.userId,
       createdAt: now,
       updatedAt: now,
-    },
-    {
+    }),
+  ).rejects.toThrow();
+
+  await expect(
+    db.insert(schema.notepads).values({
       id: wrongWorkspaceNote,
       workspaceId: foreignWorkspace,
       projectId,
@@ -79,38 +76,23 @@ it('never returns a note whose workspace disagrees with its project', async () =
       createdBy: scope.userId,
       createdAt: now,
       updatedAt: now,
-    },
-    {
-      id: wrongWorkspaceTrash,
-      workspaceId: foreignWorkspace,
-      projectId,
-      title: 'Foreign workspace trash',
-      position: 'a3',
-      deletedAt: now,
-      createdBy: scope.userId,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: legitimateTrash,
-      workspaceId,
-      projectId,
-      title: 'Local trash',
-      position: 'a4',
-      deletedAt: now,
-      createdBy: scope.userId,
-      createdAt: now,
-      updatedAt: now,
-    },
-    ]);
-  } finally {
-    await env.DB.prepare(guard!.sql!).run();
-  }
+    }),
+  ).rejects.toThrow();
+
+  // Legitimate trash inserts cleanly
+  await db.insert(schema.notepads).values({
+    id: legitimateTrash,
+    workspaceId,
+    projectId,
+    title: 'Local trash',
+    position: 'a4',
+    deletedAt: now,
+    createdBy: scope.userId,
+    createdAt: now,
+    updatedAt: now,
+  });
 
   expect((await request(`/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${wrongProjectNote}`)).status).toBe(404);
-  expect(
-    (await request(`/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${wrongProjectNote}`)).status,
-  ).toBe(404);
   expect((await request(`/api/workspaces/${workspaceId}/projects/${projectId}/notepads/${wrongWorkspaceNote}`)).status).toBe(404);
   expect((await request(`/api/workspaces/${workspaceId}/projects/${foreignProject}/notepads`)).status).toBe(404);
 

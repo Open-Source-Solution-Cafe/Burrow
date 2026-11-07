@@ -30,7 +30,9 @@ export async function assertProjectFileRegistry(
       await query(
         `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${ownerId}', 'Test User', '${ownerId}@test.com', false, now(), now())`,
       );
-    } catch {}
+    } catch {
+      /* ignore if user already exists */
+    }
   }
 
   for (const workspaceId of [workspaceOne, workspaceTwo]) {

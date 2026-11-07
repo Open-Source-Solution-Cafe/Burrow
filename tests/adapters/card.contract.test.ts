@@ -33,6 +33,9 @@ async function creationPlan(): Promise<CardPlan> {
   };
   await env.DB.batch([
     env.DB.prepare(
+      `INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Actor', ? || '@test.com', 0, ?, ?)`,
+    ).bind(plan.actorId, plan.actorId, plan.now, plan.now),
+    env.DB.prepare(
       `INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, 'Cards', ?, ?)`,
     ).bind(plan.workspaceId, plan.actorId, plan.now),
     env.DB.prepare(
@@ -81,6 +84,9 @@ describe('Card creation repository contract', () => {
     const tagId = id();
     const recipient = id();
     await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Recipient', ? || '@test.com', 0, ?, ?)`,
+      ).bind(recipient, recipient, plan.now, plan.now),
       env.DB.prepare(`INSERT INTO tags (id, project_id, name) VALUES (?, ?, 'Tag')`).bind(
         tagId,
         plan.projectId,

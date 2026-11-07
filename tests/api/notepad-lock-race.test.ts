@@ -39,10 +39,16 @@ it('returns 409 without changes when another client acquires a lock after the ea
   expect(create.status).toBe(201);
   const { id } = (await create.json()) as { id: string };
   const memberId = crypto.randomUUID();
+  const now = Date.now();
+  await env.DB.prepare(
+    "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Member', ? || '@test.com', 0, ?, ?)",
+  )
+    .bind(memberId, memberId, now, now)
+    .run();
   await env.DB.prepare(
     "INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'editor', ?)",
   )
-    .bind(scope.workspaceId, memberId, Date.now())
+    .bind(scope.workspaceId, memberId, now)
     .run();
   const infra = createD1Infrastructure(createDb(env.DB), env);
   const readLock = infra.repositories.notepads.getLock;

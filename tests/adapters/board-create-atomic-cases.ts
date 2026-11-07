@@ -51,7 +51,9 @@ async function ensureContractUser(query: Query) {
       await query(
         "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('board-contract-user', 'Board Contract User', 'board-contract@test.com', false, now(), now())",
       );
-    } catch {}
+    } catch {
+      /* ignore if user already exists */
+    }
   }
 }
 

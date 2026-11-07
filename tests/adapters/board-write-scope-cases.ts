@@ -29,7 +29,9 @@ async function setup(fixture: Fixture) {
         await query(
           `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
         );
-      } catch {}
+      } catch {
+        /* ignore if user already exists */
+      }
     }
   }
   await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',

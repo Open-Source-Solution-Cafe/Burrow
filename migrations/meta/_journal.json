@@ -6,70 +6,7 @@
       "idx": 0,
       "version": "6",
       "when": 1790206469828,
-      "tag": "0000_motionless_legion",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1790254539424,
-      "tag": "0002_card_subtasks_comments_wip",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1793103224524,
-      "tag": "0004_bootstrap_state",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1793365593571,
-      "tag": "0005_deletion_operation",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1793366773538,
-      "tag": "0006_multi_workspace_memberships",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1793367066842,
-      "tag": "0007_workspace_membership_lookup",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1793369033000,
-      "tag": "0008_scope_cascade_guards",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1793369090925,
-      "tag": "0009_project_file_registry",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1793380000000,
-      "tag": "0010_legacy_cover_file_registrations",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1793381000000,
-      "tag": "0011_scope_write_guards",
+      "tag": "0000_baseline",
       "breakpoints": true
     }
   ]

@@ -26,6 +26,12 @@ describe('D1 member repository contract', () => {
       now = Date.now();
     await env.DB.batch([
       env.DB.prepare(
+        "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Actor', ? || '@test.com', 0, ?, ?)",
+      ).bind(actorUserId, actorUserId, now, now),
+      env.DB.prepare(
+        "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Target', ? || '@test.com', 0, ?, ?)",
+      ).bind(targetUserId, targetUserId, now, now),
+      env.DB.prepare(
         "INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, 'Race', ?, ?)",
       ).bind(workspaceId, actorUserId, now),
       env.DB.prepare(

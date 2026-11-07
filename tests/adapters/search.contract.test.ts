@@ -24,6 +24,14 @@ describe('SqliteFtsSearchAdapter contract', () => {
     proj2 = crypto.randomUUID();
     proj3 = crypto.randomUUID();
     const now = Date.now();
+    await db.insert(schema.user).values({
+      id: 'search-contract-user',
+      name: 'Search User',
+      email: 'search@test.com',
+      emailVerified: false,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+    });
     for (const id of [ws1, ws2]) {
       await db.insert(schema.workspaces).values({
         id,

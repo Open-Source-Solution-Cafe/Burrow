@@ -11,7 +11,9 @@ async function ensureScopeUser(query: Query) {
   try {
     const existing = await query('SELECT id FROM "user" WHERE id = ?', ['scope-test-user']);
     if (existing.length) return;
-  } catch {}
+  } catch {
+    /* ignore query error if dialect differs */
+  }
   try {
     await query(
       'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
@@ -22,7 +24,9 @@ async function ensureScopeUser(query: Query) {
       await query(
         "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('scope-test-user', 'Scope User', 'scope@test.com', false, now(), now())",
       );
-    } catch {}
+    } catch {
+      /* ignore if user already exists */
+    }
   }
 }
 
@@ -407,9 +411,10 @@ export function structuralScopeDeleteCases(fixture: () => { query: Query }) {
       Date.now(),
     ]);
 
-    await query('INSERT INTO card_assignees (card_id, user_id) VALUES (?, ?)', [
+    await query('INSERT INTO card_assignees (card_id, user_id, assigned_at) VALUES (?, ?, ?)', [
       card,
       memberId,
+      Date.now(),
     ]);
 
     const before = await query('SELECT * FROM card_assignees WHERE card_id = ? AND user_id = ?', [card, memberId]);

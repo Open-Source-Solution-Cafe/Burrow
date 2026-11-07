@@ -30,7 +30,9 @@ export async function assertTreeScopeIsolation(db: {
       await db.query(
         "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('fixture-user', 'Fixture User', 'fixture-user@test.com', false, now(), now())",
       );
-    } catch {}
+    } catch {
+      /* ignore if user already exists */
+    }
   }
   for (const id of [workspaceId, otherWorkspace]) {
     await db.query(

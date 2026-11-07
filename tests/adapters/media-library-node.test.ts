@@ -9,6 +9,9 @@ describe('sqlite media library endpoint contract', () => {
     const fixture = await openPersistence('sqlite', '');
     try {
       await fixture.query(
+        "INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('u', 'User', 'u@test.com', 0, 1, 1)",
+      );
+      await fixture.query(
         "INSERT INTO workspaces (id,name,created_by,created_at) VALUES ('w','Workspace','u',1), ('foreign','Foreign','u',1)",
       );
       await fixture.query(

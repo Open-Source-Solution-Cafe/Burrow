@@ -100,7 +100,9 @@ describe.each(['sqlite', 'postgres'] as const)('%s atomic persistence', (kind) =
           await db.query(
             `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'Test User', '${userId}@test.com', false, now(), now())`,
           );
-        } catch {}
+        } catch {
+          /* ignore if user already exists */
+        }
       }
     }
     await db.query(

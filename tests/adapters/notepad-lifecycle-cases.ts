@@ -22,15 +22,17 @@ export async function assertNotepadLifecycle(
 
   try {
     await query(
-      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
-      [owner, 'Test User', `${owner}@test.com`, 0, now, now],
+      'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 0, ?, ?)',
+      [owner, 'Test User', `${owner}@test.com`, now, now],
     );
   } catch {
     try {
       await query(
         `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${owner}', 'Test User', '${owner}@test.com', false, now(), now())`,
       );
-    } catch {}
+    } catch {
+      /* ignore if user already exists */
+    }
   }
 
   for (const workspace of [workspaceId, otherWorkspaceId]) {

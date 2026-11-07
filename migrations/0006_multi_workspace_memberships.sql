@@ -1,1 +1,0 @@
-DROP INDEX `members_user_id_unique`;

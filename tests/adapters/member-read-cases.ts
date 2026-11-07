@@ -30,7 +30,9 @@ export async function assertMemberIsolation(
         await query(
           `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
         );
-      } catch {}
+      } catch {
+        /* ignore if user already exists */
+      }
     }
   }
   for (const [id, owner] of [
@@ -102,7 +104,9 @@ export async function assertMemberIsolation(
         await query(
           `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'Test User', '${userId}@test.com', false, now(), now())`,
         );
-      } catch {}
+      } catch {
+        /* ignore if user already exists */
+      }
     }
     await primary.create({ workspaceId: workspace, userId, role, joinedAt: now });
     await primary.remove({ workspaceId: workspace, actorUserId: userId, targetUserId: userId });
@@ -235,7 +239,9 @@ async function assertOwnerRaces(createRepository: () => IMemberRepository, query
           await query(
             `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
           );
-        } catch {}
+        } catch {
+        /* ignore if user already exists */
+      }
       }
     }
     await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [

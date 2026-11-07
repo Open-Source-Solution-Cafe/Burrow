@@ -18,6 +18,14 @@ describe('SqlLockAdapter contract', () => {
     workspaceId = crypto.randomUUID();
     projectId = crypto.randomUUID();
     const now = Date.now();
+    await db.insert(schema.user).values({
+      id: 'lock-contract-user',
+      name: 'Lock User',
+      email: 'lock@test.com',
+      emailVerified: false,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+    });
     await db.insert(schema.workspaces).values({
       id: workspaceId,
       name: 'lock-contract-ws',
@@ -52,6 +60,22 @@ describe('SqlLockAdapter contract', () => {
     return id;
   }
 
+  async function seedUser(userId: string): Promise<void> {
+    const db = createDb(env.DB);
+    const now = Date.now();
+    await db
+      .insert(schema.user)
+      .values({
+        id: userId,
+        name: `User ${userId}`,
+        email: `${userId}@test.com`,
+        emailVerified: false,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+      })
+      .onConflictDoNothing();
+  }
+
   function locks(): SqlLockAdapter {
     return new SqlLockAdapter(createDb(env.DB));
   }
@@ -60,6 +84,8 @@ describe('SqlLockAdapter contract', () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
     const userB = `user-b-${crypto.randomUUID()}`;
+    await seedUser(userA);
+    await seedUser(userB);
     const clientA = `client-a-${crypto.randomUUID()}`;
     const clientB = `client-b-${crypto.randomUUID()}`;
 
@@ -82,6 +108,8 @@ describe('SqlLockAdapter contract', () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
     const userB = `user-b-${crypto.randomUUID()}`;
+    await seedUser(userA);
+    await seedUser(userB);
     const clientA = `client-a-${crypto.randomUUID()}`;
     const clientB = `client-b-${crypto.randomUUID()}`;
 
@@ -102,6 +130,7 @@ describe('SqlLockAdapter contract', () => {
   it('same holder may re-acquire to refresh its lock', async () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
+    await seedUser(userA);
     const clientA = `client-a-${crypto.randomUUID()}`;
 
     expect((await locks().acquire(resourceId, userA, clientA, LOCK_TTL_MS)).acquired).toBe(true);
@@ -112,6 +141,8 @@ describe('SqlLockAdapter contract', () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
     const userB = `user-b-${crypto.randomUUID()}`;
+    await seedUser(userA);
+    await seedUser(userB);
     const clientA = `client-a-${crypto.randomUUID()}`;
     const clientB = `client-b-${crypto.randomUUID()}`;
 
@@ -126,6 +157,8 @@ describe('SqlLockAdapter contract', () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
     const userB = `user-b-${crypto.randomUUID()}`;
+    await seedUser(userA);
+    await seedUser(userB);
     const clientA = `client-a-${crypto.randomUUID()}`;
     const clientB = `client-b-${crypto.randomUUID()}`;
     const wrongClient = `client-wrong-${crypto.randomUUID()}`;
@@ -149,6 +182,8 @@ describe('SqlLockAdapter contract', () => {
     const resourceId = await seedResource();
     const userA = `user-a-${crypto.randomUUID()}`;
     const userB = `user-b-${crypto.randomUUID()}`;
+    await seedUser(userA);
+    await seedUser(userB);
     const clientA1 = `client-a1-${crypto.randomUUID()}`;
     const clientA2 = `client-a2-${crypto.randomUUID()}`;
     const clientB = `client-b-${crypto.randomUUID()}`;
