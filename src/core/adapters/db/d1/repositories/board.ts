@@ -180,7 +180,7 @@ export function createBoardRepository(db: DB): IBoardRepository {
 
       if (cards.length > 0) {
         const restoredIds = cards.map((card) => card.id);
-        for (const chunk of chunkByParamBudget(restoredIds, 1, 0)) {
+        for (const chunk of chunkByParamBudget(restoredIds, 1, 10)) {
           statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk}
             AND EXISTS (SELECT 1 FROM boards authorized WHERE authorized.id = ${id}
               AND authorized.workspace_id = ${scope.workspaceId} AND authorized.deleted_at IS NULL

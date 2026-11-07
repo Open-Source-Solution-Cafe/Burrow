@@ -287,7 +287,8 @@ describe('D1 Limits Contract (150+ entities: batch size & parameter limits)', ()
     const liveList = await notepadRepo.listByProject(readScope);
     expect(liveList).toHaveLength(DESCENDANT_COUNT + 1);
 
-    // 4. HARD DELETE: hard deletes root and 160 descendants across batch limit
+    // 4. HARD DELETE: soft-delete again then hard deletes root and 160 descendants across batch limit
+    await notepadRepo.softDelete(rootId, deleteTimestamp, noteScope);
     await notepadRepo.hardDelete(rootId, noteScope);
 
     const deletedRoot = await notepadRepo.findByIdInScope(readScope, rootId);

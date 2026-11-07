@@ -18,6 +18,20 @@ async function setup(fixture: Fixture) {
   const editorId = 'board-scope-editor';
   const viewerId = 'board-scope-viewer';
   const now = Date.now();
+  for (const u of [ownerId, editorId, viewerId]) {
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [u, 'Test User', `${u}@test.com`, 0, now, now],
+      );
+    } catch {
+      try {
+        await query(
+          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
+        );
+      } catch {}
+    }
+  }
   await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',
     [workspaceId, 'Board write scope', ownerId, now]);
   await query('INSERT INTO projects (id, workspace_id, name, position, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',

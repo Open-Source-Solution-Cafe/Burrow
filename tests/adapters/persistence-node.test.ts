@@ -89,6 +89,20 @@ describe.each(['sqlite', 'postgres'] as const)('%s atomic persistence', (kind) =
       now: Date.now(),
     };
     const s = seed;
+    for (const userId of [s.actorId, s.memberId]) {
+      try {
+        await db.query(
+          'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+          [userId, 'Test User', `${userId}@test.com`, 0, s.now, s.now],
+        );
+      } catch {
+        try {
+          await db.query(
+            `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'Test User', '${userId}@test.com', false, now(), now())`,
+          );
+        } catch {}
+      }
+    }
     await db.query(
       'INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',
       [s.workspaceId, 'Contract workspace', s.actorId, s.now],

@@ -16,13 +16,13 @@ export function inviteAcceptCases(fixture: () => Fixture) {
     const email = `${userId}@example.com`,
       now = Date.now(),
       token = crypto.randomUUID();
+    await createUser(userId, email, now);
     await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [
       workspaceId,
       'Invite rollback',
       userId,
       now,
     ]);
-    await createUser(userId, email, now);
     await invites.create({
       id: crypto.randomUUID(),
       workspaceId,
@@ -51,13 +51,13 @@ export function inviteAcceptCases(fixture: () => Fixture) {
     const email = `${userId}@example.com`,
       now = Date.now(),
       token = crypto.randomUUID();
+    await createUser(userId, email, now);
     await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [
       workspaceId,
       'Invite race',
       userId,
       now,
     ]);
-    await createUser(userId, email, now);
     await invites.create({
       id: crypto.randomUUID(),
       workspaceId,
@@ -88,6 +88,7 @@ export function inviteAcceptCases(fixture: () => Fixture) {
     const userId = crypto.randomUUID(),
       email = `${userId}@example.com`,
       now = Date.now();
+    await createUser(userId, email, now);
     for (const id of [workspaceId, otherWorkspace]) {
       await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [
         id,
@@ -96,7 +97,6 @@ export function inviteAcceptCases(fixture: () => Fixture) {
         now,
       ]);
     }
-    await createUser(userId, email, now);
     const makeInvite = async (workspace: string, address: string, expiresAt: number) => {
       const token = crypto.randomUUID();
       await invites.create({

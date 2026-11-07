@@ -20,6 +20,19 @@ export async function assertNotepadLifecycle(
   const foreignProjectId = id();
   const now = Date.now();
 
+  try {
+    await query(
+      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+      [owner, 'Test User', `${owner}@test.com`, 0, now, now],
+    );
+  } catch {
+    try {
+      await query(
+        `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${owner}', 'Test User', '${owner}@test.com', false, now(), now())`,
+      );
+    } catch {}
+  }
+
   for (const workspace of [workspaceId, otherWorkspaceId]) {
     await query(
       'INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',
@@ -66,18 +79,17 @@ export async function assertNotepadLifecycle(
   };
 
   const withLegacyParentEdge = async <T>(insert: () => Promise<T>): Promise<T> => {
-    let sqlite = true;
+    let isSqlite = true;
     try {
-      await query('SELECT sqlite_version()');
+      await query('DROP TRIGGER IF EXISTS notepads_scope_insert_guard');
     } catch {
-      sqlite = false;
+      isSqlite = false;
+      await query('DROP TRIGGER IF EXISTS notepads_scope_write_guard ON notepads');
     }
-    if (sqlite) await query('DROP TRIGGER IF EXISTS notepads_scope_insert_guard');
-    else await query('DROP TRIGGER IF EXISTS notepads_scope_write_guard ON notepads');
     try {
       return await insert();
     } finally {
-      if (sqlite) {
+      if (isSqlite) {
         await query(`CREATE TRIGGER notepads_scope_insert_guard
           BEFORE INSERT ON notepads
           WHEN NOT EXISTS (

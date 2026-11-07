@@ -20,6 +20,18 @@ export async function assertTreeScopeIsolation(db: {
     deletedId = uid();
   const scope = { workspaceId, projectId };
   const now = Date.now();
+  try {
+    await db.query(
+      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+      ['fixture-user', 'Fixture User', 'fixture-user@test.com', 0, now, now],
+    );
+  } catch {
+    try {
+      await db.query(
+        "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('fixture-user', 'Fixture User', 'fixture-user@test.com', false, now(), now())",
+      );
+    } catch {}
+  }
   for (const id of [workspaceId, otherWorkspace]) {
     await db.query(
       'INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',

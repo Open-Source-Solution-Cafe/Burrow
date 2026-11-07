@@ -22,6 +22,20 @@ export async function assertProjectReferenceIsolation(db: {
   const actor = uid(),
     member = uid(),
     foreignMember = uid();
+  for (const u of [actor, member, foreignMember]) {
+    try {
+      await db.query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [u, 'Test User', `${u}@test.com`, 0, now, now],
+      );
+    } catch {
+      try {
+        await db.query(
+          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
+        );
+      } catch {}
+    }
+  }
   for (const workspace of [workspaceId, foreignWorkspace]) {
     await db.query(
       'INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)',

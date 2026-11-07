@@ -3,42 +3,22 @@
 -- Phase 1 & 2: Unique Indexes for Composite FK targets & Cascade Guards
 ALTER TABLE cards ADD COLUMN kind text NOT NULL DEFAULT 'card' CHECK (kind = 'card');
 
+DROP TRIGGER IF EXISTS cards_scope_update_guard;
+CREATE TRIGGER cards_scope_update_guard
+BEFORE UPDATE OF board_id, column_id, notepad_id, kind ON cards
+WHEN NOT EXISTS (
+  SELECT 1 FROM boards b
+  JOIN board_columns col ON col.id = NEW.column_id AND col.board_id = NEW.board_id
+  JOIN projects p ON p.id = b.project_id AND p.workspace_id = b.workspace_id
+  JOIN notepads n ON n.id = NEW.notepad_id AND n.kind = 'card'
+    AND n.project_id = p.id AND n.workspace_id = p.workspace_id
+  WHERE b.id = NEW.board_id
+)
+BEGIN SELECT RAISE(ABORT, 'scope_write_conflict'); END;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_id_workspace ON projects (id, workspace_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_board_columns_id_board ON board_columns (id, board_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_notepads_id_kind ON notepads (id, kind);
-
--- User auto-provisioning triggers for SQLite fixtures & integrity
-CREATE TRIGGER IF NOT EXISTS workspaces_ensure_user
-BEFORE INSERT ON workspaces
-WHEN NEW.created_by IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.created_by)
-BEGIN
-  INSERT OR IGNORE INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
-  VALUES (NEW.created_by, NEW.created_by, NEW.created_by || '@local.test', 0, unixepoch() * 1000, unixepoch() * 1000);
-END;
-
-CREATE TRIGGER IF NOT EXISTS members_ensure_user
-BEFORE INSERT ON members
-WHEN NEW.user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.user_id)
-BEGIN
-  INSERT OR IGNORE INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
-  VALUES (NEW.user_id, NEW.user_id, NEW.user_id || '@local.test', 0, unixepoch() * 1000, unixepoch() * 1000);
-END;
-
-CREATE TRIGGER IF NOT EXISTS card_assignees_ensure_user
-BEFORE INSERT ON card_assignees
-WHEN NEW.user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.user_id)
-BEGIN
-  INSERT OR IGNORE INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
-  VALUES (NEW.user_id, NEW.user_id, NEW.user_id || '@local.test', 0, unixepoch() * 1000, unixepoch() * 1000);
-END;
-
-CREATE TRIGGER IF NOT EXISTS edit_locks_ensure_user
-BEFORE INSERT ON edit_locks
-WHEN NEW.user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.user_id)
-BEGIN
-  INSERT OR IGNORE INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
-  VALUES (NEW.user_id, NEW.user_id, NEW.user_id || '@local.test', 0, unixepoch() * 1000, unixepoch() * 1000);
-END;
 
 -- User delete cascade/set null trigger in SQLite
 CREATE TRIGGER IF NOT EXISTS user_delete_cascades
@@ -64,4 +44,24 @@ BEGIN DELETE FROM notepad_links WHERE target_type = 'card' AND target_id = OLD.i
 
 CREATE TRIGGER IF NOT EXISTS boards_cleanup_links AFTER DELETE ON boards
 BEGIN DELETE FROM notepad_links WHERE target_type = 'board' AND target_id = OLD.id; END;
+
+-- Phase 4: Member removal cleans up card assignments and locks in the workspace
+CREATE TRIGGER IF NOT EXISTS members_cleanup_workspace_assignments
+AFTER DELETE ON members
+BEGIN
+  DELETE FROM card_assignees
+  WHERE user_id = OLD.user_id
+    AND card_id IN (
+      SELECT c.id FROM cards c
+      JOIN board_columns col ON col.id = c.column_id
+      JOIN boards b ON b.id = col.board_id
+      WHERE b.workspace_id = OLD.workspace_id
+    );
+
+  DELETE FROM edit_locks
+  WHERE user_id = OLD.user_id
+    AND notepad_id IN (
+      SELECT n.id FROM notepads n WHERE n.workspace_id = OLD.workspace_id
+    );
+END;
 

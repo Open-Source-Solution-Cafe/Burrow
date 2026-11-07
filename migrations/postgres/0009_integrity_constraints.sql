@@ -22,65 +22,6 @@ ALTER TABLE edit_locks ADD CONSTRAINT edit_locks_user_id_fk FOREIGN KEY (user_id
 ALTER TABLE notifications ADD CONSTRAINT notifications_user_id_fk FOREIGN KEY (user_id) REFERENCES "user"(id) ON DELETE CASCADE;
 ALTER TABLE notifications ADD CONSTRAINT notifications_actor_id_fk FOREIGN KEY (actor_id) REFERENCES "user"(id) ON DELETE CASCADE;
 
-CREATE OR REPLACE FUNCTION ensure_user_stub() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-  v_uid text;
-BEGIN
-  IF TG_TABLE_NAME = 'workspaces' THEN v_uid := NEW.created_by;
-  ELSIF TG_TABLE_NAME = 'members' THEN v_uid := NEW.user_id;
-  ELSIF TG_TABLE_NAME = 'invites' THEN v_uid := NEW.invited_by;
-  ELSIF TG_TABLE_NAME = 'project_files' THEN v_uid := NEW.created_by;
-  ELSIF TG_TABLE_NAME = 'notepads' THEN v_uid := NEW.created_by;
-  ELSIF TG_TABLE_NAME = 'card_assignees' THEN v_uid := NEW.user_id;
-  ELSIF TG_TABLE_NAME = 'edit_locks' THEN v_uid := NEW.user_id;
-  ELSIF TG_TABLE_NAME = 'notifications' THEN
-    IF NEW.user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.user_id) THEN
-      INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES (NEW.user_id, NEW.user_id, NEW.user_id || '@local.test', false, now(), now())
-      ON CONFLICT (id) DO NOTHING;
-    END IF;
-    IF NEW.actor_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = NEW.actor_id) THEN
-      INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-      VALUES (NEW.actor_id, NEW.actor_id, NEW.actor_id || '@local.test', false, now(), now())
-      ON CONFLICT (id) DO NOTHING;
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  IF v_uid IS NOT NULL AND NOT EXISTS (SELECT 1 FROM "user" WHERE id = v_uid) THEN
-    INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-    VALUES (v_uid, v_uid, v_uid || '@local.test', false, now(), now())
-    ON CONFLICT (id) DO NOTHING;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS workspaces_ensure_user_stub ON workspaces;
-CREATE TRIGGER workspaces_ensure_user_stub BEFORE INSERT ON workspaces FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS members_ensure_user_stub ON members;
-CREATE TRIGGER members_ensure_user_stub BEFORE INSERT ON members FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS invites_ensure_user_stub ON invites;
-CREATE TRIGGER invites_ensure_user_stub BEFORE INSERT ON invites FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS project_files_ensure_user_stub ON project_files;
-CREATE TRIGGER project_files_ensure_user_stub BEFORE INSERT ON project_files FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS notepads_ensure_user_stub ON notepads;
-CREATE TRIGGER notepads_ensure_user_stub BEFORE INSERT ON notepads FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS card_assignees_ensure_user_stub ON card_assignees;
-CREATE TRIGGER card_assignees_ensure_user_stub BEFORE INSERT ON card_assignees FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS edit_locks_ensure_user_stub ON edit_locks;
-CREATE TRIGGER edit_locks_ensure_user_stub BEFORE INSERT ON edit_locks FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
-DROP TRIGGER IF EXISTS notifications_ensure_user_stub ON notifications;
-CREATE TRIGGER notifications_ensure_user_stub BEFORE INSERT ON notifications FOR EACH ROW EXECUTE FUNCTION ensure_user_stub();
-
 -- Phase 2: Cross-Scope Workspace Drift Prevention via Composite Keys
 ALTER TABLE projects ADD CONSTRAINT projects_id_workspace_uq UNIQUE (id, workspace_id);
 
@@ -94,6 +35,9 @@ ALTER TABLE board_columns ADD CONSTRAINT board_columns_id_board_uq UNIQUE (id, b
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS kind notepad_kind NOT NULL DEFAULT 'card' CHECK (kind = 'card');
 ALTER TABLE cards ADD CONSTRAINT cards_column_board_fk FOREIGN KEY (column_id, board_id) REFERENCES board_columns(id, board_id) ON DELETE CASCADE NOT VALID;
 ALTER TABLE cards ADD CONSTRAINT cards_notepad_kind_fk FOREIGN KEY (notepad_id, kind) REFERENCES notepads(id, kind) ON DELETE CASCADE NOT VALID;
+
+DROP TRIGGER IF EXISTS cards_scope_write_guard ON cards;
+CREATE TRIGGER cards_scope_write_guard BEFORE INSERT OR UPDATE OF board_id, column_id, notepad_id, kind ON cards FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 
 -- Phase 3: notepad_links Orphans Cleanup on Delete
 CREATE OR REPLACE FUNCTION cleanup_notepad_links_target() RETURNS trigger
@@ -123,3 +67,33 @@ CREATE TRIGGER boards_cleanup_links AFTER DELETE ON boards FOR EACH ROW EXECUTE 
 
 DROP TRIGGER IF EXISTS user_cleanup_links ON "user";
 CREATE TRIGGER user_cleanup_links AFTER DELETE ON "user" FOR EACH ROW EXECUTE FUNCTION cleanup_notepad_links_target();
+
+-- Phase 4: Member Removal Cascades to Workspace Card Assignments & Locks
+CREATE OR REPLACE FUNCTION members_cleanup_workspace_assignments() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  DELETE FROM card_assignees ca
+  WHERE ca.user_id = OLD.user_id
+    AND EXISTS (
+      SELECT 1 FROM cards c
+      JOIN board_columns col ON col.id = c.column_id
+      JOIN boards b ON b.id = col.board_id
+      WHERE c.id = ca.card_id AND b.workspace_id = OLD.workspace_id
+    );
+
+  DELETE FROM edit_locks el
+  WHERE el.user_id = OLD.user_id
+    AND EXISTS (
+      SELECT 1 FROM notepads n
+      WHERE n.id = el.notepad_id AND n.workspace_id = OLD.workspace_id
+    );
+
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS members_cleanup_workspace_assignments_trg ON members;
+CREATE TRIGGER members_cleanup_workspace_assignments_trg
+  AFTER DELETE ON members
+  FOR EACH ROW
+  EXECUTE FUNCTION members_cleanup_workspace_assignments();

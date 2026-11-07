@@ -119,7 +119,7 @@ BEGIN SELECT RAISE(ABORT, 'scope_write_conflict'); END;
 
 CREATE TRIGGER notepad_links_scope_insert_guard
 BEFORE INSERT ON notepad_links
-WHEN NEW.target_type IN ('notepad', 'card', 'board') AND NOT EXISTS (
+WHEN NOT EXISTS (
   SELECT 1 FROM notepads source
   WHERE source.id = NEW.source_id AND (
     (NEW.target_type = 'notepad' AND EXISTS (
@@ -136,6 +136,9 @@ WHEN NEW.target_type IN ('notepad', 'card', 'board') AND NOT EXISTS (
       SELECT 1 FROM boards b JOIN projects p ON p.id = b.project_id
       WHERE b.id = NEW.target_id AND p.id = source.project_id
         AND b.workspace_id = source.workspace_id
+    )) OR (NEW.target_type = 'user' AND EXISTS (
+      SELECT 1 FROM members m WHERE m.workspace_id = source.workspace_id
+        AND m.user_id = NEW.target_id
     ))
   )
 )
@@ -143,7 +146,7 @@ BEGIN SELECT RAISE(ABORT, 'scope_write_conflict'); END;
 --> statement-breakpoint
 CREATE TRIGGER notepad_links_scope_update_guard
 BEFORE UPDATE OF source_id, target_type, target_id ON notepad_links
-WHEN NEW.target_type IN ('notepad', 'card', 'board') AND NOT EXISTS (
+WHEN NOT EXISTS (
   SELECT 1 FROM notepads source
   WHERE source.id = NEW.source_id AND (
     (NEW.target_type = 'notepad' AND EXISTS (
@@ -160,6 +163,9 @@ WHEN NEW.target_type IN ('notepad', 'card', 'board') AND NOT EXISTS (
       SELECT 1 FROM boards b JOIN projects p ON p.id = b.project_id
       WHERE b.id = NEW.target_id AND p.id = source.project_id
         AND b.workspace_id = source.workspace_id
+    )) OR (NEW.target_type = 'user' AND EXISTS (
+      SELECT 1 FROM members m WHERE m.workspace_id = source.workspace_id
+        AND m.user_id = NEW.target_id
     ))
   )
 )

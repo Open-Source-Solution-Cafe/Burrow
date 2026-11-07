@@ -256,4 +256,170 @@ export function structuralScopeDeleteCases(fixture: () => { query: Query }) {
     await expect(createCard(query, { boardId: boardA, columnId: columnB, notepadId: body }))
       .rejects.toThrow('scope_write_conflict');
   });
+
+  it('rejects updates on cards that attempt to change notepad to another project or non-card kind', async () => {
+    const { query } = fixture();
+    const { workspaceId, projectId } = await createWorkspaceAndProject(query);
+    const { projectId: otherProjectId } = await createWorkspaceAndProject(query, workspaceId);
+
+    const board = await createBoard(query, workspaceId, projectId);
+    const column = await createColumn(query, board);
+    const bodyA = await createNotepad(query, { workspaceId, projectId, kind: 'card' });
+    const card = await createCard(query, { boardId: board, columnId: column, notepadId: bodyA });
+
+    // 1. Cannot update card notepad_id to a notepad in another project
+    const foreignBody = await createNotepad(query, { workspaceId, projectId: otherProjectId, kind: 'card' });
+    await expect(query('UPDATE cards SET notepad_id = ? WHERE id = ?', [foreignBody, card]))
+      .rejects.toThrow('scope_write_conflict');
+
+    // 2. Cannot update card notepad_id to a notepad of kind 'notepad'
+    const regularNote = await createNotepad(query, { workspaceId, projectId, kind: 'notepad' });
+    await expect(query('UPDATE cards SET notepad_id = ? WHERE id = ?', [regularNote, card]))
+      .rejects.toThrow();
+
+    // 3. Cannot update card kind to 'notepad'
+    await expect(query("UPDATE cards SET kind = 'notepad' WHERE id = ?", [card]))
+      .rejects.toThrow();
+
+    // 4. Cannot update the backing notepad to a different kind or project while attached to a card
+    await expect(query("UPDATE notepads SET kind = 'notepad' WHERE id = ?", [bodyA]))
+      .rejects.toThrow('scope_write_conflict');
+    await expect(query('UPDATE notepads SET project_id = ? WHERE id = ?', [otherProjectId, bodyA]))
+      .rejects.toThrow('scope_write_conflict');
+  });
+
+  it('rejects notepad_links to nonexistent targets and cleans up links on target deletion', async () => {
+    const { query } = fixture();
+    const { workspaceId, projectId } = await createWorkspaceAndProject(query);
+    const source = await createNotepad(query, { workspaceId, projectId });
+
+    // 1. Rejects link inserts to nonexistent targets
+    const missingTarget = id();
+    await expect(query(
+      'INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)',
+      [source, 'notepad', missingTarget],
+    )).rejects.toThrow('scope_write_conflict');
+
+    await expect(query(
+      'INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)',
+      [source, 'card', missingTarget],
+    )).rejects.toThrow('scope_write_conflict');
+
+    await expect(query(
+      'INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)',
+      [source, 'board', missingTarget],
+    )).rejects.toThrow('scope_write_conflict');
+
+    await expect(query(
+      'INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)',
+      [source, 'user', missingTarget],
+    )).rejects.toThrow('scope_write_conflict');
+
+    // 2. Create valid targets in the same project & workspace
+    const targetNote = await createNotepad(query, { workspaceId, projectId });
+    const targetBoard = await createBoard(query, workspaceId, projectId);
+    const targetCol = await createColumn(query, targetBoard);
+    const targetCardBody = await createNotepad(query, { workspaceId, projectId, kind: 'card' });
+    const targetCard = await createCard(query, { boardId: targetBoard, columnId: targetCol, notepadId: targetCardBody });
+
+    const linkedUserId = id();
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [linkedUserId, 'Linked Member', `${linkedUserId}@test.com`, 0, 1, 1],
+      );
+    } catch {
+      await query(
+        `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${linkedUserId}', 'Linked Member', '${linkedUserId}@test.com', false, now(), now())`,
+      );
+    }
+    await query('INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', [
+      workspaceId,
+      linkedUserId,
+      'editor',
+      Date.now(),
+    ]);
+
+    // Insert valid links
+    await query('INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)', [source, 'notepad', targetNote]);
+    await query('INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)', [source, 'card', targetCard]);
+    await query('INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)', [source, 'board', targetBoard]);
+    await query('INSERT INTO notepad_links (source_id, target_type, target_id) VALUES (?, ?, ?)', [source, 'user', linkedUserId]);
+
+    const linksBefore = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ?', [source]);
+    expect(linksBefore.length).toBe(4);
+
+    // 3. Soft-delete target notepad: row remains in notepad_links, but filtered in live queries
+    const now = Date.now();
+    await query('UPDATE notepads SET deleted_at = ? WHERE id = ?', [now, targetNote]);
+    const linksAfterSoftDelete = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ?', [source]);
+    expect(linksAfterSoftDelete.length).toBe(4); // row preserved for restore
+
+    // Live backlink queries join with deleted_at IS NULL, filtering it out
+    const activeBacklinks = await query(
+      'SELECT nl.target_id FROM notepad_links nl JOIN notepads n ON n.id = nl.target_id WHERE nl.source_id = ? AND n.deleted_at IS NULL',
+      [source],
+    );
+    expect(activeBacklinks.some((r: any) => r.target_id === targetNote)).toBe(false);
+
+    // 4. Hard-deleting targets cleans up notepad_links rows
+    await query('DELETE FROM notepads WHERE id = ?', [targetNote]);
+    const linksAfterNoteDelete = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ? AND target_type = ?', [source, 'notepad']);
+    expect(linksAfterNoteDelete.length).toBe(0);
+
+    await query('DELETE FROM cards WHERE id = ?', [targetCard]);
+    const linksAfterCardDelete = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ? AND target_type = ?', [source, 'card']);
+    expect(linksAfterCardDelete.length).toBe(0);
+
+    await query('DELETE FROM boards WHERE id = ?', [targetBoard]);
+    const linksAfterBoardDelete = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ? AND target_type = ?', [source, 'board']);
+    expect(linksAfterBoardDelete.length).toBe(0);
+
+    await query('DELETE FROM "user" WHERE id = ?', [linkedUserId]);
+    const linksAfterUserDelete = await query('SELECT target_type, target_id FROM notepad_links WHERE source_id = ? AND target_type = ?', [source, 'user']);
+    expect(linksAfterUserDelete.length).toBe(0);
+  });
+
+  it('cleans up card_assignees when a member is removed from the workspace', async () => {
+    const { query } = fixture();
+    const { workspaceId, projectId } = await createWorkspaceAndProject(query);
+    const board = await createBoard(query, workspaceId, projectId);
+    const col = await createColumn(query, board);
+    const body = await createNotepad(query, { workspaceId, projectId, kind: 'card' });
+    const card = await createCard(query, { boardId: board, columnId: col, notepadId: body });
+
+    const memberId = id();
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [memberId, 'Workspace Assignee', `${memberId}@test.com`, 0, 1, 1],
+      );
+    } catch {
+      await query(
+        `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${memberId}', 'Workspace Assignee', '${memberId}@test.com', false, now(), now())`,
+      );
+    }
+
+    await query('INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', [
+      workspaceId,
+      memberId,
+      'editor',
+      Date.now(),
+    ]);
+
+    await query('INSERT INTO card_assignees (card_id, user_id) VALUES (?, ?)', [
+      card,
+      memberId,
+    ]);
+
+    const before = await query('SELECT * FROM card_assignees WHERE card_id = ? AND user_id = ?', [card, memberId]);
+    expect(before.length).toBe(1);
+
+    // Remove member from workspace
+    await query('DELETE FROM members WHERE workspace_id = ? AND user_id = ?', [workspaceId, memberId]);
+
+    // card_assignees row must be automatically removed
+    const after = await query('SELECT * FROM card_assignees WHERE card_id = ? AND user_id = ?', [card, memberId]);
+    expect(after.length).toBe(0);
+  });
 }

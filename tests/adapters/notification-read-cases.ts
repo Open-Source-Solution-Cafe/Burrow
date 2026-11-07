@@ -25,6 +25,20 @@ export async function assertNotificationReadIsolation(
     foreignUser: { workspace, user: otherUser, readAt: null },
   };
   const ids = Object.fromEntries(Object.keys(rows).map((key) => [key, crypto.randomUUID()]));
+  for (const u of [user, otherUser]) {
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [u, 'Test User', `${u}@test.com`, 0, now, now],
+      );
+    } catch {
+      try {
+        await query(
+          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
+        );
+      } catch {}
+    }
+  }
   for (const id of [workspace, foreignWorkspace]) {
     await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [
       id,

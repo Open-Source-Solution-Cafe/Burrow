@@ -19,6 +19,20 @@ export async function assertMemberIsolation(
     peer = crypto.randomUUID(),
     foreignOwner = crypto.randomUUID();
   const now = Date.now();
+  for (const u of [target, peer, foreignOwner]) {
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [u, 'Test User', `${u}@test.com`, 0, now, now],
+      );
+    } catch {
+      try {
+        await query(
+          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
+        );
+      } catch {}
+    }
+  }
   for (const [id, owner] of [
     [workspace, peer],
     [foreignWorkspace, foreignOwner],
@@ -78,6 +92,18 @@ export async function assertMemberIsolation(
   ).rejects.toThrow('not_found');
   for (const role of ['viewer', 'editor'] as const) {
     const userId = crypto.randomUUID();
+    try {
+      await query(
+        'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, 'Test User', `${userId}@test.com`, 0, now, now],
+      );
+    } catch {
+      try {
+        await query(
+          `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${userId}', 'Test User', '${userId}@test.com', false, now(), now())`,
+        );
+      } catch {}
+    }
     await primary.create({ workspaceId: workspace, userId, role, joinedAt: now });
     await primary.remove({ workspaceId: workspace, actorUserId: userId, targetUserId: userId });
     expect(await secondary.findByUserId(workspace, userId)).toBeNull();
@@ -198,6 +224,20 @@ async function assertOwnerRaces(createRepository: () => IMemberRepository, query
     const now = Date.now(),
       a = createRepository(),
       b = createRepository();
+    for (const u of [first, second]) {
+      try {
+        await query(
+          'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+          [u, 'Test User', `${u}@test.com`, 0, now, now],
+        );
+      } catch {
+        try {
+          await query(
+            `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${u}', 'Test User', '${u}@test.com', false, now(), now())`,
+          );
+        } catch {}
+      }
+    }
     await query('INSERT INTO workspaces (id, name, created_by, created_at) VALUES (?, ?, ?, ?)', [
       workspaceId,
       'Owner race',

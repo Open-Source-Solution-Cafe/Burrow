@@ -141,7 +141,7 @@ export function createNotepadRepository(db: DB): INotepadRepository {
       const deletionOperationId = crypto.randomUUID();
 
       const statements: BatchItem<'sqlite'>[] = [];
-      for (const chunk of chunkByParamBudget(allIds, 1, 3)) {
+      for (const chunk of chunkByParamBudget(allIds, 1, 12)) {
         statements.push(
           db
             .update(t.notepads)
@@ -150,7 +150,7 @@ export function createNotepadRepository(db: DB): INotepadRepository {
         );
       }
 
-      for (const chunk of chunkByParamBudget(allIds, 1, 0)) {
+      for (const chunk of chunkByParamBudget(allIds, 1, 10)) {
         statements.push(
           db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role IN ('editor','owner'))`),
           db.delete(t.editLocks).where(and(inArray(t.editLocks.notepadId, chunk), writable(scope))),
@@ -225,7 +225,7 @@ export function createNotepadRepository(db: DB): INotepadRepository {
       const matchingIds = matchingNotepads.map((n) => n.id);
 
       const statements: BatchItem<'sqlite'>[] = [];
-      for (const chunk of chunkByParamBudget(matchingIds, 1, 3)) {
+      for (const chunk of chunkByParamBudget(matchingIds, 1, 12)) {
         statements.push(
           db
             .update(t.notepads)
@@ -248,7 +248,7 @@ export function createNotepadRepository(db: DB): INotepadRepository {
       }
 
       // Delete existing FTS rows for matchingIds first so re-running restore is idempotent
-      for (const chunk of chunkByParamBudget(matchingIds, 1, 0)) {
+      for (const chunk of chunkByParamBudget(matchingIds, 1, 10)) {
         statements.push(db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role IN ('editor','owner'))`));
       }
 
@@ -313,7 +313,7 @@ export function createNotepadRepository(db: DB): INotepadRepository {
       }
 
       const statements: BatchItem<'sqlite'>[] = [db.update(t.notepads).set({ updatedAt: t.notepads.updatedAt }).where(and(eq(t.notepads.id, id), eq(t.notepads.workspaceId, scope.workspaceId), eq(t.notepads.projectId, scope.projectId), isNotNull(t.notepads.deletedAt), writable(scope))).returning({ id: t.notepads.id })];
-      for (const chunk of chunkByParamBudget(allIds, 1, 0)) {
+      for (const chunk of chunkByParamBudget(allIds, 1, 10)) {
         statements.push(
           db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role='owner')`),
           db.run(sql`DELETE FROM notepad_links WHERE target_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role='owner')`),

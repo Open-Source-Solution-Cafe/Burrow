@@ -60,7 +60,7 @@ BEGIN
       RAISE EXCEPTION 'scope_write_conflict' USING ERRCODE = '23514';
     END IF;
   ELSIF TG_TABLE_NAME = 'notepad_links' THEN
-    IF NEW.target_type IN ('notepad', 'card', 'board') AND NOT EXISTS (
+    IF NOT EXISTS (
       SELECT 1 FROM notepads source WHERE source.id = NEW.source_id AND (
         (NEW.target_type = 'notepad' AND EXISTS (
           SELECT 1 FROM notepads target WHERE target.id = NEW.target_id
@@ -75,6 +75,9 @@ BEGIN
           SELECT 1 FROM boards b JOIN projects p ON p.id = b.project_id
           WHERE b.id = NEW.target_id AND p.id = source.project_id
             AND b.workspace_id = source.workspace_id
+        )) OR (NEW.target_type = 'user' AND EXISTS (
+          SELECT 1 FROM members m WHERE m.workspace_id = source.workspace_id
+            AND m.user_id = NEW.target_id
         ))
       )
     ) THEN

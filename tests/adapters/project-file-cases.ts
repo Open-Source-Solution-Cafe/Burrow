@@ -18,6 +18,20 @@ export async function assertProjectFileRegistry(
   const projectOne = id();
   const projectTwo = id();
   const now = Date.now();
+  await query('DELETE FROM project_files');
+
+  try {
+    await query(
+      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+      [ownerId, 'Test User', `${ownerId}@test.com`, 0, now, now],
+    );
+  } catch {
+    try {
+      await query(
+        `INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES ('${ownerId}', 'Test User', '${ownerId}@test.com', false, now(), now())`,
+      );
+    } catch {}
+  }
 
   for (const workspaceId of [workspaceOne, workspaceTwo]) {
     await query(

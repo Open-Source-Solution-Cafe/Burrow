@@ -40,10 +40,26 @@ const newColumn = (boardId: string, id = crypto.randomUUID()): CreateColumnData 
   wipLimit: null,
 });
 
+async function ensureContractUser(query: Query) {
+  try {
+    await query(
+      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+      ['board-contract-user', 'Board Contract User', 'board-contract@test.com', 0, 1, 1],
+    );
+  } catch {
+    try {
+      await query(
+        "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('board-contract-user', 'Board Contract User', 'board-contract@test.com', false, now(), now())",
+      );
+    } catch {}
+  }
+}
+
 /** Shared D1, Node/SQLite and PostgreSQL atomic starter-board contract. */
 export function boardCreateAtomicCases(fixture: () => Fixture) {
   it('commits the board with every starter column', async () => {
     const { boards, query } = fixture();
+    await ensureContractUser(query);
     const workspaceId = crypto.randomUUID();
     const projectId = crypto.randomUUID();
     const now = Date.now();
@@ -76,6 +92,7 @@ export function boardCreateAtomicCases(fixture: () => Fixture) {
 
   it('rolls back the board and earlier columns when a column insert fails', async () => {
     const { boards, query } = fixture();
+    await ensureContractUser(query);
     const workspaceId = crypto.randomUUID();
     const projectId = crypto.randomUUID();
     const now = Date.now();
@@ -105,6 +122,7 @@ export function boardCreateAtomicCases(fixture: () => Fixture) {
 
   it('rejects a viewer or revoked actor before creating a board or starter columns', async () => {
     const { boards, query } = fixture();
+    await ensureContractUser(query);
     const workspaceId = crypto.randomUUID();
     const projectId = crypto.randomUUID();
     const now = Date.now();

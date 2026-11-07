@@ -11,12 +11,24 @@ describe('createNotepadRepository contract', () => {
 
   beforeAll(async () => {
     const db = createD1Db(env.DB);
+    const now = Date.now();
+    const nowDate = new Date();
+    await db.insert(schema.user).values([
+      { id: 'notepad-contract-user', name: 'Contract User', email: 'contract@user.test', emailVerified: false, createdAt: nowDate, updatedAt: nowDate },
+      { id: 'lock-test-user', name: 'Lock User', email: 'lock@user.test', emailVerified: false, createdAt: nowDate, updatedAt: nowDate },
+    ]);
     workspaceId = crypto.randomUUID();
     await db.insert(schema.workspaces).values({
       id: workspaceId,
       name: 'notepad-contract-ws',
       createdBy: 'notepad-contract-user',
-      createdAt: Date.now(),
+      createdAt: now,
+    });
+    await db.insert(schema.members).values({
+      workspaceId,
+      userId: 'notepad-contract-user',
+      role: 'owner',
+      joinedAt: now,
     });
   });
 
