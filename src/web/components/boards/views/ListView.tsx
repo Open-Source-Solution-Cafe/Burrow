@@ -5,6 +5,7 @@ import { Avatar, AvatarGroup } from '../../ui/Avatar';
 import { Badge } from '../../ui/Badge';
 import { StatusDiamond } from '../../ui/StatusDiamond';
 import { PRIORITY_BADGES, PRIORITIES, type ColumnItem, type Priority } from './types';
+import { useTranslation } from '../../../lib/i18n';
 
 interface ListViewProps {
   workspaceId: string;
@@ -36,6 +37,7 @@ function parseDateInput(v: string): number | null {
  * inline quick-edit for priority and due date.
  */
 export function ListView({ workspaceId, projectId, boardId, columns, onCardClick }: ListViewProps) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const updateCard = useUpdateCard();
 
@@ -47,11 +49,11 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
       <div
         className={`hidden ${gridCols} sticky top-0 z-10 bg-[var(--surface2)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)] border-b border-[var(--line)]`}
       >
-        <span>Title</span>
-        <span>Priority</span>
-        <span>Due Date</span>
-        <span>Assignees</span>
-        <span>Tags</span>
+        <span>{t('boards.titlePlaceholder')}</span>
+        <span>{t('boards.priority')}</span>
+        <span>{t('boards.dueDate')}</span>
+        <span>{t('boards.assignee')}</span>
+        <span>{t('boards.tags')}</span>
       </div>
 
       <div className="mt-3 space-y-5">
@@ -96,7 +98,7 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
               {!isCollapsed && (
                 <div className="mt-1 space-y-2 md:space-y-0.5">
                   {col.cards.length === 0 && (
-                    <div className="px-3 py-2 text-xs italic text-[var(--muted)]">No cards</div>
+                    <div className="px-3 py-2 text-xs italic text-[var(--muted)]">{t('boards.noCardsInColumn')}</div>
                   )}
                   {col.cards.map((card) => {
                     const overdue = card.dueDate != null && card.dueDate < Date.now();
@@ -118,12 +120,12 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
                         {/* Title */}
                         <div className="flex min-w-0 items-center justify-between md:justify-start gap-2">
                           <span className="truncate font-medium md:font-normal text-[var(--text)]">
-                            {card.title || 'Untitled'}
+                            {card.title || t('common.untitled')}
                           </span>
                           {(card.totalSubtasks ?? 0) > 0 && (
                             <span
                               className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--muted)]"
-                              title={`${card.completedSubtasks ?? 0}/${card.totalSubtasks} subtasks`}
+                              title={`${card.completedSubtasks ?? 0}/${card.totalSubtasks} ${t('boards.subtasks').toLowerCase()}`}
                             >
                               <CheckSquare className="h-3 w-3" />
                               <span className="tabular-nums">
@@ -154,12 +156,12 @@ export function ListView({ workspaceId, projectId, boardId, columns, onCardClick
                                 ? PRIORITY_BADGES[card.priority]!.class
                                 : 'text-[var(--muted)]'
                             }`}
-                            title="Change priority"
+                            title={t('boards.priority')}
                           >
                             <option value="">—</option>
                             {PRIORITIES.map((p) => (
                               <option key={p} value={p}>
-                                {PRIORITY_BADGES[p]?.label ?? p}
+                                {t(`common.priorities.${p}`)}
                               </option>
                             ))}
                           </select>

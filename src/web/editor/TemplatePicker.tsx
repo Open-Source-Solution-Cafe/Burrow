@@ -1,6 +1,7 @@
 import type { BlockNoteEditor } from '@blocknote/core';
 import { STARTER_TEMPLATES, type StarterTemplate } from '../../shared/templates';
 import { ModalShell } from '../components/ui/ModalShell';
+import { useTranslation } from '../lib/i18n';
 
 interface TemplatePickerModalProps {
   editor: BlockNoteEditor<any, any, any>;
@@ -9,13 +10,20 @@ interface TemplatePickerModalProps {
 
 /** Modal listing all starter templates; applying replaces the document. */
 export function TemplatePickerModal({ editor, onClose }: TemplatePickerModalProps) {
+  const { t } = useTranslation();
   const apply = (template: StarterTemplate) => {
     editor.replaceBlocks(editor.document, template.blocks as any);
     onClose();
   };
 
+  const getTemplateName = (id: string, fallback: string) => {
+    if (id === 'product-spec') return t('editor.projectSpec');
+    if (id === 'meeting-notes') return t('editor.meetingNotes');
+    return fallback;
+  };
+
   return (
-    <ModalShell open onClose={onClose} title="Start with a template">
+    <ModalShell open onClose={onClose} title={t('editor.startWithTemplate')}>
       {/* Template list */}
       <div className="mt-3 space-y-1.5 max-h-[60vh] overflow-y-auto">
         {STARTER_TEMPLATES.map((template) => (
@@ -27,7 +35,7 @@ export function TemplatePickerModal({ editor, onClose }: TemplatePickerModalProp
             <span className="text-xl leading-none mt-0.5">{template.icon}</span>
             <span className="flex-1 min-w-0">
               <span className="block text-sm font-semibold text-[var(--text)]">
-                {template.name}
+                {getTemplateName(template.id, template.name)}
               </span>
               <span className="block text-xs text-[var(--muted)] mt-0.5">
                 {template.description}

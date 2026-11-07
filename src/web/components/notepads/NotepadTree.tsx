@@ -21,6 +21,7 @@ import {
 import { useMoveNotepad, useNotepads } from '../../lib/queries';
 import type { NotepadNode } from '../../lib/queries';
 import { notepadTarget, projectTarget, projectApiPath } from '../../lib/workspaceRoutes';
+import { useTranslation } from '../../lib/i18n';
 
 import {
   buildTreeStructure,
@@ -78,6 +79,7 @@ function TreeRow({
   onDelete,
   onToggle,
 }: TreeRowProps) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `tree:${node.id}`,
   });
@@ -131,7 +133,7 @@ function TreeRow({
                 onToggle(node.id);
               }}
               className="flex shrink-0 h-11 w-11 md:h-5 md:w-5 items-center justify-center hover:bg-hi theme-radius-xs"
-              aria-label={isExpanded ? 'Collapse' : 'Expand'}
+              aria-label={isExpanded ? t('sidebar.collapseNotepads') : t('sidebar.expandNotepads')}
             >
               {isExpanded ? (
                 <ChevronDown className="h-3.5 w-3.5 text-ink-muted" />
@@ -142,8 +144,8 @@ function TreeRow({
           ) : (
             <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
           )}
-          <span className="truncate flex-1" title={node.title || 'Untitled'}>
-            {node.title || 'Untitled'}
+          <span className="truncate flex-1" title={node.title || t('common.untitled')}>
+            {node.title || t('common.untitled')}
           </span>
           {isActive && <span className="diamond-dot group-hover:hidden" />}
         </Link>
@@ -158,7 +160,7 @@ function TreeRow({
               e.stopPropagation();
               onCreateChild(node.id);
             }}
-            title="Add child notepad"
+            title={t('sidebar.newNotepad')}
             className="flex h-6 w-6 items-center justify-center text-ink-muted hover:bg-hi hover:text-text theme-radius-xs cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -172,7 +174,7 @@ function TreeRow({
               e.stopPropagation();
               onDelete(node.id);
             }}
-            title="Delete to Trash"
+            title={t('sidebar.deleteBoardToTrash')}
             className="flex h-6 w-6 items-center justify-center text-ink-muted hover:bg-hi hover:text-[var(--danger)] cursor-pointer disabled:opacity-40 theme-radius-xs"
           >
             <Trash2 className="h-3.5 w-3.5" />
@@ -181,7 +183,7 @@ function TreeRow({
             {...attributes}
             {...listeners}
             className="flex h-6 w-6 items-center justify-center cursor-grab active:cursor-grabbing text-ink-muted hover:text-text touch-none theme-radius-xs"
-            title="Drag to reorder"
+            title={t('boards.dragToReorder')}
           >
             <GripVertical className="h-3.5 w-3.5" aria-hidden />
           </div>
@@ -214,6 +216,7 @@ function TreeRow({
 }
 
 export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; projectId: string }) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const params = useParams({ strict: false }) as { notepadId?: string };
@@ -387,7 +390,7 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
   const toggleExpand = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const createChild = (parentId: string) => {
-    createNotepad.mutate({ workspaceId, projectId, parentId, title: 'Untitled' });
+    createNotepad.mutate({ workspaceId, projectId, parentId, title: t('common.untitled') });
     setExpanded((prev) => ({ ...prev, [parentId]: true }));
   };
 
@@ -406,7 +409,7 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
       >
         <RootList>
           {roots.length === 0 ? (
-            <div className="px-2 py-1 text-xs italic text-muted">No notepads yet</div>
+            <div className="px-2 py-1 text-xs italic text-muted">{t('project.noNotepadsYet')}</div>
           ) : (
             roots.map((root) => (
               <TreeRow
@@ -432,7 +435,7 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
           {draggedNode ? (
             <div className="flex items-center gap-1.5 border border-line bg-surface px-3 py-2 text-xs text-text pointer-events-none">
               <GripVertical className="h-3 w-3 text-muted" />
-              <span className="max-w-40 truncate">{draggedNode.title || 'Untitled'}</span>
+              <span className="max-w-40 truncate">{draggedNode.title || t('common.untitled')}</span>
             </div>
           ) : null}
         </DragOverlay>

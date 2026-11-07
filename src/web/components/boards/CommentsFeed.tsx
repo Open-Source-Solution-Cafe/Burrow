@@ -11,6 +11,7 @@ import {
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
+import { useTranslation } from '../../lib/i18n';
 
 interface CommentsFeedProps {
   workspaceId: string;
@@ -54,15 +55,16 @@ function CommentRow({
   canDelete: boolean;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const parts = useMemo(() => renderContent(comment.content), [comment.content]);
 
   return (
     <div className="group flex items-start gap-2.5 py-2">
-      <Avatar name={comment.name || 'Someone'} src={comment.image} size="sm" className="mt-0.5" />
+      <Avatar name={comment.name || t('common.someone')} src={comment.image} size="sm" className="mt-0.5" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold text-[var(--text)]">
-            {comment.name || 'Someone'}
+            {comment.name || t('common.someone')}
           </span>
           <span
             className="text-[10px] text-[var(--muted)]"
@@ -73,8 +75,8 @@ function CommentRow({
           {canDelete && (
             <button
               onClick={onDelete}
-              title="Delete comment"
-              aria-label="Delete comment"
+              title={t('boards.deleteComment')}
+              aria-label={t('boards.deleteComment')}
               className="p-0.5 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition ml-auto"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -98,6 +100,7 @@ function CommentRow({
 }
 
 export function CommentsFeed({ workspaceId, projectId, cardId }: CommentsFeedProps) {
+  const { t } = useTranslation();
   const { data: comments = [], isLoading } = useComments(workspaceId, projectId, cardId);
   const { data: account } = useAccount();
   const role = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role;
@@ -171,17 +174,17 @@ export function CommentsFeed({ workspaceId, projectId, cardId }: CommentsFeedPro
         }}
       >
         <MessageSquare className="w-3.5 h-3.5" />
-        <span>Discussion</span>
+        <span>{t('boards.discussion')}</span>
         {comments.length > 0 && (
           <span className="text-[var(--muted)] font-normal">({comments.length})</span>
         )}
       </h3>
 
       {isLoading ? (
-        <div className="py-3 text-xs text-[var(--muted)]">Loading comments…</div>
+        <div className="py-3 text-xs text-[var(--muted)]">{t('boards.loadingComments')}</div>
       ) : comments.length === 0 ? (
         <div className="py-3 text-xs text-[var(--muted)] italic">
-          No comments yet. Start the discussion — use @ to mention teammates.
+          {t('boards.noCommentsYet')}
         </div>
       ) : (
         <div className="divide-y divide-[var(--hair)]">
@@ -227,15 +230,15 @@ export function CommentsFeed({ workspaceId, projectId, cardId }: CommentsFeedPro
               }
             }}
             rows={Math.min(4, Math.max(2, draft.split('\n').length))}
-            placeholder="Write a comment… (@mention · ⌘↵ to send)"
+            placeholder={t('boards.writeCommentPlaceholder')}
             className="flex-1 min-w-0 resize-none bg-transparent text-xs text-[var(--text)] placeholder:text-[var(--muted)] focus:outline-none leading-relaxed text-[16px] md:text-xs"
           />
           <button
             type="button"
             onClick={send}
             disabled={!draft.trim() || createComment.isPending}
-            title="Send (⌘+Enter)"
-            aria-label="Send comment"
+            title={t('boards.sendComment')}
+            aria-label={t('boards.sendComment')}
             className="chamfer-sm p-1.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--accent)] hover:bg-[var(--hi)] disabled:opacity-40 transition shrink-0"
           >
             <Send className="w-4 h-4" />
@@ -246,9 +249,9 @@ export function CommentsFeed({ workspaceId, projectId, cardId }: CommentsFeedPro
       {commentToDelete && (
         <ConfirmDialog
           open
-          title="Delete comment?"
-          message="Are you sure you want to delete this comment? This cannot be undone."
-          confirmLabel="Delete"
+          title={t('boards.confirmDeleteCommentTitle')}
+          message={t('boards.confirmDeleteCommentMessage')}
+          confirmLabel={t('common.delete')}
           danger
           busy={deleteComment.isPending}
           onConfirm={async () => {

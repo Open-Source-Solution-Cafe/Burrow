@@ -18,6 +18,7 @@ import { Chip } from '../../ui/Chip';
 import { StatusDiamond } from '../../ui/StatusDiamond';
 import { priorityDiamondColor } from '../../ui/status';
 import { type CardItem, type ColumnItem } from './types';
+import { useTranslation } from '../../../lib/i18n';
 
 interface CalendarViewProps {
   workspaceId: string;
@@ -44,6 +45,7 @@ function CalendarChip({
   onClick?: () => void;
   overlay?: boolean;
 }) {
+  const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `cal:${card.id}`,
     disabled: overlay,
@@ -63,7 +65,7 @@ function CalendarChip({
       } ${overlay ? 'rotate-2 scale-105' : ''} ${overdue ? 'border-[var(--danger)]' : ''}`}
     >
       <StatusDiamond color={priorityDiamondColor(card.priority)} size={7} />
-      <span className="truncate">{card.title || 'Untitled'}</span>
+      <span className="truncate">{card.title || t('common.untitled')}</span>
     </Chip>
   );
 }
@@ -118,6 +120,7 @@ function DayCell({
  * Drag a chip (scheduled or from the Unscheduled tray) onto a day to reschedule.
  */
 export function CalendarView({ workspaceId, projectId, boardId, columns, onCardClick }: CalendarViewProps) {
+  const { t, formatDate } = useTranslation();
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
@@ -204,7 +207,7 @@ export function CalendarView({ workspaceId, projectId, boardId, columns, onCardC
     updateCard.mutate({ workspaceId, projectId, cardId, boardId, dueDate: next.getTime() });
   };
 
-  const monthLabel = monthCursor.toLocaleDateString(undefined, {
+  const monthLabel = formatDate(monthCursor, {
     month: 'long',
     year: 'numeric',
   });
@@ -227,7 +230,7 @@ export function CalendarView({ workspaceId, projectId, boardId, columns, onCardC
             <button
               type="button"
               onClick={() => shiftMonth(-1)}
-              aria-label="Previous month"
+              aria-label={t('boards.previousMonth')}
               className="min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]"
             >
               <ChevronLeft className="h-4 w-4" />
@@ -235,7 +238,7 @@ export function CalendarView({ workspaceId, projectId, boardId, columns, onCardC
             <button
               type="button"
               onClick={() => shiftMonth(1)}
-              aria-label="Next month"
+              aria-label={t('boards.nextMonth')}
               className="min-h-[44px] min-w-[44px] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]"
             >
               <ChevronRight className="h-4 w-4" />
@@ -250,7 +253,7 @@ export function CalendarView({ workspaceId, projectId, boardId, columns, onCardC
             setMonthCursor(new Date(now.getFullYear(), now.getMonth(), 1));
           }}
         >
-          Today
+          {t('boards.today')}
         </Button>
       </div>
 
@@ -265,7 +268,7 @@ export function CalendarView({ workspaceId, projectId, boardId, columns, onCardC
           <div className="mb-3 border border-dashed border-[var(--line)] bg-[var(--surface2)] p-2">
             <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
               <CalendarDays className="h-3 w-3" />
-              Unscheduled
+              {t('boards.unscheduled')}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {unscheduled.map((card) => (

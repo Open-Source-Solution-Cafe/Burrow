@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { Home, Kanban, LogOut, Search, Settings, Trash2, Users } from 'lucide-react';
+import { Home, Kanban, LogOut, Search, Settings, Trash2, Users, Globe } from 'lucide-react';
 import { useBoards, useProjects, useRecentNotepads, useSearch, useSignOut } from '../lib/queries';
 import {
   boardTarget,
@@ -15,6 +15,7 @@ import { ModalShell } from './ui/ModalShell';
 import { ConfirmDialog } from './ui/ConfirmDialog';
 import { toast } from 'sonner';
 import { SegmentedControl } from './ui/SegmentedControl';
+import { useTranslation } from '../lib/i18n';
 
 const ITEM_CLASSES =
   'flex flex-col gap-1 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]';
@@ -38,6 +39,7 @@ function renderHighlightedSnippet(snippet: string) {
 }
 
 export function CommandPalette() {
+  const { t, setLocale } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'project' | 'all'>('project');
@@ -102,7 +104,7 @@ export function CommandPalette() {
         <ModalShell
           open={open}
           onClose={() => setOpen(false)}
-          title="Search and commands"
+          title={t('commandPalette.title')}
           className="w-full self-start mt-[8dvh] sm:max-w-xl"
         >
           <Command
@@ -115,7 +117,7 @@ export function CommandPalette() {
               <Command.Input
                 value={query}
                 onValueChange={setQuery}
-                placeholder="Search notepads, cards, or type a command…"
+                placeholder={t('commandPalette.searchPlaceholder')}
                 className="flex-1 bg-transparent text-base sm:text-sm text-[var(--text)] placeholder:text-[var(--muted)] outline-none"
                 autoFocus
               />
@@ -124,8 +126,8 @@ export function CommandPalette() {
                 value={scope}
                 onValueChange={(v) => setScope(v as 'project' | 'all')}
                 options={[
-                  { value: 'project', label: 'Project' },
-                  { value: 'all', label: 'All' },
+                  { value: 'project', label: t('commandPalette.scopeProject') },
+                  { value: 'all', label: t('commandPalette.scopeAll') },
                 ]}
                 size="sm"
               />
@@ -136,16 +138,16 @@ export function CommandPalette() {
               {scope === 'project' && !currentProjectId && (
                 <div className="p-4 text-center text-xs text-[var(--muted)]" role="status">
                   {projectsLoading
-                    ? 'Loading project…'
+                    ? t('commandPalette.loadingProject')
                     : projectsError
-                      ? 'Unable to load projects. Please try again.'
+                      ? t('commandPalette.unableToLoadProjects')
                       : projectId !== undefined
-                        ? 'Project not found or no longer available. Select a project from the sidebar.'
-                        : 'Select a project to search within it.'}
+                        ? t('commandPalette.projectNotFound')
+                        : t('commandPalette.selectProjectToSearch')}
                 </div>
               )}
               {isSearching && (
-                <div className="p-4 text-center text-xs text-[var(--muted)]">Searching…</div>
+                <div className="p-4 text-center text-xs text-[var(--muted)]">{t('commandPalette.searching')}</div>
               )}
 
               {query.trim().length > 0 &&
@@ -153,14 +155,14 @@ export function CommandPalette() {
                 !isSearching &&
                 searchResults.length === 0 && (
                   <Command.Empty className="p-6 text-center text-xs text-[var(--muted)]">
-                    No matching results found for "{query}".
+                    {t('commandPalette.noResultsFound', { query })}
                   </Command.Empty>
                 )}
 
               {/* FTS Search Results */}
               {query.trim().length > 0 && searchResults.length > 0 && (
                 <Command.Group
-                  heading="Search Results"
+                  heading={t('commandPalette.searchResults')}
                   className="text-[11px] font-semibold text-[var(--muted)] px-2 py-1 uppercase tracking-wider"
                 >
                   {searchResults.map((item) => (
@@ -196,7 +198,7 @@ export function CommandPalette() {
                         <span className="text-sm shrink-0">
                           {item.icon || (item.kind === 'notepad' ? '📄' : '📋')}
                         </span>
-                        <span className="font-semibold truncate">{item.title || 'Untitled'}</span>
+                        <span className="font-semibold truncate">{item.title || t('common.untitled')}</span>
                         <span className="text-[10px] px-1.5 py-0.5 bg-[var(--surface)] border border-[var(--line)] text-[var(--muted)] ml-auto shrink-0">
                           {item.projectName}
                         </span>
@@ -216,7 +218,7 @@ export function CommandPalette() {
                 <>
                   {recentNotepads.length > 0 && (
                     <Command.Group
-                      heading="Recent Notepads"
+                      heading={t('commandPalette.recentNotepads')}
                       className="text-[11px] font-semibold text-[var(--muted)] px-2 py-1 uppercase tracking-wider"
                     >
                       {recentNotepads.slice(0, 4).map((np) => (
@@ -231,14 +233,14 @@ export function CommandPalette() {
                           className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                         >
                           <span className="text-sm shrink-0">{np.icon || '📄'}</span>
-                          <span className="font-medium truncate">{np.title || 'Untitled'}</span>
+                          <span className="font-medium truncate">{np.title || t('common.untitled')}</span>
                         </Command.Item>
                       ))}
                     </Command.Group>
                   )}
 
                   <Command.Group
-                    heading="Navigation"
+                    heading={t('commandPalette.navigation')}
                     className="text-[11px] font-semibold text-[var(--muted)] px-2 py-1 uppercase tracking-wider mt-2"
                   >
                     {currentProjectId && (
@@ -251,7 +253,7 @@ export function CommandPalette() {
                         className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
                         <Home className="w-4 h-4 text-purple-500 shrink-0" />
-                        <span>Project Overview</span>
+                        <span>{t('commandPalette.projectOverview')}</span>
                       </Command.Item>
                     )}
 
@@ -267,7 +269,7 @@ export function CommandPalette() {
                         className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
                         <Kanban className="w-4 h-4 text-emerald-500 shrink-0" />
-                        <span>Board: {b.name}</span>
+                        <span>{t('commandPalette.boardPrefix', { name: b.name })}</span>
                       </Command.Item>
                     ))}
 
@@ -281,7 +283,7 @@ export function CommandPalette() {
                         className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                       >
                         <Trash2 className="w-4 h-4 text-rose-500 shrink-0" />
-                        <span>Trash</span>
+                        <span>{t('commandPalette.trash')}</span>
                       </Command.Item>
                     )}
 
@@ -294,7 +296,7 @@ export function CommandPalette() {
                       className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
                       <Users className="w-4 h-4 text-blue-500 shrink-0" />
-                      <span>Members & Invites</span>
+                      <span>{t('commandPalette.membersAndInvites')}</span>
                     </Command.Item>
 
                     <Command.Item
@@ -306,7 +308,7 @@ export function CommandPalette() {
                       className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
                       <Settings className="w-4 h-4 text-[var(--muted)] shrink-0" />
-                      <span>Settings</span>
+                      <span>{t('commandPalette.settings')}</span>
                     </Command.Item>
 
                     <Command.Item
@@ -318,7 +320,49 @@ export function CommandPalette() {
                       className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-red-500 cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
                       <LogOut className="w-4 h-4 text-red-500 shrink-0" />
-                      <span>Log out</span>
+                      <span>{t('commandPalette.logOut')}</span>
+                    </Command.Item>
+                  </Command.Group>
+
+                  <Command.Group
+                    heading={t('common.language')}
+                    className="text-[11px] font-semibold text-[var(--muted)] px-2 py-1 uppercase tracking-wider mt-2"
+                  >
+                    <Command.Item
+                      onSelect={() =>
+                        handleSelect(() => {
+                          setLocale('en');
+                          toast.success('Language: English');
+                        })
+                      }
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
+                    >
+                      <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
+                      <span>English (EN)</span>
+                    </Command.Item>
+                    <Command.Item
+                      onSelect={() =>
+                        handleSelect(() => {
+                          setLocale('es');
+                          toast.success('Idioma: Español');
+                        })
+                      }
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
+                    >
+                      <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
+                      <span>Español (ES)</span>
+                    </Command.Item>
+                    <Command.Item
+                      onSelect={() =>
+                        handleSelect(() => {
+                          setLocale('fr');
+                          toast.success('Langue : Français');
+                        })
+                      }
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
+                    >
+                      <Globe className="w-4 h-4 text-cyan-500 shrink-0" />
+                      <span>Français (FR)</span>
                     </Command.Item>
                   </Command.Group>
                 </>
@@ -328,24 +372,24 @@ export function CommandPalette() {
             {/* Footer */}
             <div className="px-4 py-2 border-t border-[var(--hair)] flex items-center justify-between text-[11px] text-[var(--muted)]">
               <div>
-                Use{' '}
+                {t('commandPalette.footerUse')}{' '}
                 <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--line)]">
                   ↑
                 </kbd>{' '}
                 <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--line)]">
                   ↓
                 </kbd>{' '}
-                to navigate,{' '}
+                {t('commandPalette.footerNavigate')},{' '}
                 <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--line)]">
                   ↵
                 </kbd>{' '}
-                to select
+                {t('commandPalette.footerSelect')}
               </div>
               <div className="flex items-center gap-1">
                 <kbd className="px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--line)] font-mono">
                   ESC
                 </kbd>{' '}
-                to close
+                {t('commandPalette.footerClose')}
               </div>
             </div>
           </Command>
@@ -354,9 +398,9 @@ export function CommandPalette() {
 
       <ConfirmDialog
         open={confirmSignOut}
-        title="Log out"
-        message="Are you sure you want to log out of your account?"
-        confirmLabel="Log out"
+        title={t('sidebar.confirmSignOutTitle')}
+        message={t('sidebar.confirmSignOutMessage')}
+        confirmLabel={t('common.signOut')}
         danger={false}
         busy={signOutMutation.isPending}
         onConfirm={async () => {

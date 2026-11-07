@@ -5,8 +5,10 @@ import { Toaster } from 'sonner';
 import { Sidebar } from './Sidebar';
 import { CommandPalette } from '../CommandPalette';
 import { ShortcutHelp } from './ShortcutHelp';
+import { useTranslation } from '../../lib/i18n';
 
 export function AppShell() {
+  const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -55,7 +57,7 @@ export function AppShell() {
             <button
               onClick={() => setMobileOpen(true)}
               className="flex h-11 w-11 shrink-0 items-center justify-center text-muted hover:text-text hover:bg-hi transition cursor-pointer"
-              aria-label="Open sidebar"
+              aria-label={t('sidebar.openSidebar')}
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -65,7 +67,7 @@ export function AppShell() {
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent('burrow:open-palette'))}
             className="flex h-11 w-11 items-center justify-center text-muted hover:text-text hover:bg-hi transition cursor-pointer"
-            aria-label="Search"
+            aria-label={t('common.search')}
           >
             <span className="text-xs">⌘K</span>
           </button>

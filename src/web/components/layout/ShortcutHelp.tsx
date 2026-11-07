@@ -1,40 +1,42 @@
 import { ModalShell } from '../ui/ModalShell';
+import { useTranslation } from '../../lib/i18n';
 
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
   const groups: Array<{ title: string; items: Array<[string, string]> }> = [
     {
-      title: 'Global',
+      title: t('shortcuts.global'),
       items: [
-        ['Ctrl / \u2318 K', 'Command palette'],
-        ['?', 'Show this shortcuts help'],
+        ['Ctrl / \u2318 K', t('shortcuts.commandPalette')],
+        ['?', t('shortcuts.showHelp')],
       ],
     },
     {
-      title: 'Board',
+      title: t('shortcuts.board'),
       items: [
-        ['J / \u2193', 'Focus next card in column'],
-        ['K / \u2191', 'Focus previous card in column'],
-        ['L / \u2192', 'Focus first card in next column'],
-        ['H / \u2190', 'Focus first card in previous column'],
-        ['Enter', 'Open the focused card'],
-        ['Space', 'Quick-peek the focused card'],
-        ['C', 'Quick-add a card to the focused column'],
-        ['P', 'Set priority of the focused card'],
-        ['M', 'Set assignee of the focused card'],
+        ['J / \u2193', t('shortcuts.focusNextCard')],
+        ['K / \u2191', t('shortcuts.focusPrevCard')],
+        ['L / \u2192', t('shortcuts.focusNextCol')],
+        ['H / \u2190', t('shortcuts.focusPrevCol')],
+        ['Enter', t('shortcuts.openCard')],
+        ['Space', t('shortcuts.quickPeek')],
+        ['C', t('shortcuts.quickAddCard')],
+        ['P', t('shortcuts.setPriority')],
+        ['M', t('shortcuts.setAssignee')],
       ],
     },
     {
-      title: 'Editor',
+      title: t('shortcuts.editor'),
       items: [
-        ['/', 'Slash commands (template, mention…)'],
-        ['@', 'Mention'],
-        ['#', 'Heading (Markdown)'],
+        ['/', t('shortcuts.slashCommands')],
+        ['@', t('shortcuts.mention')],
+        ['#', t('shortcuts.heading')],
       ],
     },
   ];
 
   return (
-    <ModalShell open onClose={onClose} title="Keyboard shortcuts" className="sm:max-w-lg">
+    <ModalShell open onClose={onClose} title={t('shortcuts.title')} className="sm:max-w-lg">
       <div className="space-y-4">
         {groups.map((g) => (
           <div key={g.title}>

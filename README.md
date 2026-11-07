@@ -215,7 +215,7 @@ To run Burrow directly on a host or VM connected to an existing PostgreSQL datab
 
 ## Deployment & Cloudflare Setup
 
-Burrow deploys entirely on Cloudflare Workers, Cloudflare D1 (SQLite), and Cloudflare R2 using the Wrangler CLI. All scripts auto-discover remote resources and output generated credentials directly to the console—no `.env` or `.dev.vars` files are written or required.
+Burrow deploys entirely on Cloudflare Workers, Cloudflare D1 (SQLite), and Cloudflare R2 using the Wrangler CLI. All scripts auto-discover remote resources and output generated credentials directly to the console—no `.env` files are written or required.
 
 > [!NOTE]
 > **Use `pnpm run` for scripts**: `setup` and `deploy` are reserved built-in commands in the `pnpm` CLI (`pnpm setup` installs PATH binaries and `pnpm deploy` deploys monorepo workspaces). To run the project's scripts, always invoke them as **`pnpm run setup`** and **`pnpm run deploy`**.
@@ -249,7 +249,7 @@ Flags available:
 - `--domain <domain>`: Deploy to a custom domain already configured on Cloudflare DNS.
 - `--name <worker-name>`: Deploy under a custom Worker name.
 
-Upon completion, `pnpm run setup` outputs all URLs, resource IDs, and generated secrets directly to the console (nothing is written to `.env` or `.dev.vars`):
+Upon completion, `pnpm run setup` outputs all URLs, resource IDs, and generated secrets directly to the console (nothing is written to `.env`):
 
 ```text
 ======================================================

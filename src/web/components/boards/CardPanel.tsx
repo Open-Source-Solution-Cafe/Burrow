@@ -20,6 +20,7 @@ import { Select } from '../ui/Select';
 import { Avatar } from '../ui/Avatar';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { StatusDiamond } from '../ui/StatusDiamond';
+import { useTranslation } from '../../lib/i18n';
 
 interface CardPanelProps {
   workspaceId: string;
@@ -39,6 +40,7 @@ const PRIORITIES = [
 ] as const;
 
 export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, onClose }: CardPanelProps) {
+  const { t } = useTranslation();
   const { data: card, isLoading } = useCard(workspaceId, projectId, cardId);
   const { data: members = [] } = useMembers(workspaceId);
   const { data: projectTags = [] } = useProjectTags(workspaceId, projectId);
@@ -68,7 +70,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           role="presentation"
         />
         <div className="fixed inset-x-0 bottom-0 top-[6dvh] sm:inset-y-0 sm:left-auto sm:right-0 sm:top-0 sm:w-[540px] md:w-[680px] h-[94dvh] sm:h-full bg-[var(--surface)] border-t-2 border-[var(--line)] sm:border-t-0 sm:border-l sm:border-l-[var(--line)] z-50 p-6 flex flex-col items-center justify-center pb-[env(safe-area-inset-bottom)]">
-          <div className="text-sm text-[var(--muted)]">Loading card…</div>
+          <div className="text-sm text-[var(--muted)]">{t('boards.loadingCard')}</div>
         </div>
       </>
     );
@@ -203,10 +205,10 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
       {
         onSuccess: () => {
           onClose();
-          toast('Card moved to trash', {
+          toast(t('boards.cardMovedToTrash'), {
             duration: 6000,
             action: {
-              label: 'Undo',
+              label: t('boards.undo'),
               onClick: () => restoreCardMutation.mutate({ workspaceId, projectId, cardId }),
             },
           });
@@ -254,7 +256,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
             <Button
               variant="ghost"
               onClick={handleDelete}
-              title="Delete card"
+              title={t('boards.deleteCard')}
               className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--danger)]"
             >
               <Trash2 className="w-4 h-4" />
@@ -262,7 +264,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
             <Button
               variant="ghost"
               onClick={onClose}
-              title="Close"
+              title={t('common.close')}
               className="p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 text-[var(--muted)] hover:text-[var(--text)]"
             >
               <X className="w-4 h-4" />
@@ -279,7 +281,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleTitleBlur}
-              placeholder="Card Title"
+              placeholder={t('boards.titlePlaceholder')}
               className="w-full text-xl sm:text-2xl font-bold bg-transparent border-none focus:outline-none placeholder:text-[var(--muted)] text-[var(--text)] px-0 min-h-[36px] sm:min-h-0"
             />
           </div>
@@ -290,7 +292,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 shrink-0">
               <Flag className="w-3.5 h-3.5" />
-              <span className="font-medium">Priority</span>
+              <span className="font-medium">{t('boards.priority')}</span>
             </div>
             <div className="w-full sm:w-auto">
               <SegmentedControl
@@ -307,7 +309,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                   label: (
                     <span className="inline-flex items-center gap-1 sm:gap-1.5">
                       <StatusDiamond color={p.colorVar} size={7} />
-                      <span>{p.label}</span>
+                      <span>{t(`common.priorities.${p.value}`)}</span>
                     </span>
                   ),
                 }))}
@@ -319,7 +321,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 shrink-0">
               <Calendar className="w-3.5 h-3.5" />
-              <span className="font-medium">Due Date</span>
+              <span className="font-medium">{t('boards.dueDate')}</span>
             </div>
             <Input
               type="date"
@@ -333,11 +335,11 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 pt-0 sm:pt-1 shrink-0">
               <Users className="w-3.5 h-3.5" />
-              <span className="font-medium">Assignees</span>
+              <span className="font-medium">{t('boards.assignee')}</span>
             </div>
             <div className="flex items-center gap-1.5 flex-wrap sm:justify-end flex-1">
               {members.length === 0 && (
-                <span className="text-xs text-[var(--muted)] italic">No workspace members</span>
+                <span className="text-xs text-[var(--muted)] italic">{t('boards.noWorkspaceMembers')}</span>
               )}
               {members.map((m) => {
                 const isAssigned = assignees.some((a: any) => a.userId === m.userId);
@@ -364,11 +366,11 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex items-center gap-2 text-[var(--muted)] sm:w-24 pt-0 sm:pt-1 shrink-0">
               <Tag className="w-3.5 h-3.5" />
-              <span className="font-medium">Tags</span>
+              <span className="font-medium">{t('boards.tags')}</span>
             </div>
             <div className="flex items-center gap-1.5 flex-wrap sm:justify-end flex-1">
               {projectTags.length === 0 && !isCreatingTag && (
-                <span className="text-xs text-[var(--muted)] italic">No tags in project</span>
+                <span className="text-xs text-[var(--muted)] italic">{t('boards.noTagsInProject')}</span>
               )}
               {projectTags.map((pt) => {
                 const isSelected = tags.some((t: any) => t.id === pt.id);
@@ -382,7 +384,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                         ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-ink)] font-medium'
                         : 'border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)]'
                     }`}
-                    title={isSelected ? `Remove #${pt.name}` : `Add #${pt.name}`}
+                    title={isSelected ? `${t('common.remove')} #${pt.name}` : `${t('common.add')} #${pt.name}`}
                   >
                     <StatusDiamond color={pt.color || 'var(--c4)'} size={6} />
                     <span>#{pt.name}</span>
@@ -409,7 +411,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                         setNewTagName('');
                       }
                     }}
-                    placeholder="tag name"
+                    placeholder={t('boards.tags').toLowerCase()}
                     className="bg-transparent border-none text-xs text-[var(--text)] focus:outline-none w-24"
                   />
                   <button
@@ -417,7 +419,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                     disabled={isSubmittingTag}
                     onClick={handleCreateTag}
                     className="text-[var(--accent)] hover:opacity-80 p-0.5 min-w-[24px] min-h-[24px] sm:min-w-0 sm:min-h-0 flex items-center justify-center cursor-pointer"
-                    title="Save tag"
+                    title={t('common.save')}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -428,7 +430,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                       setNewTagName('');
                     }}
                     className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 min-w-[24px] min-h-[24px] sm:min-w-0 sm:min-h-0 flex items-center justify-center cursor-pointer"
-                    title="Cancel"
+                    title={t('common.cancel')}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -438,10 +440,10 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                   type="button"
                   onClick={() => setIsCreatingTag(true)}
                   className="px-2 py-0.5 h-7 min-h-0 border border-dashed border-[var(--line)] bg-[var(--surface)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] text-xs flex items-center gap-1 transition cursor-pointer select-none"
-                  title="Create new tag"
+                  title={t('boards.newTag')}
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>New tag</span>
+                  <span>{t('boards.newTag')}</span>
                 </button>
               )}
             </div>
@@ -455,7 +457,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
         {card.notepadId && (
           <div className="border-t border-[var(--hair)] pt-4">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)] mb-2">
-              Card Notes & Body
+              {t('boards.cardNotesAndBody')}
             </h3>
             <NotepadEditor
               workspaceId={workspaceId}

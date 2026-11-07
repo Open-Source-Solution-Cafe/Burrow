@@ -3,6 +3,7 @@ import type { BlockNoteEditor } from '@blocknote/core';
 import { ListTree, X } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { StatusDiamond } from '../components/ui/StatusDiamond';
+import { useTranslation } from '../lib/i18n';
 
 interface HeadingEntry {
   id: string;
@@ -59,6 +60,7 @@ export function DocumentOutline({
   containerRef,
   variant = 'floating',
 }: DocumentOutlineProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [headings, setHeadings] = useState<HeadingEntry[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -139,9 +141,9 @@ export function DocumentOutline({
     const effectiveActiveId = activeId ?? ordered[0]?.id ?? null;
     return (
       <div className="no-print w-32 shrink-0 pt-2 text-xs select-none">
-        <div className="font-eyebrow mb-2">On this page</div>
+        <div className="font-eyebrow mb-2">{t('editor.onThisPage')}</div>
         {ordered.length === 0 ? (
-          <div className="text-[11px] text-[var(--ink-muted)]/70 py-1">No headings yet</div>
+          <div className="text-[11px] text-[var(--ink-muted)]/70 py-1">{t('editor.noHeadings')}</div>
         ) : (
           <nav className="flex flex-col">
             {ordered.map((heading) => {
@@ -176,7 +178,7 @@ export function DocumentOutline({
       <Button
         variant="ghost"
         onClick={() => setOpen((v) => !v)}
-        title={open ? 'Hide outline' : 'Show outline (table of contents)'}
+        title={open ? t('editor.hideOutline') : t('editor.showOutline')}
         className={`p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 border flex items-center justify-center transition cursor-pointer ${
           open
             ? 'text-[var(--accent-ink)] bg-[var(--accent)] border-[var(--accent)]'
@@ -196,12 +198,12 @@ export function DocumentOutline({
           <div className="fixed inset-x-3 bottom-4 max-h-[60vh] sm:static sm:inset-x-auto sm:bottom-auto sm:max-h-none sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:w-64 sm:max-h-[70vh] overflow-y-auto bg-[var(--surface)] border border-[var(--line)] z-40 p-3 sm:p-2 chamfer-md">
             <div className="flex items-center justify-between px-2 py-1.5 mb-1">
               <span className="text-[11px] sm:text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
-                On this page
+                {t('editor.onThisPage')}
               </span>
               <button
                 onClick={() => setOpen(false)}
                 className="p-1 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--text)] cursor-pointer"
-                aria-label="Close outline"
+                aria-label={t('editor.closeOutline')}
               >
                 <X className="w-4 h-4 sm:w-3 sm:h-3" />
               </button>
@@ -209,7 +211,7 @@ export function DocumentOutline({
 
             {ordered.length === 0 ? (
               <div className="px-2 py-3 text-xs text-[var(--muted)] italic">
-                No headings yet. Add H1–H3 blocks to build an outline.
+                {t('editor.noHeadingsYet')}
               </div>
             ) : (
               <nav className="space-y-0.5">

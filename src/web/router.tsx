@@ -21,6 +21,7 @@ import { MembersSettings } from './pages/MembersSettings';
 import { MyTasksView } from './pages/MyTasksView';
 import { SettingsView } from './pages/SettingsView';
 import { StatusDiamond } from './components/ui/StatusDiamond';
+import { useTranslation, t } from './lib/i18n';
 import {
   accountProjectsQueryOptions,
   useAccount,
@@ -41,9 +42,9 @@ const rootRoute = createRootRoute({
   errorComponent: ({ error, reset }) => (
     <div className="flex h-screen flex-col items-center justify-center p-8 text-center bg-[var(--bg)] text-[var(--text)]">
       <div className="text-4xl mb-4">⚠️</div>
-      <h2 className="text-lg font-bold mb-2">Something went wrong</h2>
+      <h2 className="text-lg font-bold mb-2">{t('router.somethingWentWrong')}</h2>
       <p className="text-xs text-[var(--muted)] max-w-md mb-6">
-        {error instanceof Error ? error.message : 'An unexpected error occurred.'}
+        {error instanceof Error ? error.message : t('router.unexpectedError')}
       </p>
       <button
         onClick={() => {
@@ -52,7 +53,7 @@ const rootRoute = createRootRoute({
         }}
         className="px-4 py-2 bg-[var(--accent)] text-[var(--accent-ink)] text-xs font-semibold hover:opacity-90 transition cursor-pointer"
       >
-        Reload Page
+        {t('router.reloadPage')}
       </button>
     </div>
   ),
@@ -60,6 +61,7 @@ const rootRoute = createRootRoute({
 
 function AccountHome() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: account, isLoading, isError, refetch } = useAccount();
   const createWorkspace = useCreateWorkspace();
   const [workspaceName, setWorkspaceName] = useState('');
@@ -75,19 +77,19 @@ function AccountHome() {
   }, [account, isLoading, isError, navigate]);
 
   if (isLoading || (account?.workspaces.length === 1 && !isError)) {
-    return <Status>Loading workspaces…</Status>;
+    return <Status>{t('router.loadingWorkspaces')}</Status>;
   }
   if (isError) {
     return (
       <Status>
-        Could not load your workspaces.{' '}
-        <button className="underline" onClick={() => void refetch()}>
-          Try again
+        {t('router.couldNotLoadWorkspaces')}{' '}
+        <button className="underline cursor-pointer" onClick={() => void refetch()}>
+          {t('router.tryAgain')}
         </button>
       </Status>
     );
   }
-  if (!account) return <Status>Redirecting to sign in…</Status>;
+  if (!account) return <Status>{t('router.redirectingToSignIn')}</Status>;
   if (account.workspaces.length === 0) {
     const create = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -99,7 +101,7 @@ function AccountHome() {
         });
         void navigate(workspaceTarget(result.workspace.id));
       } catch (err) {
-        setCreateError(err instanceof Error ? err.message : 'Failed to create workspace');
+        setCreateError(err instanceof Error ? err.message : t('common.error'));
       }
     };
     return (
@@ -107,12 +109,12 @@ function AccountHome() {
         onSubmit={create}
         className="mx-auto flex min-h-[100dvh] w-full max-w-lg flex-col justify-center gap-4 px-4 py-6 sm:p-8"
       >
-        <h1 className="text-2xl font-bold text-[var(--text)]">Create a workspace</h1>
+        <h1 className="text-2xl font-bold text-[var(--text)]">{t('router.createWorkspace')}</h1>
         <p className="text-sm text-muted">
-          Your account has no workspace yet. Create one to get started.
+          {t('router.createWorkspaceDesc')}
         </p>
         <label className="grid gap-1 text-xs font-medium text-text" htmlFor="first-workspace-name">
-          Workspace name
+          {t('router.workspaceName')}
           <input
             id="first-workspace-name"
             className="min-h-11 border border-line bg-surface px-3 text-base sm:text-sm"
@@ -132,7 +134,7 @@ function AccountHome() {
           disabled={!workspaceName.trim() || createWorkspace.isPending}
           className="min-h-11 bg-accent px-4 text-sm font-semibold text-accent-ink disabled:opacity-50 cursor-pointer"
         >
-          {createWorkspace.isPending ? 'Creating…' : 'Create workspace'}
+          {createWorkspace.isPending ? t('router.creatingWorkspace') : t('router.createWorkspaceButton')}
         </button>
       </form>
     );
@@ -140,7 +142,7 @@ function AccountHome() {
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col gap-4 overflow-y-auto px-4 py-6 sm:p-8">
-      <h1 className="text-2xl font-bold text-[var(--text)]">Choose a workspace</h1>
+      <h1 className="text-2xl font-bold text-[var(--text)]">{t('router.chooseWorkspace')}</h1>
       <div className="grid gap-2">
         {account.workspaces.map((workspace) => (
           <Link
@@ -149,7 +151,9 @@ function AccountHome() {
             className="flex min-h-12 items-center justify-between border border-line bg-surface px-4 py-3 text-sm text-text hover:bg-hi"
           >
             <span>{workspace.name}</span>
-            <span className="text-xs text-muted capitalize">{workspace.role}</span>
+            <span className="text-xs text-muted capitalize">
+              {t(`common.roles.${workspace.role}` as any) || workspace.role}
+            </span>
           </Link>
         ))}
       </div>
@@ -170,6 +174,7 @@ function Status({ children }: { children: ReactNode }) {
 
 function WorkspaceGate() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: account, isLoading, isError } = useAccount();
   const workspace = account?.workspaces.find((item) => item.id === workspaceId);
@@ -180,14 +185,15 @@ function WorkspaceGate() {
     else if (!workspace) void navigate({ to: '/' });
   }, [account, isLoading, isError, workspace, navigate]);
 
-  if (isLoading || (account && !workspace)) return <Status>Loading workspace…</Status>;
-  if (isError) return <Status>Could not load this workspace.</Status>;
-  if (!workspace) return <Status>Workspace unavailable.</Status>;
+  if (isLoading || (account && !workspace)) return <Status>{t('router.loadingWorkspace')}</Status>;
+  if (isError) return <Status>{t('router.couldNotLoadWorkspace')}</Status>;
+  if (!workspace) return <Status>{t('router.workspaceUnavailable')}</Status>;
   return <Outlet />;
 }
 
 function WorkspaceIndex() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: projects = [], isLoading, isError } = useProjects(workspaceId);
 
@@ -199,27 +205,28 @@ function WorkspaceIndex() {
     }
   }, [projects, workspaceId, isLoading, isError, navigate]);
 
-  if (isLoading) return <Status>Loading projects…</Status>;
-  if (isError) return <Status>Could not load projects for this workspace.</Status>;
-  if (projects.length > 0) return <Status>Opening project…</Status>;
-  return <Status>No active projects in this workspace. Create a project from the sidebar.</Status>;
+  if (isLoading) return <Status>{t('router.loadingProjects')}</Status>;
+  if (isError) return <Status>{t('router.couldNotLoadProjects')}</Status>;
+  if (projects.length > 0) return <Status>{t('router.openingProject')}</Status>;
+  return <Status>{t('router.noActiveProjects')}</Status>;
 }
 
 function ProjectGate() {
+  const { t } = useTranslation();
   const { workspaceId, projectId } = useParams({ strict: false }) as {
     workspaceId?: string;
     projectId?: string;
   };
   const { data: projects = [], isLoading, isError } = useProjects(workspaceId);
-  if (isLoading) return <Status>Loading project…</Status>;
-  if (isError) return <Status>Could not verify this project in the selected workspace.</Status>;
+  if (isLoading) return <Status>{t('router.loadingProject')}</Status>;
+  if (isError) return <Status>{t('router.couldNotVerifyProjectLink')}</Status>;
   if (!projectId || !projects.some((project) => project.id === projectId)) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-[var(--muted)]">
-        <p>This project is unavailable in the selected workspace.</p>
+        <p>{t('router.projectUnavailableInWorkspace')}</p>
         {workspaceId && (
           <Link {...workspaceTarget(workspaceId)} className="underline text-[var(--text)]">
-            Choose another project
+            {t('router.chooseAnotherProject')}
           </Link>
         )}
       </div>
@@ -232,6 +239,7 @@ type LegacyTarget = 'home' | 'notepad' | 'board' | 'trash';
 
 function LegacyProjectRedirect({ target }: { target: LegacyTarget }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { projectId, notepadId, boardId } = useParams({ strict: false }) as {
     projectId?: string;
     notepadId?: string;
@@ -283,24 +291,25 @@ function LegacyProjectRedirect({ target }: { target: LegacyTarget }) {
     navigate,
   ]);
 
-  if (accountLoading || pending) return <Status>Resolving this project link…</Status>;
-  if (accountError) return <Status>Could not verify this project link.</Status>;
-  if (!account) return <Status>Redirecting to sign in…</Status>;
-  if (failed) return <Status>Could not verify this project link.</Status>;
+  if (accountLoading || pending) return <Status>{t('router.resolvingProjectLink')}</Status>;
+  if (accountError) return <Status>{t('router.couldNotVerifyProjectLink')}</Status>;
+  if (!account) return <Status>{t('router.redirectingToSignIn')}</Status>;
+  if (failed) return <Status>{t('router.couldNotVerifyProjectLink')}</Status>;
   if (!resolvedWorkspace) {
-    return <Status>This project link is unavailable or matches more than one workspace.</Status>;
+    return <Status>{t('router.projectLinkUnavailable')}</Status>;
   }
-  return <Status>Opening project…</Status>;
+  return <Status>{t('router.openingProject')}</Status>;
 }
 
 function NotepadView() {
+  const { t } = useTranslation();
   const { workspaceId, notepadId, projectId } = useParams({ strict: false }) as {
     workspaceId?: string;
     notepadId?: string;
     projectId?: string;
   };
   if (!workspaceId || !notepadId || !projectId)
-    return <div className="p-8 text-sm text-[var(--muted)]">Select a notepad</div>;
+    return <div className="p-8 text-sm text-[var(--muted)]">{t('router.selectNotepad')}</div>;
   return (
     <div className="flex-1 overflow-y-auto w-full">
       <NotepadEditor workspaceId={workspaceId} notepadId={notepadId} projectId={projectId} />
@@ -309,13 +318,14 @@ function NotepadView() {
 }
 
 function BoardWrapper() {
+  const { t } = useTranslation();
   const { workspaceId, projectId, boardId } = useParams({ strict: false }) as {
     workspaceId?: string;
     projectId?: string;
     boardId?: string;
   };
   if (!workspaceId || !projectId || !boardId) {
-    return <div className="p-8 text-sm text-[var(--muted)]">Board not found</div>;
+    return <div className="p-8 text-sm text-[var(--muted)]">{t('router.boardNotFound')}</div>;
   }
   return <BoardView workspaceId={workspaceId} boardId={boardId} projectId={projectId} />;
 }
@@ -333,6 +343,7 @@ const inviteRoute = createRoute({
 
 function AuthenticatedShell() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: account, isLoading, isError } = useAccount();
 
   useEffect(() => {
@@ -347,7 +358,7 @@ function AuthenticatedShell() {
       <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
         <div className="flex flex-col items-center gap-2">
           <StatusDiamond color="var(--accent)" size={11} className="animate-pulse" />
-          <span className="text-xs">Loading Burrow…</span>
+          <span className="text-xs">{t('router.loadingBurrow')}</span>
         </div>
       </div>
     );
@@ -356,7 +367,7 @@ function AuthenticatedShell() {
   if (!account || isError) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg)] text-[var(--muted)]">
-        <span className="text-xs">Redirecting to sign in…</span>
+        <span className="text-xs">{t('router.redirectingToSignIn')}</span>
       </div>
     );
   }
@@ -480,6 +491,7 @@ const legacyMembersRoute = createRoute({
 type LegacyWorkspaceTarget = 'tasks' | 'settings' | 'members';
 function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { data: account, isLoading, isError } = useAccount();
   const workspaceId = account?.workspaces.length === 1 ? account.workspaces[0]!.id : null;
   useEffect(() => {
@@ -494,11 +506,11 @@ function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) 
       void navigate({ to: '/w/$workspaceId/settings/members', params: { workspaceId } });
     else void navigate({ to: '/w/$workspaceId/settings', params: { workspaceId } });
   }, [account, isLoading, isError, workspaceId, target, navigate]);
-  if (isLoading) return <Status>Resolving workspace link…</Status>;
-  if (isError) return <Status>Could not verify this workspace link.</Status>;
-  if (!account) return <Status>Redirecting to sign in…</Status>;
-  if (!workspaceId) return <Status>This link needs a unique workspace selection.</Status>;
-  return <Status>Opening workspace…</Status>;
+  if (isLoading) return <Status>{t('router.resolvingWorkspaceLink')}</Status>;
+  if (isError) return <Status>{t('router.couldNotVerifyWorkspaceLink')}</Status>;
+  if (!account) return <Status>{t('router.redirectingToSignIn')}</Status>;
+  if (!workspaceId) return <Status>{t('router.uniqueWorkspaceRequired')}</Status>;
+  return <Status>{t('router.openingWorkspace')}</Status>;
 }
 
 const routeTree = rootRoute.addChildren([

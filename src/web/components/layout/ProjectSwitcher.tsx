@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAccount, useProjects, useCreateProject } from '../../lib/queries';
 import { projectTarget } from '../../lib/workspaceRoutes';
 import { useTheme } from '../../lib/theme';
+import { useTranslation } from '../../lib/i18n';
 import { ModalShell } from '../ui/ModalShell';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
@@ -14,6 +15,7 @@ interface ProjectSwitcherProps {
 }
 
 export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { isModern } = useTheme();
@@ -31,12 +33,12 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
   const currentProject = projects.find((p) => p.id === currentProjectId);
   const unavailable = currentProjectId !== undefined && !currentProject;
   const label = isLoading
-    ? 'Loading project…'
+    ? t('sidebar.loadingProject')
     : isError
-      ? 'Projects unavailable'
+      ? t('sidebar.projectsUnavailable')
       : unavailable
-        ? 'Project unavailable'
-        : currentProject?.name || 'Select project';
+        ? t('sidebar.projectUnavailable')
+        : currentProject?.name || t('sidebar.selectProject');
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -89,7 +91,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       setShowCreateModal(false);
       handleSelect(res.id);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to create project');
+      toast.error(err?.message || t('sidebar.failedToCreateProject'));
     }
   };
 
@@ -98,7 +100,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       {isModern ? (
         <button
           type="button"
-          aria-label={`Switch project: ${label}`}
+          aria-label={t('sidebar.switchProjectAria', { label })}
           aria-expanded={isOpen}
           onClick={() => setIsOpen(!isOpen)}
           className="flex w-full items-center gap-2 py-1 text-[13px] font-semibold text-side-text hover:text-text transition cursor-pointer min-w-0"
@@ -112,7 +114,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       ) : (
         <button
           type="button"
-          aria-label={`Switch project: ${label}`}
+          aria-label={t('sidebar.switchProjectAria', { label })}
           aria-expanded={isOpen}
           onClick={() => setIsOpen(!isOpen)}
           className="flex w-full items-center gap-1.5 py-1 text-[14px] font-display text-side-text hover:text-text transition cursor-pointer min-w-0"
@@ -125,7 +127,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
       {isOpen && (
         <div className="absolute top-full left-0 mt-1 w-64 bg-surface border border-line py-1.5 z-50">
           <div className="px-3 py-1.5 text-xs font-semibold text-muted uppercase tracking-wider">
-            Projects
+            {t('sidebar.projects')}
           </div>
           <div className="max-h-60 overflow-y-auto">
             {(hasMembership ? projects : []).map((p) => (
@@ -153,7 +155,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted hover:text-text hover:bg-hi text-left transition min-h-[44px] md:min-h-0"
             >
               <Plus className="w-4 h-4" />
-              <span>New project</span>
+              <span>{t('sidebar.newProject')}</span>
             </button>
           </div>
         </div>
@@ -169,26 +171,26 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
           !unavailable
         }
         onClose={() => setShowCreateModal(false)}
-        title="Create Project"
+        title={t('sidebar.createProjectTitle')}
         className="sm:max-w-sm"
       >
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-muted mb-1">Icon & Name</label>
+            <label className="block text-xs font-medium text-muted mb-1">{t('sidebar.iconAndName')}</label>
             <div className="flex gap-2">
               <Input
                 value={newProjectIcon}
                 onChange={(e) => setNewProjectIcon(e.target.value)}
                 maxLength={2}
-                aria-label="Project icon"
+                aria-label={t('sidebar.projectIcon')}
                 className="w-12 shrink-0 text-center text-lg"
               />
               <Input
                 value={newProjectName}
                 onChange={(e) => setNewProjectName(e.target.value)}
-                placeholder="Project name"
+                placeholder={t('sidebar.projectNamePlaceholder')}
                 autoFocus
-                aria-label="Project name"
+                aria-label={t('sidebar.projectName')}
                 className="min-w-0 flex-1"
               />
             </div>
@@ -196,14 +198,14 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
 
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               variant="primary"
               disabled={!newProjectName.trim() || createProject.isPending}
             >
-              {createProject.isPending ? 'Creating…' : 'Create'}
+              {createProject.isPending ? t('sidebar.creatingProject') : t('common.create')}
             </Button>
           </div>
         </form>

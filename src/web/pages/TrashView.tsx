@@ -12,12 +12,14 @@ import {
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
+import { useTranslation } from '../lib/i18n';
 
 export function TrashView() {
   const { workspaceId, projectId } = useParams({ strict: false }) as {
     workspaceId?: string;
     projectId?: string;
   };
+  const { t, formatDate } = useTranslation();
   const { data: projects = [], isLoading: projectsLoading, isError: projectsError } =
     useProjects(workspaceId);
   const project = projectId === undefined ? projects[0] : projects.find((p) => p.id === projectId);
@@ -67,12 +69,12 @@ export function TrashView() {
     return (
       <div className="flex-1 p-8 text-sm text-[var(--muted)]" role="status">
         {projectsLoading
-          ? 'Loading project…'
+          ? t('project.loadingProject')
           : projectsError
-            ? 'Unable to load projects. Please try again.'
+            ? t('project.unableToLoad')
             : !project
-              ? 'Project not found or no longer available. Select a project from the sidebar.'
-              : 'Unable to load trash. Please try again.'}
+              ? t('project.projectNotFound')
+              : t('common.error')}
       </div>
     );
   }
@@ -85,12 +87,10 @@ export function TrashView() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-[var(--text)] flex items-center gap-2.5">
               <Trash2 className="w-6 h-6 text-[var(--danger)]" />
-              <span>Trash</span>
+              <span>{t('trash.title')}</span>
             </h1>
             <p className="text-sm text-[var(--muted)] mt-1">
-              Items in trash for project <span className="font-semibold">{project?.name}</span>.
-              Restored notepads are re-attached to their parent, or to the project root if the
-              parent is still in trash.
+              {t('trash.subtitle', { projectName: project?.name || '' })}
             </p>
           </div>
 
@@ -99,24 +99,23 @@ export function TrashView() {
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as 'all' | 'notepads' | 'boards')}
             options={[
-              { value: 'all', label: `All (${totalCount})` },
-              { value: 'notepads', label: `Notepads (${notepads.length})` },
-              { value: 'boards', label: `Boards (${boards.length})` },
+              { value: 'all', label: t('trash.allTab', { count: totalCount }) },
+              { value: 'notepads', label: t('trash.notepadsTab', { count: notepads.length }) },
+              { value: 'boards', label: t('trash.boardsTab', { count: boards.length }) },
             ]}
           />
         </div>
 
         {isLoading ? (
-          <div className="py-12 text-center text-sm text-[var(--muted)]">Loading trash…</div>
+          <div className="py-12 text-center text-sm text-[var(--muted)]">{t('common.loading')}</div>
         ) : totalCount === 0 ? (
           <div className="py-16 text-center space-y-3">
             <div className="w-12 h-12 bg-[var(--surface2)] border border-[var(--line)] flex items-center justify-center mx-auto text-[var(--muted)]">
               <Trash2 className="w-6 h-6" />
             </div>
-            <div className="text-sm font-semibold text-[var(--text)]">Trash is empty</div>
+            <div className="text-sm font-semibold text-[var(--text)]">{t('trash.trashEmptyTitle')}</div>
             <p className="text-xs text-[var(--muted)] max-w-sm mx-auto">
-              Deleted notepads and boards will appear here. You can restore them or permanently
-              delete them anytime.
+              {t('trash.trashEmptyDesc')}
             </p>
           </div>
         ) : (
@@ -134,10 +133,12 @@ export function TrashView() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[var(--text)] truncate">
-                        {item.title || 'Untitled'}
+                        {item.title || t('common.untitled')}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
-                        Deleted {new Date(item.deletedAt).toLocaleString()}
+                        {t('trash.deletedAt', {
+                          date: formatDate(item.deletedAt, { dateStyle: 'short', timeStyle: 'short' }),
+                        })}
                       </div>
                     </div>
                   </div>
@@ -148,20 +149,20 @@ export function TrashView() {
                       size="sm"
                       onClick={() => handleRestoreNotepad(item.id)}
                       className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
-                      title="Restore"
+                      title={t('trash.restoreButton')}
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Restore</span>
+                      <span>{t('trash.restoreButton')}</span>
                     </Button>
                     <Button
                       variant="danger"
                       size="sm"
                       onClick={() => handlePermanentDeleteNotepad(item.id, item.title)}
                       className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
-                      title="Permanently Delete"
+                      title={t('trash.deletePermanentlyButton')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete</span>
+                      <span>{t('trash.deletePermanentlyButton')}</span>
                     </Button>
                   </div>
                 </div>
@@ -180,10 +181,12 @@ export function TrashView() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold text-[var(--text)] truncate">
-                        {b.name || 'Untitled Board'}
+                        {b.name || t('sidebar.untitled')}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
-                        Deleted {new Date(b.deletedAt).toLocaleString()}
+                        {t('trash.deletedAt', {
+                          date: formatDate(b.deletedAt, { dateStyle: 'short', timeStyle: 'short' }),
+                        })}
                       </div>
                     </div>
                   </div>
@@ -194,20 +197,20 @@ export function TrashView() {
                       size="sm"
                       onClick={() => handleRestoreBoard(b.id)}
                       className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
-                      title="Restore"
+                      title={t('trash.restoreButton')}
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Restore</span>
+                      <span>{t('trash.restoreButton')}</span>
                     </Button>
                     <Button
                       variant="danger"
                       size="sm"
                       onClick={() => handlePermanentDeleteBoard(b.id, b.name)}
                       className="px-2.5 py-1 text-xs font-semibold flex items-center gap-1.5"
-                      title="Permanently Delete"
+                      title={t('trash.deletePermanentlyButton')}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete</span>
+                      <span>{t('trash.deletePermanentlyButton')}</span>
                     </Button>
                   </div>
                 </div>
@@ -219,13 +222,15 @@ export function TrashView() {
       {confirmDelete && confirmDelete.workspaceId === workspaceId && confirmDelete.projectId === currentProjectId && (
         <ConfirmDialog
           open
-          title={`Permanently delete ${confirmDelete.type === 'notepad' ? 'notepad' : 'board'}?`}
+          title={t('trash.confirmPermanentDeleteTitle', {
+            type: confirmDelete.type === 'notepad' ? t('sidebar.notepads').toLowerCase() : t('sidebar.boards').toLowerCase(),
+          })}
           message={
             confirmDelete.type === 'notepad'
-              ? `Are you sure you want to permanently delete "${confirmDelete.name}"? This cannot be undone.`
-              : `Are you sure you want to permanently delete board "${confirmDelete.name}" and all its cards? This cannot be undone.`
+              ? t('trash.confirmPermanentDeleteNotepad', { name: confirmDelete.name })
+              : t('trash.confirmPermanentDeleteBoard', { name: confirmDelete.name })
           }
-          confirmLabel="Permanently Delete"
+          confirmLabel={t('trash.permanentlyDeleteConfirmLabel')}
           danger
           busy={permanentDeleteNotepad.isPending || permanentDeleteBoard.isPending}
           onConfirm={async () => {

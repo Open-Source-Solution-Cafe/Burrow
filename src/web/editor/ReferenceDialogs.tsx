@@ -9,6 +9,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { projectApiPath } from '../lib/workspaceRoutes';
+import { useTranslation } from '../lib/i18n';
 
 interface NotepadPickerModalProps {
   workspaceId: string;
@@ -23,6 +24,7 @@ export function NotepadPickerModal({
   onClose,
   onSelectNotepad,
 }: NotepadPickerModalProps) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'new' | 'existing'>('new');
   const [newTitle, setNewTitle] = useState('');
@@ -80,17 +82,15 @@ export function NotepadPickerModal({
   };
 
   return (
-    <ModalShell open onClose={onClose} title="Link Notepad" className="sm:max-w-md">
-      {/* Tab Switcher — geometric segmented control */}
-
+    <ModalShell open onClose={onClose} title={t('editor.linkNotepad')} className="sm:max-w-md">
       {/* Tab Switcher — geometric segmented control */}
       <div className="m-4">
         <SegmentedControl
           value={tab}
           onValueChange={(v) => setTab(v as 'new' | 'existing')}
           options={[
-            { value: 'new', label: 'Create New' },
-            { value: 'existing', label: 'Existing Notepad' },
+            { value: 'new', label: t('editor.createNew') },
+            { value: 'existing', label: t('editor.existingNotepad') },
           ]}
           fullWidth
         />
@@ -102,14 +102,14 @@ export function NotepadPickerModal({
           <form onSubmit={handleCreateNew} className="space-y-4">
             <div>
               <label className="block text-xs font-medium text-[var(--muted)] mb-1">
-                Notepad Title
+                {t('editor.notepadTitle')}
               </label>
               <Input
                 type="text"
                 autoFocus
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="e.g., Project Specifications"
+                placeholder={t('editor.notepadTitlePlaceholder')}
                 className="w-full p-2.5 text-base sm:text-xs"
               />
             </div>
@@ -120,7 +120,7 @@ export function NotepadPickerModal({
                 onClick={onClose}
                 className="px-3 py-1.5 text-xs min-h-[44px] sm:min-h-0"
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 type="submit"
@@ -128,7 +128,7 @@ export function NotepadPickerModal({
                 disabled={!newTitle.trim() || isSubmitting}
                 className="px-3 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0"
               >
-                {isSubmitting ? 'Creating…' : 'Create & Link'}
+                {isSubmitting ? t('common.saving') : t('editor.createAndLink')}
               </Button>
             </div>
           </form>
@@ -141,14 +141,14 @@ export function NotepadPickerModal({
                 autoFocus
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search notepads…"
+                placeholder={t('editor.searchNotepadsPlaceholder')}
                 className="w-full pl-9 pr-3 py-2 text-base sm:text-xs"
               />
             </div>
             <div className="max-h-48 overflow-y-auto space-y-1">
               {results.length === 0 ? (
                 <div className="p-4 text-center text-xs text-[var(--muted)] italic">
-                  {searchQuery ? 'No matching notepads' : 'Type to search'}
+                  {searchQuery ? t('editor.noMatchingNotepads') : t('editor.typeToSearch')}
                 </div>
               ) : (
                 results.map((r) => (
@@ -161,7 +161,7 @@ export function NotepadPickerModal({
                     className="w-full p-2 min-h-[44px] sm:min-h-0 text-left text-xs text-[var(--text)] hover:bg-[var(--hi)] flex items-center gap-2 transition"
                   >
                     <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-                    <span className="truncate">{r.label || 'Untitled'}</span>
+                    <span className="truncate">{r.label || t('editor.untitled')}</span>
                   </button>
                 ))
               )}
@@ -181,6 +181,7 @@ interface TaskPickerModalProps {
 }
 
 export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated }: TaskPickerModalProps) {
+  const { t } = useTranslation();
   const { data: boards = [] } = useBoards(workspaceId, projectId);
   const createCardMutation = useCreateCard();
 
@@ -244,17 +245,17 @@ export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated
   };
 
   return (
-    <ModalShell open onClose={onClose} title="Create & Link Task Card" className="sm:max-w-md">
+    <ModalShell open onClose={onClose} title={t('editor.createAndLinkTaskCard')} className="sm:max-w-md">
       <form onSubmit={handleSubmit} className="pt-3 space-y-4">
         <div>
-          <label className="block text-xs font-medium text-[var(--muted)] mb-1">Select Board</label>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1">{t('editor.selectBoard')}</label>
           <Select
             value={selectedBoardId}
             onChange={(e) => handleBoardChange(e.target.value)}
             className="w-full p-2 text-base sm:text-xs min-h-[44px] sm:min-h-0"
           >
             <option value="" disabled>
-              Select a board…
+              {t('editor.selectBoardPlaceholder')}
             </option>
             {boards.map((b) => (
               <option key={b.id} value={b.id}>
@@ -265,14 +266,14 @@ export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-[var(--muted)] mb-1">Column</label>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1">{t('editor.column')}</label>
           <Select
             value={selectedColId}
             onChange={(e) => setSelectedColId(e.target.value)}
             className="w-full p-2 text-base sm:text-xs min-h-[44px] sm:min-h-0"
           >
             {columns.length === 0 ? (
-              <option value="">Select board first</option>
+              <option value="">{t('editor.selectBoardFirst')}</option>
             ) : (
               columns.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -284,13 +285,13 @@ export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-[var(--muted)] mb-1">Task Title</label>
+          <label className="block text-xs font-medium text-[var(--muted)] mb-1">{t('editor.taskTitle')}</label>
           <Input
             type="text"
             autoFocus
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g., Fix login bug"
+            placeholder={t('editor.taskTitlePlaceholder')}
             className="w-full p-2.5 text-base sm:text-xs"
           />
         </div>
@@ -302,7 +303,7 @@ export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated
             onClick={onClose}
             className="px-3 py-1.5 text-xs min-h-[44px] sm:min-h-0"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             type="submit"
@@ -310,7 +311,7 @@ export function TaskPickerModal({ workspaceId, projectId, onClose, onCardCreated
             disabled={!selectedColId || !title.trim() || isSubmitting}
             className="px-3 py-1.5 text-xs font-semibold min-h-[44px] sm:min-h-0"
           >
-            {isSubmitting ? 'Creating…' : 'Create & Insert Link'}
+            {isSubmitting ? t('common.saving') : t('editor.createAndInsertLink')}
           </Button>
         </div>
       </form>
@@ -326,16 +327,17 @@ interface BoardPickerModalProps {
 }
 
 export function BoardPickerModal({ workspaceId, projectId, onClose, onSelectBoard }: BoardPickerModalProps) {
+  const { t } = useTranslation();
   const { data: boards = [], isLoading } = useBoards(workspaceId, projectId);
 
   return (
-    <ModalShell open onClose={onClose} title="Link Board" className="sm:max-w-md">
+    <ModalShell open onClose={onClose} title={t('editor.linkBoard')} className="sm:max-w-md">
       <div className="pt-3 space-y-2">
         {isLoading ? (
-          <div className="p-4 text-center text-xs text-[var(--muted)]">Loading boards…</div>
+          <div className="p-4 text-center text-xs text-[var(--muted)]">{t('editor.loadingBoards')}</div>
         ) : boards.length === 0 ? (
           <div className="p-4 text-center text-xs text-[var(--muted)] italic">
-            No boards found in this project
+            {t('editor.noBoardsFound')}
           </div>
         ) : (
           <div className="max-h-60 overflow-y-auto space-y-1">
@@ -357,7 +359,7 @@ export function BoardPickerModal({ workspaceId, projectId, onClose, onSelectBoar
         )}
         <div className="flex justify-end pt-2 border-t border-[var(--hair)]">
           <Button type="button" variant="ghost" onClick={onClose} className="px-3 py-1.5 text-xs">
-            Cancel
+            {t('common.cancel')}
           </Button>
         </div>
       </div>

@@ -24,6 +24,8 @@ import { StatusDiamond } from '../components/ui/StatusDiamond';
 import { workspaceTarget } from '../lib/workspaceRoutes';
 import { useUploadPolicy, useUpdateUploadPolicy } from '../lib/uploadPolicy';
 import { MAX_UPLOAD_BYTES, UPLOAD_FILE_TYPES } from '../../shared/uploadPolicy';
+import { useTranslation } from '../lib/i18n';
+import { LanguageSelector } from '../components/ui/LanguageSelector';
 
 const ICON_PRESETS = ['📁', '🚀', '⚡', '🎯', '🛠️', '💡', '📊', '📝', '📦', '✨'];
 const COLOR_PRESETS = ['#6366f1', '#059669', '#d97706', '#dc2626', '#9333ea', '#0284c7', '#64748b'];
@@ -37,6 +39,7 @@ function UploadSettings({
   projectId: string;
   canEdit: boolean;
 }) {
+  const { t } = useTranslation();
   const policy = useUploadPolicy(workspaceId, projectId);
   const update = useUpdateUploadPolicy(workspaceId, projectId);
   const [sizeMb, setSizeMb] = useState('');
@@ -49,24 +52,23 @@ function UploadSettings({
 
   return (
     <section className="pt-5 border-t border-[var(--hair)] space-y-3">
-      <h3 className="text-sm font-semibold text-[var(--text)]">File uploads</h3>
+      <h3 className="text-sm font-semibold text-[var(--text)]">{t('settings.fileUploadsTitle')}</h3>
       <p className="text-xs text-[var(--muted)]">
-        Choose the file types and maximum size allowed in this project. Existing files remain
-        available.
+        {t('settings.fileUploadsDesc')}
       </p>
       {policy.isPending ? (
-        <p className="text-xs text-[var(--muted)]">Loading upload settings…</p>
+        <p className="text-xs text-[var(--muted)]">{t('common.loading')}</p>
       ) : policy.isError ? (
         <div className="text-xs text-[var(--danger)]">
-          <p>Could not load upload settings.</p>
+          <p>{t('common.error')}</p>
           <Button type="button" variant="ghost" onClick={() => void policy.refetch()}>
-            Retry
+            {t('common.retry')}
           </Button>
         </div>
       ) : (
         <>
           <label className="block space-y-1.5 text-xs font-medium text-[var(--text)]">
-            <span>Maximum file size (MB)</span>
+            <span>{t('settings.maxFileSizeMb')}</span>
             <Input
               type="number"
               min="0.01"
@@ -80,7 +82,7 @@ function UploadSettings({
           </label>
           <fieldset disabled={!canEdit || update.isPending} className="space-y-2">
             <legend className="mb-2 text-xs font-medium text-[var(--text)]">
-              Allowed file types
+              {t('settings.allowedFileTypes')}
             </legend>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {UPLOAD_FILE_TYPES.map((type) => (
@@ -133,11 +135,11 @@ function UploadSettings({
                 }
               }}
             >
-              {update.isPending ? 'Saving…' : 'Save upload settings'}
+              {update.isPending ? t('common.loading') : t('settings.saveUploadSettings')}
             </Button>
           ) : (
             <p className="text-xs text-[var(--muted)]">
-              Only workspace owners can change upload settings.
+              {t('settings.ownerUploadOnly')}
             </p>
           )}
         </>
@@ -148,6 +150,7 @@ function UploadSettings({
 
 export function SettingsView() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: account, isError: accountError } = useAccount();
   const signOut = useSignOut();
@@ -349,7 +352,7 @@ export function SettingsView() {
         color: newTagColor,
       });
       setNewTagName('');
-      toast.success('Tag created');
+      toast.success(t('settings.tagCreated'));
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create tag');
     }
@@ -369,7 +372,7 @@ export function SettingsView() {
         tagId: tagToDelete.id,
         projectId: tagToDelete.projectId,
       });
-      toast.success('Tag deleted');
+      toast.success(t('settings.tagDeleted'));
       setTagToDelete(null);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to delete tag');
@@ -380,9 +383,9 @@ export function SettingsView() {
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto py-5 px-3.5 sm:py-8 sm:px-6 space-y-5 sm:space-y-8">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text)]">Settings</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text)]">{t('settings.title')}</h1>
           <p className="text-xs sm:text-sm text-[var(--muted)]">
-            Manage your profile, project preferences, and workflow tags.
+            {t('settings.subtitle')}
           </p>
         </div>
 
@@ -391,22 +394,22 @@ export function SettingsView() {
           <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
             <User className="w-4 h-4 text-[var(--accent)]" />
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
-              Profile & Account
+              {t('settings.profileAndAccount')}
             </h2>
           </div>
 
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">
-              <Avatar name={account?.user?.name || 'User'} size="md" />
+              <Avatar name={account?.user?.name || t('common.user')} size="md" />
               <div>
                 <div className="text-sm font-semibold text-[var(--text)]">
-                  {account?.user?.name || 'User'}
+                  {account?.user?.name || t('common.user')}
                 </div>
                 <div className="text-xs text-[var(--muted)]">{account?.user?.email}</div>
                 <div className="mt-1 flex items-center gap-1.5">
-                  <span className="text-[11px] text-[var(--muted)]">Workspace Role:</span>
+                  <span className="text-[11px] text-[var(--muted)]">{t('settings.workspaceRole')}</span>
                   <Badge className="uppercase text-[10px] tracking-wider font-mono">
-                    {role || 'member'}
+                    {t(`common.roles.${role}` as any) || role || t('common.roles.member')}
                   </Badge>
                 </div>
               </div>
@@ -419,8 +422,13 @@ export function SettingsView() {
               className="flex items-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>Log out</span>
+              <span>{t('settings.logOut')}</span>
             </Button>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-[var(--hair)] pt-3 text-xs">
+            <span className="text-[var(--muted)] font-medium">{t('common.language')}</span>
+            <LanguageSelector />
           </div>
         </div>
 
@@ -429,12 +437,12 @@ export function SettingsView() {
             <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
               <Users className="w-4 h-4 text-[var(--accent)]" />
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
-                Workspace
+                {t('settings.workspaceSection')}
               </h2>
             </div>
             <form onSubmit={handleRenameWorkspace} className="flex flex-col sm:flex-row sm:items-end gap-2.5">
               <label className="w-full sm:min-w-56 sm:flex-1 space-y-1 text-xs font-medium text-[var(--text)]">
-                Workspace name
+                {t('settings.workspaceNameLabel')}
                 <Input
                   value={workspaceName}
                   onChange={(event) => setWorkspaceName(event.target.value)}
@@ -454,19 +462,18 @@ export function SettingsView() {
                   renameWorkspace.isPending
                 }
               >
-                {renameWorkspace.isPending ? 'Saving…' : 'Save workspace name'}
+                {renameWorkspace.isPending ? t('common.loading') : t('settings.saveWorkspaceName')}
               </Button>
               <Badge className="uppercase text-[10px] tracking-wider font-mono self-start sm:self-center">
-                {role || 'member'}
+                {t(`common.roles.${role}` as any) || role || t('common.roles.member')}
               </Badge>
             </form>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--hair)] pt-3">
               <p className="max-w-xl text-xs text-[var(--muted)]">
-                A workspace owner must promote another owner before leaving if they are the last
-                owner.
+                {t('settings.leaveWorkspaceNotice')}
               </p>
               <Button type="button" variant="danger" size="sm" onClick={() => setConfirmLeaveWorkspace(true)}>
-                Leave workspace
+                {t('settings.leaveWorkspace')}
               </Button>
             </div>
           </div>
@@ -478,13 +485,13 @@ export function SettingsView() {
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-[var(--accent)]" />
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
-                Project Settings
+                {t('settings.projectSettingsTitle')}
               </h2>
             </div>
 
             {projects.length > 0 && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--muted)]">Configuring:</span>
+                <span className="text-xs text-[var(--muted)]">{t('settings.configuringProject')}</span>
                 <Select
                   value={selectedProject?.id || ''}
                   onChange={(e) => {
@@ -496,10 +503,10 @@ export function SettingsView() {
                   }}
                   className="w-auto text-xs font-medium"
                 >
-                  {!selectedProject && <option value="">Select a project</option>}
+                  {!selectedProject && <option value="">{t('settings.selectProjectPlaceholder')}</option>}
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.icon || '📁'} {p.name} {p.archivedAt ? '(Archived)' : ''}
+                      {p.icon || '📁'} {p.name} {p.archivedAt ? `(${t('common.archived')})` : ''}
                     </option>
                   ))}
                 </Select>
@@ -508,18 +515,18 @@ export function SettingsView() {
           </div>
 
           {projectsLoading ? (
-            <div className="text-xs text-[var(--muted)] py-4">Loading project settings…</div>
+            <div className="text-xs text-[var(--muted)] py-4">{t('settings.loadingProjectSettings')}</div>
           ) : projectsError || accountError ? (
-            <div className="text-xs text-[var(--muted)] py-4">Unable to load project settings.</div>
+            <div className="text-xs text-[var(--muted)] py-4">{t('settings.unableToLoadProjectSettings')}</div>
           ) : !selectedProject ? (
             <div className="text-xs text-[var(--muted)] italic py-4">
-              {projects.length ? 'Select an available project.' : 'No projects available.'}
+              {projects.length ? t('settings.selectAvailableProject') : t('settings.noProjectsAvailableDesc')}
             </div>
           ) : (
             <form onSubmit={handleSaveProject} className="space-y-4">
               {/* Project Name */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--text)]">Project Name</label>
+                <label className="text-xs font-medium text-[var(--text)]">{t('settings.projectNameLabel')}</label>
                 <Input
                   type="text"
                   required
@@ -533,7 +540,7 @@ export function SettingsView() {
 
               {/* Icon Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--text)]">Project Icon</label>
+                <label className="text-xs font-medium text-[var(--text)]">{t('settings.projectIconLabel')}</label>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Input
                     type="text"
@@ -565,7 +572,7 @@ export function SettingsView() {
 
               {/* Color Selector */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-[var(--text)]">Accent Color</label>
+                <label className="text-xs font-medium text-[var(--text)]">{t('settings.accentColorLabel')}</label>
                 <div className="flex items-center gap-2 flex-wrap">
                   {COLOR_PRESETS.map((color) => {
                     const isSelected = projectColor === color;
@@ -592,7 +599,7 @@ export function SettingsView() {
                       disabled={isViewer}
                       className="text-xs text-[var(--muted)] hover:text-[var(--text)] underline ml-2 cursor-pointer"
                     >
-                      Clear
+                      {t('common.clear')}
                     </button>
                   )}
                 </div>
@@ -620,7 +627,7 @@ export function SettingsView() {
                       !projectName.trim()
                     }
                   >
-                    {updateProjectMutation.isPending ? 'Saving…' : 'Save Changes'}
+                    {updateProjectMutation.isPending ? t('common.saving') : t('settings.saveProjectChanges')}
                   </Button>
                 </div>
               )}
@@ -629,7 +636,7 @@ export function SettingsView() {
               {!isViewer && (
                 <div className="pt-5 border-t border-[var(--hair)] space-y-3">
                   <h3 className="text-xs font-semibold text-[var(--danger)] uppercase tracking-wider">
-                    Danger Zone
+                    {t('settings.dangerZone')}
                   </h3>
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <Button
@@ -648,7 +655,7 @@ export function SettingsView() {
                       className="flex items-center gap-2 border border-[var(--line)]"
                     >
                       <Archive className="w-3.5 h-3.5" />
-                      <span>{isArchived ? 'Unarchive Project' : 'Archive Project'}</span>
+                      <span>{isArchived ? t('settings.unarchiveProject') : t('settings.archiveProject')}</span>
                     </Button>
                     <Button
                       type="button"
@@ -665,7 +672,7 @@ export function SettingsView() {
                       className="flex items-center gap-2"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
-                      <span>Delete Project…</span>
+                      <span>{t('settings.deleteProject')}</span>
                     </Button>
                   </div>
                 </div>
@@ -679,13 +686,12 @@ export function SettingsView() {
           <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
             <Tag className="w-4 h-4 text-[var(--accent)]" />
             <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
-              Tag Management
+              {t('settings.tagManagementTitle')}
             </h2>
           </div>
 
           <p className="text-xs text-[var(--muted)]">
-            Tags scoped to <strong>{selectedProject?.name || 'current project'}</strong>. Use tags
-            on kanban cards to group tasks and filter work.
+            {t('settings.tagManagementDesc', { projectName: selectedProject?.name || 'current project' })}
           </p>
 
           {/* New Tag Form */}
@@ -696,7 +702,7 @@ export function SettingsView() {
                 required
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
-                placeholder="New tag name (e.g. bug, urgent)"
+                placeholder={t('settings.newTagNamePlaceholder')}
                 className="flex-1 min-w-[180px]"
               />
               <div className="flex items-center gap-1 self-start sm:self-center">
@@ -723,7 +729,7 @@ export function SettingsView() {
                 className="flex items-center justify-center gap-1.5"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>{createTagMutation.isPending ? 'Adding…' : 'Add Tag'}</span>
+                <span>{createTagMutation.isPending ? t('common.saving') : t('settings.addTag')}</span>
               </Button>
             </form>
           )}
@@ -732,7 +738,7 @@ export function SettingsView() {
           <div className="space-y-2 pt-2">
             {projectTags.length === 0 ? (
               <div className="text-xs text-[var(--muted)] italic py-1">
-                No tags created for this project yet.
+                {t('settings.noTagsYet')}
               </div>
             ) : (
               <div className="flex items-center gap-2 flex-wrap">
@@ -758,7 +764,7 @@ export function SettingsView() {
                           })
                         }
                         className="text-[var(--muted)] hover:text-[var(--danger)] transition ml-1 p-0.5 cursor-pointer"
-                        title={`Delete tag #${tag.name}`}
+                        title={`${t('common.delete')} #${tag.name}`}
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -774,9 +780,9 @@ export function SettingsView() {
       {/* Confirm Sign Out */}
       <ConfirmDialog
         open={confirmSignOut}
-        title="Log out"
-        message="Are you sure you want to log out of your account?"
-        confirmLabel="Log out"
+        title={t('sidebar.confirmSignOutTitle')}
+        message={t('sidebar.confirmSignOutMessage')}
+        confirmLabel={t('common.signOut')}
         danger={false}
         busy={signOut.isPending}
         onConfirm={async () => {
@@ -793,9 +799,9 @@ export function SettingsView() {
       {confirmLeaveWorkspace && currentWorkspace && (
         <ConfirmDialog
           open
-          title="Leave workspace"
-          message={`Leave "${currentWorkspace.name}"? You will lose access to its projects and content.`}
-          confirmLabel="Leave workspace"
+          title={t('settings.confirmLeaveTitle')}
+          message={t('settings.confirmLeaveMessage', { name: currentWorkspace.name })}
+          confirmLabel={t('settings.leaveWorkspace')}
           danger
           busy={leaveWorkspace.isPending}
           onConfirm={handleLeaveWorkspace}
@@ -809,13 +815,12 @@ export function SettingsView() {
         archiveTarget.id === selectedProject?.id && (
           <ConfirmDialog
             open
-            title={archiveTarget.archived ? 'Unarchive Project' : 'Archive Project'}
-            message={
-              archiveTarget.archived
-                ? `Restore project "${archiveTarget.name}" to active status?`
-                : `Archive project "${archiveTarget.name}"? It will be hidden from default views.`
-            }
-            confirmLabel={archiveTarget.archived ? 'Unarchive' : 'Archive'}
+            title={archiveTarget.archived ? t('settings.unarchiveProject') : t('settings.archiveProject')}
+            message={t('settings.confirmArchiveMessage', {
+              action: archiveTarget.archived ? t('settings.unarchiveProject').toLowerCase() : t('settings.archiveProject').toLowerCase(),
+              name: archiveTarget.name,
+            })}
+            confirmLabel={archiveTarget.archived ? t('settings.unarchiveProject') : t('settings.archiveProject')}
             danger={!archiveTarget.archived}
             busy={updateProjectMutation.isPending}
             onConfirm={handleToggleArchive}
@@ -829,9 +834,9 @@ export function SettingsView() {
         deleteTarget.id === selectedProject?.id && (
           <ConfirmDialog
             open
-            title="Delete Project"
-            message={`Are you sure you want to permanently delete "${deleteTarget.name}" and all its notepads, boards, and cards? This action cannot be undone.`}
-            confirmLabel="Delete Project"
+            title={t('settings.confirmDeleteProjectTitle')}
+            message={t('settings.confirmDeleteProjectMessage', { name: deleteTarget.name })}
+            confirmLabel={t('settings.deleteProject')}
             danger={true}
             busy={deleteProjectMutation.isPending}
             onConfirm={handleDeleteProject}
@@ -845,9 +850,9 @@ export function SettingsView() {
         tagToDelete.projectId === selectedProject?.id && (
           <ConfirmDialog
             open={!!tagToDelete}
-            title="Delete Tag"
-            message={`Are you sure you want to delete tag "#${tagToDelete.name}"? Cards with this tag will keep their content.`}
-            confirmLabel="Delete Tag"
+            title={t('settings.confirmDeleteTagTitle')}
+            message={t('settings.confirmDeleteTagMessage', { name: tagToDelete.name })}
+            confirmLabel={t('common.delete')}
             danger={true}
             busy={deleteTagMutation.isPending}
             onConfirm={handleDeleteTag}

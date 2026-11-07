@@ -6,6 +6,7 @@ import { useCreateCard, useCreateTag, useMembers, useProjectTags } from '../../l
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { useTranslation } from '../../lib/i18n';
 
 interface QuickAddCardProps {
   workspaceId: string;
@@ -24,6 +25,7 @@ interface QuickAddChips {
 }
 
 export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClose }: QuickAddCardProps) {
+  const { t } = useTranslation();
   const [title, setTitle] = useState('');
   const [chips, setChips] = useState<QuickAddChips>({ assignees: [], tags: [] });
   const [menuMode, setMenuMode] = useState<'none' | 'slash' | 'at' | 'hash'>('none');
@@ -101,7 +103,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       });
       selectTag(newTag.id, newTag.name, newTag.color);
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to create tag');
+      toast.error(err?.message || t('boards.failedToCreateTag'));
     }
   };
 
@@ -110,7 +112,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {
         id: 'notepad',
         label: '/notepad',
-        desc: 'Create new linked notepad',
+        desc: t('boards.slashNotepadDesc'),
         icon: FileText,
         action: () => {
           setChips((c) => ({ ...c, notepad: { mode: 'new' } }));
@@ -122,7 +124,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {
         id: 'due',
         label: '/due',
-        desc: 'Set due date (e.g. tomorrow, Oct 12)',
+        desc: t('boards.slashDueDesc'),
         icon: Calendar,
         action: () => {
           setTitle(cleanLastTrigger(title));
@@ -133,42 +135,42 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {
         id: 'priority',
         label: '/priority',
-        desc: 'Set priority (urgent, high, medium, low)',
+        desc: t('boards.slashPriorityDesc'),
         icon: Flag,
         action: () => selectPriority('urgent'),
       },
       {
         id: 'urgent',
         label: '/urgent',
-        desc: 'Set priority: Urgent',
+        desc: `${t('boards.setPriority')}: ${t('common.priorities.urgent')}`,
         icon: Flag,
         action: () => selectPriority('urgent'),
       },
       {
         id: 'high',
         label: '/high',
-        desc: 'Set priority: High',
+        desc: `${t('boards.setPriority')}: ${t('common.priorities.high')}`,
         icon: Flag,
         action: () => selectPriority('high'),
       },
       {
         id: 'medium',
         label: '/medium',
-        desc: 'Set priority: Medium',
+        desc: `${t('boards.setPriority')}: ${t('common.priorities.medium')}`,
         icon: Flag,
         action: () => selectPriority('medium'),
       },
       {
         id: 'low',
         label: '/low',
-        desc: 'Set priority: Low',
+        desc: `${t('boards.setPriority')}: ${t('common.priorities.low')}`,
         icon: Flag,
         action: () => selectPriority('low'),
       },
       {
         id: 'assign',
         label: '/assign',
-        desc: 'Assign member (@)',
+        desc: `${t('boards.assignMember')} (@)`,
         icon: User,
         action: () => {
           setTitle(cleanLastTrigger(title) + '@');
@@ -181,7 +183,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {
         id: 'tag',
         label: '/tag',
-        desc: 'Add project tag (#)',
+        desc: `${t('boards.addProjectTag')} (#)`,
         icon: Tag,
         action: () => {
           setTitle(cleanLastTrigger(title) + '#');
@@ -192,7 +194,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         },
       },
     ],
-    [title],
+    [title, t],
   );
 
   const filteredSlashCommands = useMemo(() => {
@@ -419,7 +421,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
             name: rawMatch,
           });
         } catch (err: any) {
-          toast.error(err?.message || 'Failed to create tag');
+          toast.error(err?.message || t('boards.failedToCreateTag'));
         }
       }
       if (found && !tagIds.includes(found.id)) {
@@ -430,7 +432,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
 
     // Strip trailing bare trigger characters e.g. "Buy milk /" -> "Buy milk"
     cleanTitle = cleanTitle.replace(/(?:^|\s)[/@#]$/, '').trim();
-    cleanTitle = cleanTitle || 'Untitled';
+    cleanTitle = cleanTitle || t('common.untitled');
 
     try {
       await createCardMutation.mutateAsync({
@@ -457,7 +459,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         onClose();
       }
     } catch (err: any) {
-      toast.error(err.message || 'Failed to create card');
+      toast.error(err.message || t('boards.failedToCreateCard'));
     }
   };
 
@@ -468,11 +470,11 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         {chips.notepad && (
           <span className="chamfer-sm inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)]">
             <FileText className="w-3 h-3 text-[var(--muted)]" />
-            <span>{chips.notepad.mode === 'new' ? 'New Notepad' : chips.notepad.title}</span>
+            <span>{chips.notepad.mode === 'new' ? t('sidebar.newNotepad') : chips.notepad.title}</span>
             <button
               type="button"
               onClick={() => setChips((c) => ({ ...c, notepad: undefined }))}
-              aria-label="Remove notepad"
+              aria-label={t('common.remove')}
               className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
@@ -483,11 +485,11 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         {chips.priority && (
           <span className="chamfer-sm inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/40">
             <Flag className="w-3 h-3" />
-            <span className="capitalize">{chips.priority}</span>
+            <span className="capitalize">{t(`common.priorities.${chips.priority}`)}</span>
             <button
               type="button"
               onClick={() => setChips((c) => ({ ...c, priority: undefined }))}
-              aria-label="Remove priority"
+              aria-label={t('common.remove')}
               className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
@@ -502,7 +504,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
             <button
               type="button"
               onClick={() => setChips((c) => ({ ...c, dueDate: undefined }))}
-              aria-label="Remove due date"
+              aria-label={t('common.remove')}
               className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
@@ -525,7 +527,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
                   assignees: c.assignees.filter((x) => x.userId !== a.userId),
                 }))
               }
-              aria-label={`Remove ${a.name}`}
+              aria-label={`${t('common.remove')} ${a.name}`}
               className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
             >
               <X className="w-2.5 h-2.5" />
@@ -533,25 +535,25 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
           </span>
         ))}
 
-        {chips.tags.map((t) => (
+        {chips.tags.map((tagItem) => (
           <span
-            key={t.tagId}
+            key={tagItem.tagId}
             className="chamfer-sm inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium border"
             style={{
-              backgroundColor: `${t.color || '#64748b'}20`,
-              color: t.color || '#64748b',
-              borderColor: `${t.color || '#64748b'}40`,
+              backgroundColor: `${tagItem.color || '#64748b'}20`,
+              color: tagItem.color || '#64748b',
+              borderColor: `${tagItem.color || '#64748b'}40`,
             }}
           >
             <Tag className="w-3 h-3" />
-            <span>#{t.name}</span>
+            <span>#{tagItem.name}</span>
             <button
               type="button"
-              aria-label={`Remove tag ${t.name}`}
+              aria-label={`${t('common.remove')} #${tagItem.name}`}
               onClick={() =>
                 setChips((c) => ({
                   ...c,
-                  tags: c.tags.filter((x) => x.tagId !== t.tagId),
+                  tags: c.tags.filter((x) => x.tagId !== tagItem.tagId),
                 }))
               }
               className="w-5 h-5 flex items-center justify-center hover:text-[var(--danger)] cursor-pointer"
@@ -569,7 +571,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         value={title}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
-        placeholder="Type a title, / for commands, @ for members, # for tags…"
+        placeholder={t('boards.quickAddPlaceholder')}
         className="border-none bg-transparent px-0 text-base md:text-sm focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[38px] md:min-h-0"
       />
 
@@ -577,7 +579,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {menuMode === 'slash' && filteredSlashCommands.length > 0 && (
         <div className="absolute left-0 bottom-full mb-1.5 w-64 bg-[var(--surface)] border border-[var(--line)] chamfer-sm p-1.5 z-50 text-xs space-y-0.5 max-h-56 overflow-y-auto">
           <div className="px-2 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">
-            Quick-Add Commands
+            {t('boards.quickAddCommands')}
           </div>
           {filteredSlashCommands.map((cmd, idx) => {
             const Icon = cmd.icon;
@@ -612,14 +614,14 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {menuMode === 'at' && (
         <div className="absolute left-0 bottom-full mb-1.5 w-64 bg-[var(--surface)] border border-[var(--line)] chamfer-sm p-1.5 z-50 text-xs space-y-0.5 max-h-56 overflow-y-auto">
           <div className="px-2 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">
-            Assign Member
+            {t('boards.assignMember')}
           </div>
           {filteredMembers.length === 0 ? (
-            <div className="px-2 py-2 text-xs text-[var(--muted)] italic">No members found</div>
+            <div className="px-2 py-2 text-xs text-[var(--muted)] italic">{t('boards.noMembersFound')}</div>
           ) : (
             filteredMembers.map((m, idx) => {
               const isSelected = idx === selectedIndex;
-              const displayName = m.name || m.email || 'Member';
+              const displayName = m.name || m.email || t('common.roles.member');
               return (
                 <button
                   key={m.userId}
@@ -655,17 +657,17 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
       {menuMode === 'hash' && (
         <div className="absolute left-0 bottom-full mb-1.5 w-64 bg-[var(--surface)] border border-[var(--line)] chamfer-sm p-1.5 z-50 text-xs space-y-0.5 max-h-56 overflow-y-auto">
           <div className="px-2 py-1 text-[10px] font-semibold text-[var(--muted)] uppercase tracking-wider">
-            Project Tags
+            {t('boards.tags')}
           </div>
-          {filteredTags.map((t, idx) => {
+          {filteredTags.map((tItem, idx) => {
             const isSelected = idx === selectedIndex;
             return (
               <button
-                key={t.id}
+                key={tItem.id}
                 type="button"
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  selectTag(t.id, t.name, t.color);
+                  selectTag(tItem.id, tItem.name, tItem.color);
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
                 className={`w-full p-2 min-h-[36px] flex items-center gap-2 rounded text-left transition-colors cursor-pointer ${
@@ -674,13 +676,13 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
                     : 'hover:bg-[var(--hi)]/50 text-[var(--text)]'
                 }`}
               >
-                <Tag className="w-3.5 h-3.5 shrink-0" style={{ color: t.color || '#64748b' }} />
-                <span className="truncate">#{t.name}</span>
+                <Tag className="w-3.5 h-3.5 shrink-0" style={{ color: tItem.color || '#64748b' }} />
+                <span className="truncate">#{tItem.name}</span>
               </button>
             );
           })}
           {menuQuery.trim() &&
-            !filteredTags.some((t) => t.name.toLowerCase() === menuQuery.toLowerCase()) && (
+            !filteredTags.some((tItem) => tItem.name.toLowerCase() === menuQuery.toLowerCase()) && (
               <button
                 type="button"
                 onMouseDown={(e) => {
@@ -695,12 +697,12 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
                 }`}
               >
                 <Plus className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">Create tag &quot;#{menuQuery.trim()}&quot;</span>
+                <span className="truncate">{t('boards.createTagNamed', { name: menuQuery.trim() })}</span>
               </button>
             )}
           {filteredTags.length === 0 && !menuQuery.trim() && (
             <div className="px-2 py-2 text-xs text-[var(--muted)] italic">
-              No tags yet. Type to create one!
+              {t('boards.noTagsYet')}
             </div>
           )}
         </div>
@@ -722,11 +724,11 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
               }
               if (e.key === 'Escape') setDateInputOpen(false);
             }}
-            placeholder="e.g. tomorrow, next fri, Oct 3"
+            placeholder={t('boards.dueDatePlaceholder')}
             className="flex-1 text-xs py-1"
           />
           <Button variant="primary" size="sm" onClick={() => selectDueDate(dateInputValue)}>
-            Set
+            {t('common.save')}
           </Button>
           <button
             type="button"
@@ -750,7 +752,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
               onClick={onClose}
               className="px-2 py-1 min-h-[44px] md:min-h-0 hover:bg-[var(--hi)] hover:text-[var(--text)] text-xs text-[var(--muted)] transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           )}
           <Button
@@ -759,7 +761,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
             disabled={!title.trim() || createCardMutation.isPending}
             onClick={() => handleSave(false)}
           >
-            {createCardMutation.isPending ? 'Adding…' : 'Add card'}
+            {createCardMutation.isPending ? t('common.loading') : t('boards.addCard')}
           </Button>
         </div>
       </div>

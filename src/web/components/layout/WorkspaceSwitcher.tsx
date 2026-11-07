@@ -5,11 +5,13 @@ import { toast } from 'sonner';
 import { useAccount, useCreateWorkspace } from '../../lib/queries';
 import { workspaceSettingsTarget, workspaceTarget } from '../../lib/workspaceRoutes';
 import { useTheme } from '../../lib/theme';
+import { useTranslation } from '../../lib/i18n';
 import { ModalShell } from '../ui/ModalShell';
 import { Input } from '../ui/Input';
 import { Button } from '../ui/Button';
 
 export function WorkspaceSwitcher() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { isModern } = useTheme();
@@ -17,10 +19,10 @@ export function WorkspaceSwitcher() {
   const createWorkspace = useCreateWorkspace();
   const currentWorkspace = account?.workspaces.find((workspace) => workspace.id === workspaceId);
   const label = isLoading
-    ? 'Loading workspace…'
+    ? t('sidebar.loadingWorkspace')
     : isError || (workspaceId && !currentWorkspace)
-      ? 'Workspace unavailable'
-      : currentWorkspace?.name || 'Select workspace';
+      ? t('sidebar.workspaceUnavailable')
+      : currentWorkspace?.name || t('sidebar.selectWorkspace');
   const [isOpen, setIsOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [name, setName] = useState('');
@@ -62,7 +64,7 @@ export function WorkspaceSwitcher() {
       setIsOpen(false);
       navigate(workspaceTarget(result.workspace.id));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create workspace');
+      toast.error(error instanceof Error ? error.message : t('sidebar.failedToCreateWorkspace'));
     }
   };
 
@@ -70,7 +72,7 @@ export function WorkspaceSwitcher() {
     <div className="relative min-w-0 flex-1" ref={dropdownRef}>
       <button
         type="button"
-        aria-label={`Switch workspace: ${label}`}
+        aria-label={t('sidebar.switchWorkspaceAria', { label })}
         aria-expanded={isOpen}
         onClick={() => setIsOpen(!isOpen)}
         className={`flex w-full min-w-0 items-center gap-1.5 py-1 text-side-text hover:text-text transition cursor-pointer ${isModern ? 'text-[13px] font-semibold' : 'text-[14px] font-display'}`}
@@ -81,7 +83,7 @@ export function WorkspaceSwitcher() {
       {isOpen && (
         <div className="absolute top-full left-0 mt-1 w-64 max-w-[calc(100vw-6rem)] bg-surface border border-line py-1.5 z-50">
           <div className="px-3 py-1.5 text-xs font-semibold text-muted uppercase tracking-wider">
-            Workspaces
+            {t('sidebar.workspaces')}
           </div>
           <div className="max-h-60 overflow-y-auto">
             {(account?.workspaces ?? []).map((workspace) => (
@@ -104,7 +106,7 @@ export function WorkspaceSwitcher() {
                 className="flex items-center gap-2 px-3 py-2 text-sm text-muted hover:text-text hover:bg-hi transition min-h-[44px] md:min-h-0"
               >
                 <Settings className="w-4 h-4" />
-                <span>Workspace settings</span>
+                <span>{t('sidebar.workspaceSettings')}</span>
               </Link>
             )}
             <button
@@ -117,7 +119,7 @@ export function WorkspaceSwitcher() {
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted hover:text-text hover:bg-hi text-left transition min-h-[44px] md:min-h-0 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
-              <span>Create workspace</span>
+              <span>{t('sidebar.createWorkspace')}</span>
             </button>
           </div>
         </div>
@@ -125,33 +127,33 @@ export function WorkspaceSwitcher() {
       <ModalShell
         open={showCreateModal && !!account}
         onClose={() => setShowCreateModal(false)}
-        title="Create Workspace"
+        title={t('sidebar.createWorkspaceTitle')}
         className="sm:max-w-sm"
       >
         <form onSubmit={handleCreate} className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-muted mb-1" htmlFor="workspace-name">
-              Workspace Name
+              {t('sidebar.workspaceName')}
             </label>
             <Input
               id="workspace-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Workspace name"
+              placeholder={t('sidebar.workspaceNamePlaceholder')}
               autoFocus
               maxLength={100}
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               variant="primary"
               disabled={!name.trim() || createWorkspace.isPending}
             >
-              {createWorkspace.isPending ? 'Creating…' : 'Create Workspace'}
+              {createWorkspace.isPending ? t('sidebar.creatingWorkspace') : t('sidebar.createWorkspaceTitle')}
             </Button>
           </div>
         </form>

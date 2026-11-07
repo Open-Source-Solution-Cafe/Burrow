@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/Badge';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { toast } from 'sonner';
 import { useParams } from '@tanstack/react-router';
+import { useTranslation } from '../lib/i18n';
 interface CreatedInviteInfo {
   url: string;
   token: string;
@@ -17,6 +18,7 @@ interface CreatedInviteInfo {
 }
 
 export function MembersSettings() {
+  const { t } = useTranslation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: account } = useAccount();
   const { data: members = [], refetch: refetchMembers } = useMembers(workspaceId);
@@ -135,10 +137,10 @@ export function MembersSettings() {
       <div className="max-w-4xl mx-auto py-6 px-4 sm:py-8 sm:px-6 space-y-6 sm:space-y-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">
-            Workspace Members
+            {t('members.title')}
           </h1>
           <p className="text-sm text-[var(--muted)]">
-            Manage workspace teammates, roles, and pending invitations.
+            {t('members.subtitle')}
           </p>
         </div>
 
@@ -152,7 +154,7 @@ export function MembersSettings() {
         {isOwner && (
           <div className="border border-[var(--line)] chamfer-sm bg-[var(--surface)] p-4 sm:p-5 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-wider flex items-center gap-2 text-[var(--text)]">
-              <UserPlus className="w-4 h-4 text-[var(--accent)]" /> Invite a teammate
+              <UserPlus className="w-4 h-4 text-[var(--accent)]" /> {t('members.inviteTeammate')}
             </h2>
             <form onSubmit={handleCreateInvite} className="flex flex-col sm:flex-row gap-2">
               <Input
@@ -160,7 +162,7 @@ export function MembersSettings() {
                 required
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="colleague@example.com"
+                placeholder={t('members.teammateEmailPlaceholder')}
                 autoComplete="email"
                 inputMode="email"
                 autoCapitalize="none"
@@ -172,8 +174,8 @@ export function MembersSettings() {
                 onChange={(e) => setInviteRole(e.target.value as 'editor' | 'viewer')}
                 className="w-auto"
               >
-                <option value="editor">Editor</option>
-                <option value="viewer">Viewer</option>
+                <option value="editor">{t('common.roles.editor')}</option>
+                <option value="viewer">{t('common.roles.viewer')}</option>
               </Select>
               <Button
                 type="submit"
@@ -182,7 +184,7 @@ export function MembersSettings() {
                 disabled={createInvite.isPending}
                 className="px-4 font-medium"
               >
-                {createInvite.isPending ? 'Inviting…' : 'Generate Invite'}
+                {createInvite.isPending ? t('members.invitingButton') : t('members.generateInvite')}
               </Button>
             </form>
 
@@ -192,14 +194,17 @@ export function MembersSettings() {
                   <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text)]">
                     <Check className="w-4 h-4 text-[var(--c4)]" />
                     <span>
-                      Invitation created for {createdInvite.email} ({createdInvite.role})
+                      {t('members.inviteCreatedSuccess', {
+                        email: createdInvite.email,
+                        role: t(`common.roles.${createdInvite.role as 'owner' | 'editor' | 'viewer'}`),
+                      })}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setCreatedInvite(null)}
                     className="text-[var(--muted)] hover:text-[var(--text)] p-0.5 cursor-pointer"
-                    title="Dismiss"
+                    title={t('common.dismiss')}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -209,7 +214,7 @@ export function MembersSettings() {
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-medium text-[var(--muted)]">
-                      Invite Link (for one-click sign-up)
+                      {t('members.inviteLinkTitle')}
                     </span>
                     <a
                       href={createdInvite.url}
@@ -217,7 +222,7 @@ export function MembersSettings() {
                       rel="noreferrer"
                       className="text-[11px] text-[var(--accent)] hover:underline flex items-center gap-1"
                     >
-                      Open link <ExternalLink className="w-3 h-3" />
+                      {t('members.openLink')} <ExternalLink className="w-3 h-3" />
                     </a>
                   </div>
                   <div className="p-2 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
@@ -234,7 +239,7 @@ export function MembersSettings() {
                       ) : (
                         <Copy className="w-3.5 h-3.5" />
                       )}
-                      <span>{copiedUrl ? 'Copied' : 'Copy Link'}</span>
+                      <span>{copiedUrl ? t('common.copied') : t('members.copyLink')}</span>
                     </button>
                   </div>
                 </div>
@@ -242,8 +247,7 @@ export function MembersSettings() {
                 {/* Invite Token */}
                 <div className="space-y-1">
                   <span className="text-[11px] font-medium text-[var(--muted)] flex items-center gap-1">
-                    <KeyRound className="w-3 h-3 text-[var(--muted)]" /> Invite Token (for manual
-                    entry on registration page)
+                    <KeyRound className="w-3 h-3 text-[var(--muted)]" /> {t('members.inviteTokenTitle')}
                   </span>
                   <div className="p-2 bg-[var(--surface)] border border-[var(--line)] flex items-center justify-between gap-3 text-xs">
                     <code className="font-mono font-semibold text-[var(--text)] select-all tracking-wider">
@@ -259,14 +263,13 @@ export function MembersSettings() {
                       ) : (
                         <Copy className="w-3.5 h-3.5" />
                       )}
-                      <span>{copiedToken ? 'Copied' : 'Copy Token'}</span>
+                      <span>{copiedToken ? t('common.copied') : t('members.copyToken')}</span>
                     </button>
                   </div>
                 </div>
 
                 <p className="text-[11px] text-[var(--muted)]">
-                  The recipient can click the link to register instantly, or enter this invite token
-                  manually if they are on the sign-up page.
+                  {t('members.inviteHelpNotice')}
                 </p>
               </div>
             )}
@@ -276,7 +279,7 @@ export function MembersSettings() {
         {/* Members List */}
         <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
           <div className="px-4 py-2.5 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
-            Members ({members.length})
+            {t('members.membersCount', { count: members.length })}
           </div>
 
           {members.map((member) => (
@@ -289,7 +292,7 @@ export function MembersSettings() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-[var(--text)] truncate flex items-center gap-2">
                     <span className="truncate">{member.name}</span>
-                    {member.userId === account?.user?.id && <Badge className="shrink-0">You</Badge>}
+                    {member.userId === account?.user?.id && <Badge className="shrink-0">{t('common.roles.you')}</Badge>}
                   </div>
                   <div className="text-xs text-[var(--muted)] truncate">{member.email}</div>
                 </div>
@@ -307,12 +310,12 @@ export function MembersSettings() {
                     }
                     className="text-xs px-2 py-1 w-auto"
                   >
-                    <option value="owner">Owner</option>
-                    <option value="editor">Editor</option>
-                    <option value="viewer">Viewer</option>
+                    <option value="owner">{t('common.roles.owner')}</option>
+                    <option value="editor">{t('common.roles.editor')}</option>
+                    <option value="viewer">{t('common.roles.viewer')}</option>
                   </Select>
                 ) : (
-                  <Badge className="capitalize">{member.role}</Badge>
+                  <Badge className="capitalize">{t(`common.roles.${member.role as 'owner' | 'editor' | 'viewer'}`)}</Badge>
                 )}
 
                 {isOwner && member.userId !== account?.user?.id && (
@@ -321,7 +324,7 @@ export function MembersSettings() {
                     size="sm"
                     onClick={() => setMemberToRemove({ id: member.userId, name: member.name })}
                     className="p-1.5 text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
-                    title="Remove member"
+                    title={t('members.removeMember')}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -335,14 +338,14 @@ export function MembersSettings() {
         {isOwner && invites.length > 0 && (
           <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] divide-y divide-[var(--hair)] overflow-hidden">
             <div className="px-4 py-2.5 text-xs font-semibold text-[var(--muted)] uppercase tracking-wider bg-[var(--surface2)]">
-              Pending Invites ({invites.length})
+              {t('members.pendingInvitesCount', { count: invites.length })}
             </div>
 
             {invites.map((inv) => (
               <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm">
                 <div>
                   <span className="font-medium text-[var(--text)]">{inv.email}</span>
-                  <span className="ml-2 text-xs text-[var(--muted)] capitalize">({inv.role})</span>
+                  <span className="ml-2 text-xs text-[var(--muted)] capitalize">({t(`common.roles.${inv.role as 'owner' | 'editor' | 'viewer'}`)})</span>
                 </div>
                 <button
                   onClick={() =>
@@ -353,7 +356,7 @@ export function MembersSettings() {
                   }
                   className="text-xs text-[var(--danger)] hover:underline cursor-pointer py-1 px-1.5"
                 >
-                  Revoke
+                  {t('members.revokeInvite')}
                 </button>
               </div>
             ))}
@@ -362,9 +365,9 @@ export function MembersSettings() {
 
         <ConfirmDialog
           open={!!memberToRemove}
-          title="Remove Member"
-          message={`Are you sure you want to remove "${memberToRemove?.name || 'this member'}" from the workspace?`}
-          confirmLabel="Remove"
+          title={t('members.confirmRemoveMemberTitle')}
+          message={t('members.confirmRemoveMemberMessage', { name: memberToRemove?.name || '' })}
+          confirmLabel={t('common.remove')}
           danger={true}
           busy={isRemoving}
           onConfirm={handleRemoveMember}

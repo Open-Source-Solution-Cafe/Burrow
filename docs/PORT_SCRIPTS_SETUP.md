@@ -35,7 +35,7 @@ work from this summary alone.
 | `scripts/seed.sql`             | Demo data (new project only — see Step 5)                                                                                          |
 | `scripts/check-invariants.sql` | One query per invariant for SQLite/D1 (new project only — see Step 5)                                                              |
 | `scripts/check-invariants.postgres.sql` | PostgreSQL equivalents for I1–I13, including generated search-vector validation                                     |
-| `.dev.vars.example`            | Env template; `dev.mjs` copies it to git-ignored `.dev.vars`                                                                       |
+| `.env.example`                 | Env template; copy to git-ignored `.env`                                                                            |
 
 **Also in scope — edit these:**
 
@@ -86,14 +86,14 @@ real Windows/Cloudflare failures:
    calls `printWranglerTroubleshooting` when the command mentions `wrangler`, then
    `process.exit(status)`.
 4. **`getWranglerConfigArgs()`** is the important one. It must:
-   - read `D1_DATABASE_ID` / `CLOUDFLARE_D1_DATABASE_ID` from `.env` or `.dev.vars`;
+   - read `D1_DATABASE_ID` / `CLOUDFLARE_D1_DATABASE_ID` from `.env`;
    - fall back to an existing `wrangler.local.jsonc`;
    - fall back to `wrangler d1 list --json`, match by `database_name`, and write the
-     discovered UUID back into `.dev.vars` if `D1_DATABASE_ID=` is present but blank;
+     discovered UUID back into `.env` if `D1_DATABASE_ID=` is present but blank;
    - generate a **git-ignored** `wrangler.local.jsonc` (base config with only
      `database_id` overridden) and return `['--config', 'wrangler.local.jsonc']`.
      This exists so no personal UUID or account id is ever committed to `wrangler.jsonc`.
-5. **`loadEnv()`** parses both `.env` and `.dev.vars`, strips matching quotes, and never
+5. **`loadEnv()`** parses `.env`, strips matching quotes, and never
    overwrites an already-set `process.env` key.
 6. **`smoke(url)`** polls `GET <url>/api/health`, 3 attempts / 2s apart, prints the body
    on success. **The new project must expose a `GET /api/health` route returning 2xx**,
@@ -113,7 +113,7 @@ commented-out step.
 
 `dev.mjs` must keep all of:
 
-- copy `.dev.vars.example` → `.dev.vars` if missing;
+- copy `.env.example` → `.env` if missing;
 - write a placeholder `dist/web/index.html` if absent, so wrangler does not fail on a
   missing assets directory before the first build;
 - launch **both** children with `stdio: ['ignore', 'inherit', 'inherit']` — inheriting
@@ -240,7 +240,7 @@ teardown, seed:local, test, e2e, logs, typecheck, lint, format
   that is the whole point of the `wrangler.local.jsonc` indirection.
 - **R2**: include `r2_buckets[0]` only if the new project uses R2; `teardown.mjs` and
   `setup.mjs` both reference the bucket name.
-- **`.dev.vars.example`**: `D1_DATABASE_ID=` and `CLOUDFLARE_ACCOUNT_ID=` blank,
+- **`.env.example`**: `D1_DATABASE_ID=` and `CLOUDFLARE_ACCOUNT_ID=` blank,
   `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL=http://localhost:<vite port>`, `BOOTSTRAP_TOKEN`.
 - **`.gitignore`**: `.dev.vars`, `.env`, `wrangler.local.jsonc`, `.deploy-log`,
   `.secrets.tmp.json`, `.wrangler/`, `dist/`, `node_modules/`.
@@ -274,7 +274,7 @@ pnpm teardown                 # type TEARDOWN; confirm resources are gone
 
 Additional acceptance criteria:
 
-- `grep -rni burrow scripts/ package.json .dev.vars.example` returns nothing.
+- `grep -rni burrow scripts/ package.json .env.example` returns nothing.
 - Every destructive script (reset, teardown) refuses without its typed confirmation phrase,
   and its `--force` path still works.
 - No script prints a secret value other than `BOOTSTRAP_TOKEN` in the final summary.

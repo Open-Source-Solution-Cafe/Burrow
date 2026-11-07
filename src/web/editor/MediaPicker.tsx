@@ -6,6 +6,7 @@ import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { MediaUploadControl, ProjectMediaBrowser } from '../components/media/ProjectMediaLibrary';
 import { parseMediaUrl } from './mediaUrl';
+import { useTranslation } from '../lib/i18n';
 
 export type MediaSelection =
   { kind: 'image' | 'file'; url: string; name?: string } | NonNullable<ReturnType<typeof parseMediaUrl>>;
@@ -21,6 +22,7 @@ export function MediaPicker({
   onSelect: (selection: MediaSelection) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState('upload');
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,11 +39,11 @@ export function MediaPicker({
       onSelect(selection);
       onClose();
     } catch {
-      toast.error('Could not insert media. Try again.');
+      toast.error(t('editor.couldNotInsertMedia'));
     }
   };
   return (
-    <ModalShell open onClose={busy ? undefined : onClose} title="Insert media">
+    <ModalShell open onClose={busy ? undefined : onClose} title={t('editor.insertMedia')}>
       <div className="space-y-4">
         <SegmentedControl
           value={tab}
@@ -50,9 +52,9 @@ export function MediaPicker({
           }}
           fullWidth
           options={[
-            { value: 'upload', label: 'Upload' },
-            { value: 'library', label: 'Project library' },
-            { value: 'link', label: 'Link' },
+            { value: 'upload', label: t('media.upload') },
+            { value: 'library', label: t('editor.projectLibrary') },
+            { value: 'link', label: t('editor.link') },
           ]}
         />
         {tab === 'upload' && (
@@ -79,28 +81,28 @@ export function MediaPicker({
               event.preventDefault();
               const selection = parseMediaUrl(url);
               if (!selection) {
-                toast.error('Enter a valid HTTP or HTTPS URL');
+                toast.error(t('editor.validUrlPrompt'));
                 return;
               }
               select(selection);
             }}
           >
             <Input
-              aria-label="Media URL"
+              aria-label={t('editor.link')}
               placeholder="https://www.youtube.com/watch?v=…"
               value={url}
               onChange={(event) => setUrl(event.target.value)}
             />
             <p className="text-xs text-[var(--muted)]">
-              YouTube videos play inline. Other websites are inserted as links.
+              {t('editor.youtubeInlineNote')}
             </p>
             <Button type="submit" disabled={!url.trim()}>
-              Insert link
+              {t('editor.insertLink')}
             </Button>
           </form>
         )}
         <Button onClick={onClose} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </Button>
       </div>
     </ModalShell>

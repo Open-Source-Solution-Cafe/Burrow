@@ -68,3 +68,16 @@
 - **Always parallelize large tasks.** If a task touches 3+ files, spans multiple independent areas/components, or has separable workstreams (e.g. foundation + feature areas, independent files, research + implementation), split it into parallel `subagent` workers instead of doing it sequentially.
 - **Split by disjoint file sets.** Give each subagent an explicit ONLY-these-files scope so edits never overlap. Shared contracts (new APIs, token names, types) must be specified identically in every prompt, or built first by one agent before the others consume them.
 - **Verify after merging.** Parallel agents' outputs can drift (e.g. TODO fallbacks, duplicated helpers). After they complete, always re-check ground truth yourself: typecheck, grep for leftovers, and run a build before reporting done.
+
+## Versioning & Changelog Protocol (Learned 2026-11-06)
+
+- **Update `CHANGELOG.md` on every completed task**: Whenever completing an issue, feature, bugfix, or refactor in `Burrow`, add a concise bullet under the relevant heading (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`) inside the `## [Unreleased]` section of `CHANGELOG.md`.
+- **Zero SaaS / hosted vocabulary in changelog entries**: Never mention `stripe`, `billing`, `enterprise`, `burrow-cloud`, `organization`, `org_id`, `tenant`, or `coolify` in `CHANGELOG.md`. Run `node scripts/check-decoupling.mjs` to ensure 0 violations.
+- **Explicit migration notes**: If a task introduces or alters database migrations (`migrations/` or `migrations/postgres/`), add an entry noting the migration and runtime behavior.
+- **Agent-driven release cut**: When asked to bump version or cut a release:
+  1. Determine SemVer bump (`patch`, `minor`, `major`).
+  2. Update `"version"` in `Burrow/package.json`.
+  3. Clean up, polish, and promote the `## [Unreleased]` bullet points into `## [X.Y.Z] - YYYY-MM-DD`.
+  4. Reset an empty `## [Unreleased]` template block at the top of `CHANGELOG.md`.
+  5. Verify `node scripts/check-decoupling.mjs` and `pnpm check`.
+

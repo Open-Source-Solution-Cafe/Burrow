@@ -5,6 +5,7 @@ import { useMarkNotificationsRead, useNotifications } from '../../lib/queries';
 import { Avatar } from '../ui/Avatar';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { boardTarget, notepadTarget, workspaceTasksTarget } from '../../lib/workspaceRoutes';
+import { useTranslation } from '../../lib/i18n';
 
 interface NotificationItem {
   id: string;
@@ -30,6 +31,7 @@ export function NotificationsBell({
   projectId?: string;
 }) {
   const navigate = useNavigate();
+  const { t, formatDate } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -79,7 +81,7 @@ export function NotificationsBell({
         type="button"
         onClick={() => setIsOpen(!isOpen)}
         className="relative flex h-11 w-11 md:h-8 md:w-8 items-center justify-center text-muted hover:text-text hover:bg-hi transition"
-        title="Notifications"
+        title={t('notifications.title')}
       >
         <Bell className="w-4 h-4" />
         {unreadCount > 0 && (
@@ -91,7 +93,7 @@ export function NotificationsBell({
         <div className="absolute right-0 top-full mt-1.5 w-80 bg-surface border border-line p-2 z-50 text-xs select-none">
           <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-hair">
             <span className="font-semibold text-text">
-              Notifications {unreadCount > 0 && `(${unreadCount})`}
+              {t('notifications.title')} {unreadCount > 0 && `(${unreadCount})`}
             </span>
             {unreadCount > 0 && (
               <button
@@ -100,14 +102,14 @@ export function NotificationsBell({
                 className="text-[11px] text-accent hover:underline flex items-center gap-1 font-medium min-h-[44px] md:min-h-0"
               >
                 <Check className="w-3 h-3" />
-                <span>Mark all read</span>
+                <span>{t('notifications.markAllRead')}</span>
               </button>
             )}
           </div>
 
           <div className="max-h-72 overflow-y-auto py-1 space-y-1">
             {notifications.length === 0 ? (
-              <div className="p-6 text-center text-muted italic">No notifications yet</div>
+              <div className="p-6 text-center text-muted italic">{t('notifications.noNotifications')}</div>
             ) : (
               notifications.map((n) => (
                 <div
@@ -126,11 +128,11 @@ export function NotificationsBell({
                   <div className="flex-1 min-w-0">
                     <div className="leading-tight">
                       <strong>{n.actor.name}</strong>{' '}
-                      {n.type === 'mention' ? 'mentioned you in' : 'assigned you to'}{' '}
-                      <span className="font-medium text-text">{n.targetTitle || 'a task'}</span>
+                      {n.type === 'mention' ? t('notifications.mentionedYouIn') : t('notifications.assignedYouTo')}{' '}
+                      <span className="font-medium text-text">{n.targetTitle || t('notifications.aTask')}</span>
                     </div>
                     <div className="text-[10px] text-muted mt-1">
-                      {new Date(n.createdAt).toLocaleDateString(undefined, {
+                      {formatDate(n.createdAt, {
                         month: 'short',
                         day: 'numeric',
                         hour: '2-digit',

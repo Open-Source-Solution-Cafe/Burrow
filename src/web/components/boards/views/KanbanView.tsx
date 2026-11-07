@@ -54,6 +54,7 @@ import { priorityBadgeTone } from '../../ui/status';
 import { AssignPickerModal, PriorityPickerModal, QuickPeekModal } from './BoardQuickModals';
 import { COMPLETED_COLUMN_RE, PRIORITY_BADGES, type CardItem, type ColumnItem } from './types';
 import { computeCardDropTarget, computeColumnDropTarget } from '../kanbanReorder';
+import { useTranslation } from '../../../lib/i18n';
 
 interface KanbanViewProps {
   workspaceId: string;
@@ -269,6 +270,7 @@ function ColumnComponent({
   onRenameColumn: (columnId: string, currentName: string) => void;
   onOpenWipDialog: (column: { id: string; name: string; wipLimit?: number | null }) => void;
 }) {
+  const { t } = useTranslation();
   const [isAdding, setIsAdding] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -325,7 +327,7 @@ function ColumnComponent({
             e.stopPropagation();
             setIsCollapsed(false);
           }}
-          aria-label="Expand column"
+          aria-label={t('boards.expandColumn')}
           className="h-7 w-7 flex items-center justify-center text-[var(--ink-muted)] hover:bg-[var(--hi)] hover:text-[var(--text)] theme-radius-xs cursor-pointer"
         >
           <ChevronRight className="w-4 h-4" />
@@ -396,8 +398,8 @@ function ColumnComponent({
           <button
             type="button"
             onClick={() => setIsCollapsed(true)}
-            aria-label="Collapse column"
-            title="Collapse column"
+            aria-label={t('boards.collapseColumn')}
+            title={t('boards.collapseColumn')}
             className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -408,8 +410,8 @@ function ColumnComponent({
             ref={setActivatorNodeRef}
             {...attributes}
             {...listeners}
-            aria-label="Drag to reorder column"
-            title="Drag to reorder"
+            aria-label={t('boards.dragToReorder')}
+            title={t('boards.dragToReorder')}
             className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs cursor-grab active:cursor-grabbing touch-none transition"
           >
             <GripVertical className="w-3.5 h-3.5" />
@@ -418,7 +420,7 @@ function ColumnComponent({
           <div className="relative">
             <button
               onClick={() => setShowMenu(!showMenu)}
-              aria-label="Column menu"
+              aria-label={t('boards.columnOptions')}
               className="h-7 w-7 sm:h-6 sm:w-6 flex items-center justify-center text-[var(--ink-muted)] hover:text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs transition cursor-pointer"
             >
               <MoreHorizontal className="w-3.5 h-3.5" />
@@ -435,7 +437,7 @@ function ColumnComponent({
                   className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs cursor-pointer text-left"
                 >
                   <Edit2 className="w-3.5 h-3.5" />
-                  <span>Rename</span>
+                  <span>{t('boards.renameColumn')}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -449,7 +451,7 @@ function ColumnComponent({
                   className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--text)] hover:bg-[var(--hi)] theme-radius-xs cursor-pointer text-left"
                 >
                   <CheckSquare className="w-3.5 h-3.5" />
-                  <span>WIP limit…</span>
+                  <span>{t('boards.wipLimitMenu')}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -459,7 +461,7 @@ function ColumnComponent({
                   className="w-full flex items-center gap-2 px-2 py-1.5 text-[var(--danger)] hover:bg-[var(--hi)] theme-radius-xs cursor-pointer text-left"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete</span>
+                  <span>{t('common.delete')}</span>
                 </button>
               </div>
             )}
@@ -488,7 +490,7 @@ function ColumnComponent({
                 : 'border-[var(--hair)] text-[var(--ink-muted)]/70'
             }`}
           >
-            Drop cards here
+            {t('boards.dropCardsHere')}
           </div>
         )}
       </div>
@@ -510,7 +512,7 @@ function ColumnComponent({
             className="w-full flex items-center justify-center gap-1.5 h-8 px-2 border border-dashed border-[var(--line)] text-[var(--ink-muted)] hover:text-[var(--text)] hover:border-[var(--accent)] text-xs font-semibold transition cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add card</span>
+            <span>{t('boards.addCard')}</span>
           </button>
         )}
       </div>
@@ -528,6 +530,7 @@ export function KanbanView({
   setIsAddingColumn,
   onCardClick,
 }: KanbanViewProps) {
+  const { t } = useTranslation();
   const moveCardMutation = useMoveCard();
   const moveColumnMutation = useMoveColumn();
   const createColumnMutation = useCreateColumn();
@@ -828,7 +831,7 @@ export function KanbanView({
             <Input
               autoFocus
               type="text"
-              placeholder="Column name…"
+              placeholder={t('boards.columnNamePlaceholder')}
               value={newColumnName}
               onChange={(e) => setNewColumnName(e.target.value)}
               onKeyDown={(e) => {
@@ -850,7 +853,7 @@ export function KanbanView({
                 disabled={!newColumnName.trim() || createColumnMutation.isPending}
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>{createColumnMutation.isPending ? 'Adding…' : 'Add Column'}</span>
+                <span>{createColumnMutation.isPending ? t('common.saving') : t('boards.addColumn')}</span>
               </Button>
               <button
                 type="button"
@@ -858,9 +861,9 @@ export function KanbanView({
                   setIsAddingColumn(false);
                   setNewColumnName('');
                 }}
-                aria-label="Cancel"
+                aria-label={t('common.cancel')}
                 className="h-8 w-8 flex items-center justify-center hover:bg-[var(--hi)] text-[var(--ink-muted)] hover:text-[var(--text)] transition cursor-pointer theme-radius-xs"
-                title="Cancel"
+                title={t('common.cancel')}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -873,7 +876,7 @@ export function KanbanView({
             className="w-[300px] md:w-[320px] shrink-0 snap-start h-12 border border-dashed border-[var(--line)] hover:border-[var(--accent)] hover:text-[var(--accent)] text-xs font-semibold text-[var(--ink-muted)] transition flex items-center justify-center gap-2 cursor-pointer select-none"
           >
             <Plus className="w-4 h-4" />
-            <span>Add Column</span>
+            <span>{t('boards.addColumn')}</span>
           </button>
         )}
       </div>
@@ -881,15 +884,15 @@ export function KanbanView({
       {/* WIP Limit Prompt Dialog */}
       <PromptDialog
         open={!!wipPromptColumn}
-        title={`Set WIP limit for "${wipPromptColumn?.name}"`}
-        message="Enter maximum number of cards for this column (leave empty to remove limit):"
-        placeholder="e.g. 5"
+        title={t('boards.wipLimitPromptTitle', { name: wipPromptColumn?.name || '' })}
+        message={t('boards.wipLimitPromptMessage')}
+        placeholder={t('boards.wipLimitPlaceholder')}
         defaultValue={
           wipPromptColumn?.wipLimit != null && wipPromptColumn.wipLimit > 0
             ? String(wipPromptColumn.wipLimit)
             : ''
         }
-        confirmLabel="Save"
+        confirmLabel={t('common.save')}
         allowEmpty={true}
         busy={updateColumnMutation.isPending}
         onConfirm={(val) => {
@@ -902,7 +905,7 @@ export function KanbanView({
             if (!Number.isNaN(parsed) && parsed >= 0 && parsed <= 999) {
               handleSetWipLimit(wipPromptColumn.id, parsed);
             } else {
-              toast.error('WIP limit must be a number between 0 and 999');
+              toast.error(t('boards.wipLimitValidation'));
               return;
             }
           }
@@ -920,13 +923,13 @@ export function KanbanView({
           return (
             <ConfirmDialog
               open={true}
-              title="Delete column"
+              title={t('boards.deleteColumn')}
               message={
                 hasCards && moveToCol
                   ? `Column "${columnToDelete.name}" has ${columnToDelete.cardCount} card(s). They will be moved to "${moveToCol.name}". Are you sure you want to delete this column?`
-                  : `Are you sure you want to delete column "${columnToDelete.name}"?`
+                  : t('boards.confirmDeleteColumn', { name: columnToDelete.name })
               }
-              confirmLabel="Delete"
+              confirmLabel={t('common.delete')}
               danger={true}
               busy={deleteColumnMutation.isPending}
               onConfirm={() => {
@@ -942,10 +945,13 @@ export function KanbanView({
                     onSuccess: () => {
                       if (hasCards && moveToCol) {
                         toast.success(
-                          `Column deleted — ${columnToDelete.cardCount} cards moved to ${moveToCol.name}`,
+                          t('boards.deleteColumnCardsMoved', {
+                            count: columnToDelete.cardCount,
+                            name: moveToCol.name,
+                          }),
                         );
                       } else {
-                        toast.success('Column deleted');
+                        toast.success(t('boards.columnDeleted'));
                       }
                       setColumnToDelete(null);
                     },

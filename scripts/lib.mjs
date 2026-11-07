@@ -255,7 +255,7 @@ export async function smoke(url, { attempts = 3, delayMs = 2000 } = {}) {
   return false;
 }
 
-/** Load environment variables from .env and .dev.vars if present. */
+/** Load environment variables from .env if present. */
 export function loadEnv(target = process.env) {
   return canonicalLoadEnv({ rootDir: root, env: target });
 }
@@ -263,7 +263,7 @@ export function loadEnv(target = process.env) {
 /**
  * Returns wrangler CLI config args (--config wrangler.local.jsonc).
  * Auto-discovers D1_DATABASE_ID from Cloudflare if not provided in process.env,
- * and writes only to git-ignored ephemeral wrangler.local.jsonc (never mutates .env or .dev.vars).
+ * and writes only to git-ignored ephemeral wrangler.local.jsonc (never mutates .env).
  */
 export function getWranglerConfigArgs(options = {}) {
   const {

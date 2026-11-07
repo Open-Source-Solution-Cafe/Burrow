@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Pure parser: parses .env / .dev.vars content string into a Record<string, string>.
+ * Pure parser: parses .env content string into a Record<string, string>.
  * Strips comments, empty lines, and surrounding quotes.
  */
 export function parseEnvContent(content: string): Record<string, string> {
@@ -63,7 +63,7 @@ export interface LoadEnvOptions {
 }
 
 /**
- * Canonical environment loader: loads environment variables from .env and .dev.vars.
+ * Canonical environment loader: loads environment variables from .env (with fallback to legacy .dev.vars).
  * Single source of truth across CLI scripts (dev, dev:worker, setup) and server runtime (start).
  */
 export function loadEnv(options: LoadEnvOptions = {}): Record<string, string | undefined> {

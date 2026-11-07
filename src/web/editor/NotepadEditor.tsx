@@ -54,6 +54,7 @@ import { projectPath, projectTarget, projectApiPath } from '../lib/workspaceRout
 import { SaveConflictError, SaveLockController, type EditorScope } from './saveLockController';
 import { useTheme } from '../lib/theme';
 import { ReferenceScopeProvider } from './referenceScope';
+import { useTranslation } from '../lib/i18n';
 
 function getTabClientId(): string {
   if (typeof window === 'undefined') return nanoid();
@@ -214,6 +215,7 @@ function NotepadEditorInner({
   onReload,
   onScopeSwitchComplete,
 }: NotepadEditorInnerProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isModern, isDark } = useTheme();
@@ -817,11 +819,12 @@ function NotepadEditorInner({
             <Lock className="w-4 h-4 text-[var(--c2)] shrink-0" />
             <span>
               {lockBanner.isMe ? (
-                <>You are currently editing this notepad in another window or tab (read-only).</>
+                <>{t('editor.readOnlyOtherTab')}</>
               ) : (
                 <>
-                  <strong>{lockBanner.holderName}</strong> is currently editing this notepad
-                  (read-only).
+                  <strong>{lockBanner.holderName}</strong>{' '}
+                  {t('editor.readOnlyOtherUser', { name: '' }).replace(/^\s*\{\w+\}\s*/, '').trim() ||
+                    t('editor.readOnlyOtherUser', { name: lockBanner.holderName })}
                 </>
               )}
             </span>
@@ -839,7 +842,7 @@ function NotepadEditorInner({
                 }}
                 className="px-2.5 py-1 text-xs font-medium"
               >
-                Edit Here Instead
+                {t('editor.editHereInstead')}
               </Button>
             )}
             <Button
@@ -853,7 +856,7 @@ function NotepadEditorInner({
               }}
               className="px-2.5 py-1 text-xs font-medium"
             >
-              Check Availability
+              {t('editor.checkAvailability')}
             </Button>
           </div>
         </div>
@@ -864,7 +867,7 @@ function NotepadEditorInner({
         <div className="p-3 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--c4)] flex items-center justify-between gap-3 text-xs text-[var(--text)]">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-[var(--c4)] shrink-0" />
-            <span>This notepad is now available to edit.</span>
+            <span>{t('editor.availableToEdit')}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -878,7 +881,7 @@ function NotepadEditorInner({
               }}
               className="px-2.5 py-1 bg-[var(--accent)] text-[var(--accent-ink)] text-xs font-medium transition cursor-pointer"
             >
-              Start Editing
+              {t('editor.startEditing')}
             </button>
             <button
               onClick={() => {
@@ -899,7 +902,7 @@ function NotepadEditorInner({
         <div className="p-3 bg-[var(--surface2)] border border-[var(--line)] border-l-4 border-l-[var(--danger)] flex items-center justify-between gap-3 text-xs text-[var(--text)]">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-[var(--danger)]" />
-            <span>This notepad changed elsewhere. Reload to get latest changes or overwrite.</span>
+            <span>{t('editor.conflictWarning')}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -909,7 +912,7 @@ function NotepadEditorInner({
               }}
               className="px-2.5 py-1 bg-[var(--surface)] border border-[var(--line)] text-xs font-medium hover:bg-[var(--hi)] cursor-pointer"
             >
-              Reload
+              {t('editor.reload')}
             </button>
             <button
               onClick={async () => {
@@ -934,7 +937,7 @@ function NotepadEditorInner({
               }}
               className="px-2.5 py-1 bg-[var(--danger)] text-white text-xs font-medium cursor-pointer"
             >
-              Overwrite
+              {t('editor.overwrite')}
             </button>
           </div>
         </div>
@@ -945,7 +948,7 @@ function NotepadEditorInner({
         <div className="p-3 bg-[var(--surface2)] border border-[var(--danger)]/40 border-l-4 border-l-[var(--danger)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-[var(--text)]">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-[var(--danger)] shrink-0" />
-            <span>Could not save changes to server. Your edits are held locally.</span>
+            <span>{t('editor.saveErrorOffline')}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -953,14 +956,14 @@ function NotepadEditorInner({
               onClick={() => void saveController.retry()}
               className="px-3 py-1.5 bg-[var(--danger)] text-white text-xs font-medium hover:brightness-110 transition cursor-pointer flex items-center justify-center min-h-[36px] sm:min-h-0"
             >
-              Retry save
+              {t('editor.retrySave')}
             </button>
             <button
               type="button"
               onClick={handleDiscardSave}
               className="px-2.5 py-1.5 text-[var(--muted)] hover:text-[var(--text)] underline text-xs cursor-pointer flex items-center justify-center min-h-[36px] sm:min-h-0"
             >
-              Discard
+              {t('editor.discard')}
             </button>
           </div>
         </div>
@@ -1066,7 +1069,7 @@ function NotepadEditorInner({
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: data.title || 'Untitled Notepad',
+          title: data.title || t('editor.untitled'),
           url: window.location.href,
         });
         return;
@@ -1075,8 +1078,8 @@ function NotepadEditorInner({
       }
     }
     navigator.clipboard?.writeText(window.location.href);
-    toast.success('Notepad link copied to clipboard');
-  }, [data.title]);
+    toast.success(t('editor.shareCopied'));
+  }, [data.title, t]);
 
   const tagsNode = (
     <div className="flex items-center gap-1.5 flex-wrap">
@@ -1090,7 +1093,7 @@ function NotepadEditorInner({
           <button
             type="button"
             onClick={() => removeTag(tag.id)}
-            title={`Remove #${tag.name}`}
+            title={`${t('common.remove')} #${tag.name}`}
             className="p-1 min-w-[24px] min-h-[24px] flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] cursor-pointer"
           >
             <X className="w-3 h-3" />
@@ -1102,11 +1105,11 @@ function NotepadEditorInner({
         <button
           type="button"
           onClick={() => setShowTagMenu((v) => !v)}
-          title="Add tag"
+          title={t('editor.tag')}
           className="inline-flex items-center gap-1 px-2.5 py-1 text-xs border border-dashed border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--muted)] bg-[var(--surface)] transition cursor-pointer select-none min-h-[30px]"
         >
           <Plus className="w-3 h-3" />
-          <span>Tag</span>
+          <span>{t('editor.tag')}</span>
         </button>
 
         {showTagMenu && (
@@ -1130,7 +1133,7 @@ function NotepadEditorInner({
                       setShowTagMenu(false);
                     }
                   }}
-                  placeholder="Search or new tag…"
+                  placeholder={t('editor.searchOrNewTag')}
                   className="w-full px-2 py-1.5 text-base sm:text-xs bg-[var(--surface2)] border border-[var(--line)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
@@ -1157,12 +1160,12 @@ function NotepadEditorInner({
                     className="w-full text-left px-2 py-1.5 min-h-[36px] sm:min-h-0 text-xs hover:bg-[var(--accent)] hover:text-[var(--accent-ink)] flex items-center gap-1.5 text-[var(--accent)] hover:text-[var(--accent-ink)] font-medium cursor-pointer transition"
                   >
                     <Plus className="w-3 h-3 shrink-0" />
-                    <span>Create "#{cleanTagSearch}"</span>
+                    <span>{t('editor.createTag', { name: cleanTagSearch })}</span>
                   </button>
                 )}
                 {!cleanTagSearch && availableTags.length === 0 && (
                   <div className="p-2 text-center text-xs text-[var(--muted)]">
-                    No other tags. Type to create.
+                    {t('editor.noOtherTags')}
                   </div>
                 )}
               </div>
@@ -1178,7 +1181,7 @@ function NotepadEditorInner({
       <Button
         variant="ghost"
         onClick={() => setShowExportMenu((v) => !v)}
-        title="Document actions"
+        title={t('common.actions')}
         className="p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 border border-[var(--line)] text-[var(--muted)] hover:text-[var(--text)] transition flex items-center justify-center cursor-pointer"
       >
         <MoreHorizontal className="w-4 h-4" />
@@ -1198,7 +1201,7 @@ function NotepadEditorInner({
               className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
             >
               <Share2 className="w-3.5 h-3.5 text-[var(--accent)]" />
-              <span>Share notepad…</span>
+              <span>{t('editor.shareNotepad')}</span>
             </button>
             <button
               onClick={() => {
@@ -1208,7 +1211,7 @@ function NotepadEditorInner({
               className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
             >
               <LayoutTemplate className="w-3.5 h-3.5" />
-              <span>Apply a template…</span>
+              <span>{t('editor.applyTemplate')}</span>
             </button>
             <button
               onClick={() => {
@@ -1218,7 +1221,7 @@ function NotepadEditorInner({
               className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Export to Markdown</span>
+              <span>{t('editor.exportMarkdown')}</span>
             </button>
             <button
               onClick={() => {
@@ -1228,7 +1231,7 @@ function NotepadEditorInner({
               className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--text)] hover:bg-[var(--hi)] min-h-[44px] sm:min-h-0 cursor-pointer"
             >
               <Printer className="w-3.5 h-3.5" />
-              <span>Print / Export as PDF</span>
+              <span>{t('editor.printExportPdf')}</span>
             </button>
             <div className="my-1 border-t border-[var(--line)]" />
             {data.kind !== 'card' && (
@@ -1240,7 +1243,7 @@ function NotepadEditorInner({
                 className="w-full flex items-center gap-2 px-2.5 py-2 sm:py-1.5 text-[var(--danger)] hover:bg-[var(--danger)]/10 min-h-[44px] sm:min-h-0 cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete to Trash</span>
+                <span>{t('editor.deleteToTrash')}</span>
               </button>
             )}
           </div>
@@ -1253,7 +1256,7 @@ function NotepadEditorInner({
     <div className="no-print w-full flex items-center justify-between gap-3 p-3 border border-dashed border-[var(--line)] bg-[var(--surface2)] text-xs">
       <div className="flex items-center gap-2 text-[var(--muted)]">
         <LayoutTemplate className="w-4 h-4 text-[var(--accent)] shrink-0" />
-        <span>This page is empty — start from a template?</span>
+        <span>{t('editor.emptyPagePrompt')}</span>
       </div>
       <div className="flex items-center gap-2">
         <Button
@@ -1261,10 +1264,10 @@ function NotepadEditorInner({
           onClick={() => setDialogState({ type: 'template' })}
           className="px-2.5 py-1 font-medium"
         >
-          Browse templates
+          {t('editor.browseTemplates')}
         </Button>
         <Button variant="secondary" onClick={() => setIsBlank(false)} className="px-2.5 py-1">
-          Write from scratch
+          {t('editor.writeFromScratch')}
         </Button>
       </div>
     </div>
@@ -1363,7 +1366,7 @@ function NotepadEditorInner({
         ) : (
           <ChevronRight className="w-3.5 h-3.5" />
         )}
-        <span>Backlinks ({data.backlinks.length})</span>
+        <span>{t('editor.backlinks', { count: data.backlinks.length })}</span>
       </button>
 
       {showBacklinks && (
@@ -1433,9 +1436,10 @@ function NotepadEditorInner({
       {/* Delete to Trash confirmation */}
       <ConfirmDialog
         open={confirmDeleteOpen}
-        title="Delete notepad"
-        message={`Move "${data.title || 'Untitled'}" to Trash? You can restore it from Trash if needed.`}
-        confirmLabel="Delete to Trash"
+        title={t('editor.deleteNotepadTitle')}
+        message={t('editor.deleteNotepadConfirm', { title: data.title || t('editor.untitled') })}
+        confirmLabel={t('editor.deleteToTrash')}
+        cancelLabel={t('common.cancel')}
         danger
         busy={isDeleting}
         onConfirm={handleDeleteNotepad}
@@ -1532,10 +1536,10 @@ function NotepadEditorInner({
               className="flex items-center gap-1.5 text-xs text-[var(--muted)]"
               title={
                 saveStatus === 'saving'
-                  ? 'Saving changes…'
+                  ? t('editor.saving')
                   : saveStatus === 'saved'
-                  ? 'All changes saved'
-                  : 'Save failed — click to retry'
+                  ? t('editor.saved')
+                  : t('editor.failed')
               }
             >
               {saveStatus === 'error' || saveStatus === 'conflict' ? (
@@ -1543,10 +1547,10 @@ function NotepadEditorInner({
                   type="button"
                   onClick={() => void saveController.retry()}
                   className="flex items-center gap-1 text-[var(--danger)] hover:underline cursor-pointer"
-                  title="Save failed — click to retry"
+                  title={t('editor.retrySave')}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline">Failed</span>
+                  <span className="hidden sm:inline">{t('editor.failed')}</span>
                 </button>
               ) : (
                 <>
@@ -1554,7 +1558,7 @@ function NotepadEditorInner({
                     className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
                   />
                   <span className="hidden sm:inline">
-                    {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                    {saveStatus === 'saving' ? t('editor.saving') : t('editor.saved')}
                   </span>
                 </>
               )}
@@ -1600,7 +1604,7 @@ function NotepadEditorInner({
             }
           }
         }}
-        placeholder="Untitled"
+        placeholder={t('editor.untitled')}
         disabled={!isEditable}
         className={
           isModern
@@ -1625,14 +1629,14 @@ function NotepadEditorInner({
             <Link
               {...projectTarget(data.workspaceId, data.projectId)}
               className="flex items-center gap-1 text-[var(--muted)] hover:text-[var(--text)] transition shrink-0 py-1.5 pr-1 min-h-[44px] sm:min-h-0 font-medium"
-              title="Back to project"
+              title={t('editor.backToProject')}
             >
               <ChevronLeft className="w-4 h-4 sm:hidden shrink-0" />
-              <span>Notepads</span>
+              <span>{t('editor.notepads')}</span>
             </Link>
             <span className="opacity-50 hidden sm:inline">/</span>
             <span className="text-[var(--text)] font-medium truncate max-w-[200px] hidden sm:inline">
-              {data.title || 'Untitled'}
+              {data.title || t('editor.untitled')}
             </span>
           </div>
 
@@ -1644,22 +1648,22 @@ function NotepadEditorInner({
                   type="button"
                   onClick={() => void saveController.retry()}
                   className="flex items-center gap-1 text-[var(--danger)] hover:opacity-80 transition cursor-pointer p-1"
-                  title="Save failed — click to retry"
-                  aria-label="Save failed, click to retry"
+                  title={t('editor.retrySave')}
+                  aria-label={t('editor.retrySave')}
                 >
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span className="hidden sm:inline text-xs font-medium">Failed</span>
+                  <span className="hidden sm:inline text-xs font-medium">{t('editor.failed')}</span>
                 </button>
               ) : (
                 <span
                   className="flex items-center gap-1.5 text-[var(--muted)] text-xs font-medium"
-                  title={saveStatus === 'saving' ? 'Saving changes…' : 'All changes saved'}
+                  title={saveStatus === 'saving' ? t('editor.saving') : t('editor.saved')}
                 >
                   <span
                     className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
                   />
                   <span className="hidden sm:inline">
-                    {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                    {saveStatus === 'saving' ? t('editor.saving') : t('editor.saved')}
                   </span>
                 </span>
               )}
@@ -1669,8 +1673,8 @@ function NotepadEditorInner({
               <button
                 type="button"
                 onClick={toggleFavorite}
-                title={data.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-                aria-label="Favorite"
+                title={data.isFavorite ? `${t('common.remove')} ${t('common.favorite')}` : `${t('common.add')} ${t('common.favorite')}`}
+                aria-label={t('common.favorite')}
                 className={`p-2 sm:p-1.5 min-w-[40px] min-h-[40px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
                   data.isFavorite
                     ? 'text-[var(--accent)]'
@@ -1686,7 +1690,7 @@ function NotepadEditorInner({
               onClick={() => void handleShare()}
               className="hidden sm:flex h-7 px-3 theme-radius-md bg-[var(--accent)] text-[var(--accent-ink)] font-semibold text-[13px] items-center hover:brightness-110 transition cursor-pointer"
             >
-              Share
+              {t('editor.share')}
             </button>
 
             <DocumentOutline editor={editor} containerRef={containerRef} variant="floating" />
@@ -1723,14 +1727,14 @@ function NotepadEditorInner({
           <Link
             {...projectTarget(data.workspaceId, data.projectId)}
             className="flex items-center gap-1 text-[var(--ink-muted)] hover:text-[var(--text)] transition shrink-0 py-1.5 pr-2 min-h-[44px] sm:min-h-0"
-            title="Back to project"
+            title={t('editor.backToProject')}
           >
             <ChevronLeft className="w-4 h-4 sm:hidden shrink-0" />
-            <span>Notepads</span>
+            <span>{t('editor.notepads')}</span>
           </Link>
           <span className="opacity-50 hidden sm:inline">/</span>
           <span className="text-[var(--text)] truncate max-w-[200px] hidden sm:inline">
-            {data.title || 'Untitled'}
+            {data.title || t('editor.untitled')}
           </span>
         </div>
 
@@ -1742,22 +1746,22 @@ function NotepadEditorInner({
                 type="button"
                 onClick={() => void saveController.retry()}
                 className="flex items-center gap-1 text-[var(--danger)] hover:opacity-80 transition cursor-pointer p-1"
-                title="Save failed — click to retry"
-                aria-label="Save failed, click to retry"
+                title={t('editor.retrySave')}
+                aria-label={t('editor.retrySave')}
               >
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline text-xs font-medium">Failed</span>
+                <span className="hidden sm:inline text-xs font-medium">{t('editor.failed')}</span>
               </button>
             ) : (
               <span
                 className="flex items-center gap-1.5 font-medium text-[var(--ink-muted)] text-xs sm:text-[13px]"
-                title={saveStatus === 'saving' ? 'Saving changes…' : 'All changes saved'}
+                title={saveStatus === 'saving' ? t('editor.saving') : t('editor.saved')}
               >
                 <span
                   className={`diamond-dot ${saveStatus === 'saving' ? 'animate-pulse' : 'opacity-70'}`}
                 />
                 <span className="hidden sm:inline">
-                  {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
+                  {saveStatus === 'saving' ? t('editor.saving') : t('editor.saved')}
                 </span>
               </span>
             )}
@@ -1782,8 +1786,8 @@ function NotepadEditorInner({
             <button
               type="button"
               onClick={toggleFavorite}
-              title={data.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-              aria-label="Favorite"
+              title={data.isFavorite ? `${t('common.remove')} ${t('common.favorite')}` : `${t('common.add')} ${t('common.favorite')}`}
+              aria-label={t('common.favorite')}
               className={`p-2 sm:p-1.5 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
                 data.isFavorite
                   ? 'text-[var(--accent)]'
@@ -1799,7 +1803,7 @@ function NotepadEditorInner({
             onClick={() => void handleShare()}
             className="hidden sm:flex h-8 px-[18px] chamfer-btn bg-[var(--accent)] text-[var(--accent-ink)] items-center text-[12px] font-display uppercase tracking-[0.08em] hover:brightness-110 transition cursor-pointer"
           >
-            Share
+            {t('editor.share')}
           </button>
 
           <div className="lg:hidden">
@@ -1835,7 +1839,7 @@ function NotepadEditorInner({
         className="no-print fixed bottom-7 left-1/2 -translate-x-1/2 z-20 hidden md:flex items-center gap-2.5 h-[42px] pl-4 pr-2.5 bg-[var(--side)] border border-[var(--line)] float-command-bar text-[var(--ink-muted)] hover:text-[var(--text)] hover:border-[var(--accent)] font-semibold text-[13px] transition cursor-pointer"
       >
         <Search className="w-4 h-4 shrink-0" />
-        <span className="w-[200px] text-left">Search or command</span>
+        <span className="w-[200px] text-left">{t('editor.searchOrCommand')}</span>
         <span className="border border-[var(--line)] px-2 py-0.5 text-[11px] text-[var(--text)]">
           Ctrl+K
         </span>
@@ -1853,6 +1857,7 @@ export function NotepadEditor({
   hideTitle = false,
   hideFavorite = false,
 }: NotepadEditorProps) {
+  const { t } = useTranslation();
   const { data: account } = useAccount();
   const [reloadKey, setReloadKey] = useState(0);
   const [displayedData, setDisplayedData] = useState<NotepadData | null>(null);
@@ -1873,14 +1878,14 @@ export function NotepadEditor({
           signal,
         },
       );
-      if (!response.ok) throw new Error('This notepad is unavailable in this project.');
+      if (!response.ok) throw new Error(t('editor.notepadNoLongerAvailable'));
       const note = (await response.json()) as NotepadData;
       if (
         note.id !== notepadId ||
         note.projectId !== projectId ||
         note.workspaceId !== workspaceId
       ) {
-        throw new Error('This notepad is unavailable in this project.');
+        throw new Error(t('editor.notepadNoLongerAvailable'));
       }
       return note;
     },
@@ -1912,9 +1917,9 @@ export function NotepadEditor({
     return (
       <div className="w-full p-12 max-w-xl mx-auto text-center space-y-4">
         <div className="text-4xl">📄</div>
-        <h2 className="text-lg font-semibold text-[var(--text)]">Notepad Unavailable</h2>
+        <h2 className="text-lg font-semibold text-[var(--text)]">{t('editor.notepadUnavailable')}</h2>
         <p className="text-xs text-[var(--muted)]">
-          {error?.message || 'This notepad is no longer available.'}
+          {error?.message || t('editor.notepadNoLongerAvailable')}
         </p>
       </div>
     );

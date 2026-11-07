@@ -22,7 +22,7 @@ import { toast } from 'sonner';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ThemeToggle } from './ThemeToggle';
-import { LanguageSelector } from '../ui/LanguageSelector';
+import { LanguageSelector, LanguageToggle } from '../ui/LanguageSelector';
 import { Badge } from '../ui/Badge';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { Avatar } from '../ui/Avatar';
@@ -42,6 +42,7 @@ import {
   useSystemVersion,
 } from '../../lib/queries';
 import { THEME_LABELS, useTheme, type BurrowTheme } from '../../lib/theme';
+import { useTranslation } from '../../lib/i18n';
 import { NotepadTree } from '../notepads/NotepadTree';
 import { NotificationsBell } from './NotificationsBell';
 import {
@@ -69,6 +70,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location.pathname;
+  const { t } = useTranslation();
   const { isModern, theme, setTheme } = useTheme();
   const { data: account } = useAccount();
   const params = useParams({ strict: false }) as {
@@ -92,7 +94,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       className={`flex items-center gap-2.5 px-2.5 py-2 text-sm theme-radius-md ${libraryActive ? 'bg-hi text-hi-ink font-semibold' : 'text-muted hover:bg-hi hover:text-text'}`}
     >
       <Library className="h-4 w-4 shrink-0" />
-      <span>Project library</span>
+      <span>{t('sidebar.projectLibrary')}</span>
     </Link>
   );
   const currentBoardId = params.boardId;
@@ -315,14 +317,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const renderAccountMenu = () => (
     <div className="absolute bottom-full left-0 mb-2 w-60 max-w-[calc(100vw-2rem)] bg-surface border border-line theme-radius-md p-1 z-50 text-xs">
       <div className="px-3 py-2 border-b border-hair">
-        <div className="font-semibold text-text truncate">{account?.user?.name || 'Account'}</div>
+        <div className="font-semibold text-text truncate">{account?.user?.name || t('sidebar.account')}</div>
         {account?.user?.email && (
           <div className="text-[11px] text-muted truncate">{account.user.email}</div>
         )}
         {workspaceRole && (
           <div className="mt-1">
             <span className="inline-block px-1.5 py-0.5 text-[9px] uppercase font-mono tracking-wider bg-hi text-muted border border-hair theme-radius-xs">
-              {workspaceRole}
+              {t(`common.roles.${workspaceRole as 'owner' | 'editor' | 'viewer'}`).toUpperCase()}
             </span>
           </div>
         )}
@@ -338,7 +340,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
         >
           <Settings className="w-3.5 h-3.5" />
-          <span>Settings</span>
+          <span>{t('sidebar.settings')}</span>
         </button>
         {workspaceRole === 'owner' && (
           <button
@@ -350,7 +352,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Workspace Members</span>
+            <span>{t('sidebar.workspaceMembers')}</span>
           </button>
         )}
       </div>
@@ -365,7 +367,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           >
             <span className="flex items-center gap-1.5 font-medium">
               <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
-              <span>Update available</span>
+              <span>{t('sidebar.updateAvailable')}</span>
             </span>
             <span className="font-mono text-[10px]">v{systemVersion.latestVersion}</span>
           </a>
@@ -373,23 +375,23 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       )}
 
       <div className="border-t border-hair py-1 px-3 flex items-center justify-between">
-        <span className="text-[10px] font-eyebrow text-muted">Language</span>
+        <span className="text-[10px] font-eyebrow text-muted">{t('common.language')}</span>
         <LanguageSelector />
       </div>
 
       <div className="border-t border-hair py-1">
-        <div className="px-3 py-1 text-[10px] font-eyebrow">Theme</div>
+        <div className="px-3 py-1 text-[10px] font-eyebrow">{t('sidebar.theme')}</div>
         {THEME_OPTIONS.map((opt) => (
           <button
             key={opt}
             type="button"
             onClick={() => {
               setTheme(opt);
-              toast.success(`Theme: ${THEME_LABELS[opt]}`);
+              toast.success(`${t('sidebar.theme')}: ${t(`common.themes.${opt}` as any) || THEME_LABELS[opt]}`);
             }}
             className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
           >
-            <span>{THEME_LABELS[opt]}</span>
+            <span>{t(`common.themes.${opt}` as any) || THEME_LABELS[opt]}</span>
             {theme === opt && <Check className="w-3.5 h-3.5 text-accent" />}
           </button>
         ))}
@@ -405,7 +407,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-danger hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
         >
           <LogOut className="w-3.5 h-3.5" />
-          <span>Log out</span>
+          <span>{t('sidebar.logOut')}</span>
         </button>
       </div>
     </div>
@@ -427,7 +429,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   type="button"
                   onClick={onCloseMobile}
                   className="md:hidden flex h-8 w-8 items-center justify-center text-muted hover:text-text hover:bg-hi theme-radius-md transition"
-                  aria-label="Close sidebar"
+                  aria-label={t('sidebar.closeSidebar')}
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -439,11 +441,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           <button
             type="button"
             onClick={() => openPalette()}
-            aria-label="Search or command"
+            aria-label={t('sidebar.searchPlaceholder')}
             className="flex items-center gap-2 h-8 theme-radius-md border border-line px-2.5 text-muted text-[13px] mb-2 hover:border-muted/40 transition cursor-pointer"
           >
             <Search className="w-3.5 h-3.5 shrink-0" />
-            <span className="flex-1 text-left">Search</span>
+            <span className="flex-1 text-left">{t('sidebar.search')}</span>
             <kbd className="bg-hi theme-radius-xs px-1.5 py-0.5 text-[11px] font-sans">⌘K</kbd>
           </button>
 
@@ -458,7 +460,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               }`}
             >
               <Home className="w-4 h-4 shrink-0" />
-              <span>Overview</span>
+              <span>{t('sidebar.overview')}</span>
             </Link>
           ) : (
             <Link
@@ -470,7 +472,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               }`}
             >
               <Home className="w-4 h-4 shrink-0" />
-              <span>Overview</span>
+              <span>{t('sidebar.overview')}</span>
             </Link>
           )}
 
@@ -484,7 +486,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           >
             <span className="flex items-center gap-2.5 min-w-0">
               <Inbox className="w-4 h-4 shrink-0" />
-              <span className="truncate">My tasks</span>
+              <span className="truncate">{t('sidebar.myTasks')}</span>
             </span>
             {badgeCount > 0 && (
               <Badge tone="neutral" className="min-w-[18px] justify-center">
@@ -494,7 +496,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           </Link>
 
           <div className="px-2.5 pt-3 pb-1">
-            <div className="font-eyebrow mb-1">Project</div>
+            <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
             <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
             {projectLibraryLink}
           </div>
@@ -504,12 +506,12 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {/* Favorites */}
             <div>
               <div className="px-2.5 pt-4 pb-1.5 font-eyebrow flex items-center justify-between">
-                <span>Favorites</span>
+                <span>{t('sidebar.favorites')}</span>
               </div>
               <div id="sidebar-favorites-list" className="space-y-0.5">
                 {favoriteNotepads.length === 0 ? (
                   <div className="px-2.5 py-1 text-xs text-muted italic">
-                    No favorited notepads yet
+                    {t('sidebar.noFavoritesYet')}
                   </div>
                 ) : (
                   favoriteNotepads.map((np) => {
@@ -530,7 +532,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         }`}
                       >
                         <Star className="w-3.5 h-3.5 text-accent shrink-0" />
-                        <span className="truncate">{np.title || 'Untitled'}</span>
+                        <span className="truncate">{np.title || t('sidebar.untitled')}</span>
                       </Link>
                     );
                   })
@@ -546,9 +548,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   onClick={toggleNotepads}
                   className="flex items-center gap-1 hover:text-text transition focus:outline-none cursor-pointer"
                   aria-expanded={notepadsOpen}
-                  title={notepadsOpen ? 'Collapse Notepads' : 'Expand Notepads'}
+                  title={notepadsOpen ? t('sidebar.collapseNotepads') : t('sidebar.expandNotepads')}
                 >
-                  <span>Notepads</span>
+                  <span>{t('sidebar.notepads')}</span>
                 </button>
                 {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
@@ -558,7 +560,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       createRootNotepadNow();
                     }}
                     className="flex h-5 w-5 items-center justify-center hover:bg-hi text-muted hover:text-text theme-radius-xs transition cursor-pointer"
-                    title="New notepad"
+                    title={t('sidebar.newNotepad')}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -581,9 +583,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   onClick={toggleBoards}
                   className="flex items-center gap-1 hover:text-text transition focus:outline-none cursor-pointer"
                   aria-expanded={boardsOpen}
-                  title={boardsOpen ? 'Collapse Boards' : 'Expand Boards'}
+                  title={boardsOpen ? t('sidebar.collapseBoards') : t('sidebar.expandBoards')}
                 >
-                  <span>Boards</span>
+                  <span>{t('sidebar.boards')}</span>
                 </button>
                 {currentProjectId && workspaceRole !== 'viewer' && (
                   <button
@@ -593,7 +595,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       setCreateBoardOpen(true);
                     }}
                     className="flex h-5 w-5 items-center justify-center hover:bg-hi text-muted hover:text-text theme-radius-xs transition cursor-pointer"
-                    title="Create Board"
+                    title={t('sidebar.createBoard')}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -602,7 +604,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               {boardsOpen && (
                 <div id="sidebar-boards-list" className="space-y-0.5">
                   {boards.length === 0 ? (
-                    <div className="px-2.5 py-1 text-xs text-muted italic">No boards yet</div>
+                    <div className="px-2.5 py-1 text-xs text-muted italic">{t('sidebar.noBoardsYet')}</div>
                   ) : (
                     boards.map((b) => {
                       const isActive = b.id === currentBoardId;
@@ -636,7 +638,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                                 setConfirmDeleteBoard({ id: b.id, name: b.name });
                               }}
                               className="opacity-0 group-hover:opacity-100 focus:opacity-100 flex h-7 w-7 items-center justify-center theme-radius-xs text-muted hover:bg-hi hover:text-[var(--danger)] transition shrink-0 mr-1 cursor-pointer"
-                              title="Delete board to Trash"
+                              title={t('sidebar.deleteBoardToTrash')}
                             >
                               <Trash2 className="h-3 w-3" />
                             </button>
@@ -653,7 +655,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {projectTags.length > 0 && (
               <div>
                 <div className="px-2.5 pt-4 pb-1.5 font-eyebrow">
-                  <span>Tags</span>
+                  <span>{t('sidebar.tags')}</span>
                 </div>
                 <div className="space-y-0.5">
                   {projectTags.map((tag) => (
@@ -679,7 +681,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               className="h-8 px-2.5 theme-radius-md text-[13px] text-muted hover:text-text hover:bg-hi flex items-center gap-2.5 transition"
             >
               <Users className="w-4 h-4 shrink-0" />
-              <span>Workspace Members</span>
+              <span>{t('sidebar.workspaceMembers')}</span>
             </Link>
           )}
           {currentProjectId && (
@@ -688,7 +690,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               className="h-8 px-2.5 theme-radius-md text-[13px] text-muted hover:text-text hover:bg-hi flex items-center gap-2.5 transition"
             >
               <Trash2 className="w-4 h-4 shrink-0" />
-              <span>Trash</span>
+              <span>{t('sidebar.trash')}</span>
             </Link>
           )}
 
@@ -698,11 +700,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               target="_blank"
               rel="noopener noreferrer"
               className="mx-2 mb-1 px-2.5 py-1.5 theme-radius-md text-xs bg-accent/15 text-accent border border-accent/30 flex items-center justify-between gap-1.5 transition hover:bg-accent/25"
-              title={`Update available: v${systemVersion.latestVersion}`}
+              title={`${t('sidebar.updateAvailable')}: v${systemVersion.latestVersion}`}
             >
               <span className="flex items-center gap-1.5 font-medium truncate">
                 <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
-                <span>Update available (v{systemVersion.latestVersion})</span>
+                <span>{t('sidebar.updateAvailable')} (v{systemVersion.latestVersion})</span>
               </span>
             </a>
           )}
@@ -716,7 +718,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               type="button"
               onClick={() => setAccountMenuOpen(!accountMenuOpen)}
               className="flex items-center gap-2 min-w-0 flex-1 text-left hover:text-text transition cursor-pointer"
-              title="Account menu"
+              title={t('sidebar.accountMenu')}
               aria-expanded={accountMenuOpen}
               aria-haspopup="menu"
             >
@@ -734,8 +736,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 type="button"
                 onClick={() => setConfirmSignOut(true)}
                 className="flex h-11 w-11 md:h-8 md:w-8 items-center justify-center theme-radius-md text-muted hover:text-danger hover:bg-hi transition cursor-pointer"
-                title="Log out"
-                aria-label="Log out"
+                title={t('sidebar.logOut')}
+                aria-label={t('sidebar.logOut')}
               >
                 <LogOut className="w-3.5 h-3.5" />
               </button>
@@ -761,8 +763,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 }
               }}
               className="w-[38px] h-[38px] clip-hex bg-accent text-accent-ink flex items-center justify-center text-base font-display mb-3 shrink-0 cursor-pointer"
-              title="Burrow Overview"
-              aria-label="Burrow Overview"
+              title={t('sidebar.overview')}
+              aria-label={t('sidebar.overview')}
             >
               B
             </button>
@@ -776,8 +778,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="Search"
-              aria-label="Search"
+              title={t('sidebar.search')}
+              aria-label={t('sidebar.search')}
             >
               <Search className="w-[18px] h-[18px]" />
             </button>
@@ -798,8 +800,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="Overview"
-              aria-label="Overview"
+              title={t('sidebar.overview')}
+              aria-label={t('sidebar.overview')}
             >
               <Home className="w-[18px] h-[18px]" />
             </button>
@@ -816,8 +818,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="My Tasks"
-              aria-label="My Tasks"
+              title={t('sidebar.myTasks')}
+              aria-label={t('sidebar.myTasks')}
             >
               <Inbox className="w-[18px] h-[18px]" />
               {badgeCount > 0 && (
@@ -836,8 +838,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="Notepads"
-              aria-label="Notepads"
+              title={t('sidebar.notepads')}
+              aria-label={t('sidebar.notepads')}
             >
               <FileText className="w-[18px] h-[18px]" />
             </button>
@@ -851,8 +853,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="Boards"
-              aria-label="Boards"
+              title={t('sidebar.boards')}
+              aria-label={t('sidebar.boards')}
             >
               <Kanban className="w-[18px] h-[18px]" />
             </button>
@@ -871,8 +873,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   ? 'bg-accent text-accent-ink'
                   : 'text-ink-muted hover:text-text hover:bg-hi'
               }`}
-              title="Members & Settings"
-              aria-label="Members & Settings"
+              title={t('sidebar.membersAndSettings')}
+              aria-label={t('sidebar.membersAndSettings')}
             >
               <Users className="w-[18px] h-[18px]" />
             </button>
@@ -890,8 +892,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     ? 'bg-accent text-accent-ink'
                     : 'text-ink-muted hover:text-text hover:bg-hi'
                 }`}
-                title="Trash"
-                aria-label="Trash"
+                title={t('sidebar.trash')}
+                aria-label={t('sidebar.trash')}
               >
                 <Trash2 className="w-[18px] h-[18px]" />
               </button>
@@ -911,6 +913,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <Clock className="w-[18px] h-[18px]" />
               </a>
             )}
+
+            {/* Language Toggle */}
+            <LanguageToggle className="w-10 h-10 md:w-10 md:h-10" />
 
             {/* Theme Toggle */}
             <ThemeToggle className="w-10 h-10 md:w-10 md:h-10" />
@@ -948,8 +953,8 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             <div
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize sidebar panel"
-              title="Drag to resize panel, double-click to reset"
+              aria-label={t('sidebar.resizePanel')}
+              title={t('sidebar.resizePanel')}
               onMouseDown={(e) => {
                 e.preventDefault();
                 secondaryResizeRef.current = { startX: e.clientX, startWidth: secondaryPanelWidth };
@@ -977,7 +982,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     type="button"
                     onClick={onCloseMobile}
                     className="md:hidden flex h-8 w-8 items-center justify-center text-muted hover:text-text hover:bg-hi theme-radius-xs transition cursor-pointer"
-                    aria-label="Close sidebar"
+                    aria-label={t('sidebar.closeSidebar')}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -985,7 +990,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </div>
             </div>
             <div className="px-3 pt-2 pb-3">
-              <div className="font-eyebrow mb-1">Project</div>
+              <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
               <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
               {projectLibraryLink}
             </div>
@@ -1003,7 +1008,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       autoFocus
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Quick filter…"
+                      placeholder={t('sidebar.searchPlaceholder')}
                       className="w-full h-8 pl-8 pr-2 bg-surface border border-line text-xs text-text placeholder:text-ink-muted focus:outline-none focus:border-accent"
                     />
                   </div>
@@ -1014,7 +1019,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {searchMatchesNotepads.length > 0 && (
                     <div>
                       <div className="px-2 pb-1 font-eyebrow flex items-center justify-between">
-                        <span>Notepads</span>
+                        <span>{t('sidebar.notepads')}</span>
                         <span>{searchMatchesNotepads.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1025,7 +1030,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             className="flex items-center gap-2 h-7 px-2 text-xs text-ink-muted hover:text-text hover:bg-hi truncate"
                           >
                             <FileText className="w-3.5 h-3.5 shrink-0 text-accent" />
-                            <span className="truncate">{np.title || 'Untitled'}</span>
+                            <span className="truncate">{np.title || t('sidebar.untitled')}</span>
                           </Link>
                         ))}
                       </div>
@@ -1036,7 +1041,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {searchMatchesBoards.length > 0 && (
                     <div>
                       <div className="px-2 pb-1 font-eyebrow flex items-center justify-between">
-                        <span>Boards</span>
+                        <span>{t('sidebar.boards')}</span>
                         <span>{searchMatchesBoards.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1058,7 +1063,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {searchMatchesTags.length > 0 && (
                     <div>
                       <div className="px-2 pb-1 font-eyebrow flex items-center justify-between">
-                        <span>Tags</span>
+                        <span>{t('sidebar.tags')}</span>
                         <span>{searchMatchesTags.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1081,7 +1086,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     searchMatchesBoards.length === 0 &&
                     searchMatchesTags.length === 0 && (
                       <div className="px-2 py-4 text-xs text-ink-muted italic text-center">
-                        No matches found
+                        {t('sidebar.noMatchesFound')}
                       </div>
                     )}
                 </div>
@@ -1092,7 +1097,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-text hover:bg-hi transition cursor-pointer"
                 >
                   <Search className="w-3.5 h-3.5" />
-                  <span>Open ⌘K Palette</span>
+                  <span>{t('sidebar.openPalette')}</span>
                 </button>
               </div>
             )}
@@ -1106,13 +1111,13 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {/* Favorites section */}
                   <div>
                     <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                      <span>Favorites</span>
+                      <span>{t('sidebar.favorites')}</span>
                       <span>{favoriteNotepads.length}</span>
                     </div>
                     <div id="sidebar-favorites-list" className="space-y-0.5">
                       {favoriteNotepads.length === 0 ? (
                         <div className="px-3 py-1 text-xs text-ink-muted italic">
-                          No favorited notepads yet
+                          {t('sidebar.noFavoritesYet')}
                         </div>
                       ) : (
                         favoriteNotepads.map((np) => {
@@ -1121,7 +1126,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             <Link
                               key={np.id}
                               {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
-                              title={np.title || 'Untitled'}
+                              title={np.title || t('sidebar.untitled')}
                               className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
                                 isActive
                                   ? 'bg-hi text-hi-ink font-bold'
@@ -1129,7 +1134,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                               }`}
                             >
                               <Star className="w-4 h-4 shrink-0 text-accent" />
-                              <span className="flex-1 truncate">{np.title || 'Untitled'}</span>
+                              <span className="flex-1 truncate">{np.title || t('sidebar.untitled')}</span>
                               {isActive && <span className="diamond-dot" />}
                             </Link>
                           );
@@ -1147,7 +1152,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         className="flex items-center gap-1 hover:text-text transition focus:outline-none cursor-pointer"
                         aria-expanded={notepadsOpen}
                       >
-                        <span>Notepads</span>
+                        <span>{t('sidebar.notepads')}</span>
                       </button>
                       <span>{notepads.length}</span>
                     </div>
@@ -1169,7 +1174,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         className="flex items-center gap-1 hover:text-text transition focus:outline-none cursor-pointer"
                         aria-expanded={boardsOpen}
                       >
-                        <span>Boards</span>
+                        <span>{t('sidebar.boards')}</span>
                       </button>
                       <span>{boards.length}</span>
                     </div>
@@ -1194,7 +1199,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {projectTags.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                        <span>Tags</span>
+                        <span>{t('sidebar.tags')}</span>
                         <span>{projectTags.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1221,7 +1226,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     className="mt-2 w-full flex items-center gap-2 h-9 px-3 border border-dashed border-line text-ink-muted hover:text-text hover:border-accent text-[13px] font-semibold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>New notepad</span>
+                    <span>{t('sidebar.newNotepad')}</span>
                   </button>
                 )}
               </div>
@@ -1237,7 +1242,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {favoriteNotepads.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                        <span>Favorites</span>
+                        <span>{t('sidebar.favorites')}</span>
                         <span>{favoriteNotepads.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1247,7 +1252,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             <Link
                               key={np.id}
                               {...notepadTarget(workspaceId!, currentProjectId!, np.id)}
-                              title={np.title || 'Untitled'}
+                              title={np.title || t('sidebar.untitled')}
                               className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
                                 isActive
                                   ? 'bg-hi text-hi-ink font-bold'
@@ -1255,7 +1260,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                               }`}
                             >
                               <Star className="w-4 h-4 shrink-0 text-accent" />
-                              <span className="flex-1 truncate">{np.title || 'Untitled'}</span>
+                              <span className="flex-1 truncate">{np.title || t('sidebar.untitled')}</span>
                               {isActive && <span className="diamond-dot" />}
                             </Link>
                           );
@@ -1267,7 +1272,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {/* Full Notepads Tree */}
                   <div>
                     <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                      <span>All Notepads</span>
+                      <span>{t('sidebar.allNotepads')}</span>
                       <div className="flex items-center gap-1.5">
                         <span>{notepads.length}</span>
                         {currentProjectId && workspaceRole !== 'viewer' && (
@@ -1275,7 +1280,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             type="button"
                             onClick={() => createRootNotepadNow()}
                             className="flex h-5 w-5 items-center justify-center hover:bg-hi text-ink-muted hover:text-text transition cursor-pointer"
-                            title="New notepad"
+                            title={t('sidebar.newNotepad')}
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
@@ -1297,7 +1302,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     className="mt-2 w-full flex items-center gap-2 h-9 px-3 border border-dashed border-line text-ink-muted hover:text-text hover:border-accent text-[13px] font-semibold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>New notepad</span>
+                    <span>{t('sidebar.newNotepad')}</span>
                   </button>
                 )}
               </div>
@@ -1312,7 +1317,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {/* Boards section */}
                   <div>
                     <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                      <span>Boards</span>
+                      <span>{t('sidebar.boards')}</span>
                       <div className="flex items-center gap-1.5">
                         <span>{boards.length}</span>
                         {currentProjectId && workspaceRole !== 'viewer' && (
@@ -1320,7 +1325,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                             type="button"
                             onClick={() => setCreateBoardOpen(true)}
                             className="flex h-5 w-5 items-center justify-center hover:bg-hi text-ink-muted hover:text-text transition cursor-pointer"
-                            title="Create Board"
+                            title={t('sidebar.createBoard')}
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
@@ -1331,7 +1336,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     <div className="space-y-0.5">
                       {boards.length === 0 ? (
                         <div className="px-3 py-3 text-xs text-ink-muted italic">
-                          No boards created yet
+                          {t('sidebar.noBoardsYet')}
                         </div>
                       ) : (
                         boards.map((b) => {
@@ -1363,7 +1368,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                                     setConfirmDeleteBoard({ id: b.id, name: b.name });
                                   }}
                                   className="hidden group-hover:flex absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 items-center justify-center theme-radius-xs bg-side/95 text-ink-muted hover:bg-hi hover:text-[var(--danger)] transition shrink-0 cursor-pointer z-10"
-                                  title="Delete board to Trash"
+                                  title={t('sidebar.deleteBoardToTrash')}
                                 >
                                   <Trash2 className="h-3 w-3" />
                                 </button>
@@ -1379,7 +1384,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   {projectTags.length > 0 && (
                     <div>
                       <div className="flex items-center justify-between px-3 pt-4 pb-1.5 font-eyebrow">
-                        <span>Workflow Tags</span>
+                        <span>{t('sidebar.workflowTags')}</span>
                         <span>{projectTags.length}</span>
                       </div>
                       <div className="space-y-0.5">
@@ -1406,7 +1411,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     className="mt-2 w-full flex items-center gap-2 h-9 px-3 border border-dashed border-line text-ink-muted hover:text-text hover:border-accent text-[13px] font-semibold transition cursor-pointer"
                   >
                     <Plus className="w-4 h-4" />
-                    <span>New board</span>
+                    <span>{t('sidebar.newBoard')}</span>
                   </button>
                 )}
               </div>
@@ -1420,11 +1425,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <div className="flex items-center justify-between px-3 pt-0.5 pb-2 text-[14px] font-display text-side-text">
                   <span className="flex items-center gap-2">
                     <Inbox className="w-4 h-4 text-accent" />
-                    <span>My Tasks</span>
+                    <span>{t('sidebar.myTasks')}</span>
                   </span>
                   {badgeCount > 0 && (
                     <span className="px-1.5 py-0.5 bg-accent text-accent-ink text-[10px] font-bold">
-                      {badgeCount} due
+                      {t('sidebar.dueCount', { count: badgeCount })}
                     </span>
                   )}
                 </div>
@@ -1440,7 +1445,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         : 'bg-surface2 text-ink-muted hover:text-text'
                     }`}
                   >
-                    All ({myTasks.length})
+                    {t('sidebar.allFilter', { count: myTasks.length })}
                   </button>
                   <button
                     type="button"
@@ -1451,14 +1456,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         : 'bg-surface2 text-ink-muted hover:text-text'
                     }`}
                   >
-                    Due ({dueTasks.length})
+                    {t('sidebar.dueFilter', { count: dueTasks.length })}
                   </button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-1">
                   {displayedTasks.length === 0 ? (
                     <div className="px-3 py-4 text-xs text-ink-muted italic text-center">
-                      No active tasks
+                      {t('sidebar.noActiveTasks')}
                     </div>
                   ) : (
                     displayedTasks.map((t) => (
@@ -1498,7 +1503,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-text hover:bg-hi transition"
                 >
                   <Inbox className="w-3.5 h-3.5 text-accent" />
-                  <span>Open Tasks Board</span>
+                  <span>{t('sidebar.openTasksBoard')}</span>
                 </Link>
               </div>
             )}
@@ -1511,7 +1516,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <div className="flex items-center justify-between px-3 pt-0.5 pb-2 text-[14px] font-display text-side-text">
                   <span className="flex items-center gap-2">
                     <Users className="w-4 h-4 text-accent" />
-                    <span>Workspace</span>
+                    <span>{t('sidebar.workspace')}</span>
                   </span>
                 </div>
 
@@ -1528,7 +1533,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       }`}
                     >
                       <Users className="w-4 h-4 shrink-0 text-accent" />
-                      <span>Workspace Members</span>
+                      <span>{t('sidebar.workspaceMembers')}</span>
                     </Link>
                     <Link
                       {...(workspaceId
@@ -1541,14 +1546,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                       }`}
                     >
                       <Settings className="w-4 h-4 shrink-0" />
-                      <span>Project Settings</span>
+                      <span>{t('sidebar.projectSettings')}</span>
                     </Link>
                   </div>
 
                   {/* Members list */}
                   <div>
                     <div className="px-3 pb-1 font-eyebrow flex items-center justify-between">
-                      <span>Members</span>
+                      <span>{t('members.title')}</span>
                       <span>{members.length}</span>
                     </div>
                     <div className="space-y-1">
@@ -1558,18 +1563,24 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                           className="flex items-center gap-2 px-3 py-1.5 text-xs text-text hover:bg-hi"
                         >
                           <Avatar
-                            name={m.name || 'Member'}
+                            name={m.name || t('common.roles.member')}
                             size="xs"
                             className="w-5 h-5 text-[9px]"
                           />
-                          <span className="flex-1 truncate">{m.name || 'Member'}</span>
+                          <span className="flex-1 truncate">{m.name || t('common.roles.member')}</span>
                           <span className="text-[10px] uppercase font-mono px-1 py-0.5 bg-hi text-ink-muted">
-                            {m.role}
+                            {t(`common.roles.${m.role as 'owner' | 'editor' | 'viewer'}`).toUpperCase()}
                           </span>
                         </div>
                       ))}
                     </div>
                   </div>
+                </div>
+
+                {/* Language Switcher in Members/Workspace panel */}
+                <div className="mt-2 pt-2 border-t border-hair/60 flex items-center justify-between px-1">
+                  <span className="font-eyebrow text-ink-muted text-[10px]">{t('sidebar.language')}</span>
+                  <LanguageSelector />
                 </div>
 
                 <button
@@ -1578,7 +1589,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-danger hover:bg-hi transition cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
-                  <span>Log out</span>
+                  <span>{t('sidebar.logOut')}</span>
                 </button>
               </div>
             )}
@@ -1591,20 +1602,20 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <div className="flex items-center justify-between px-3 pt-0.5 pb-2 text-[14px] font-display text-side-text">
                   <span className="flex items-center gap-2">
                     <Trash2 className="w-4 h-4 text-ink-muted" />
-                    <span>Trash</span>
+                    <span>{t('sidebar.trash')}</span>
                   </span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-3 pt-2">
                   <div>
                     <div className="px-3 pb-1 font-eyebrow flex items-center justify-between">
-                      <span>Deleted Notepads</span>
+                      <span>{t('sidebar.deletedNotepads')}</span>
                       <span>{trashData?.notepads?.length ?? 0}</span>
                     </div>
                     <div className="space-y-0.5">
                       {!trashData?.notepads?.length ? (
                         <div className="px-3 py-1 text-xs text-ink-muted italic">
-                          No deleted notepads
+                          {t('sidebar.noDeletedNotepads')}
                         </div>
                       ) : (
                         trashData.notepads.slice(0, 6).map((np) => (
@@ -1623,13 +1634,13 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
                   <div>
                     <div className="px-3 pb-1 font-eyebrow flex items-center justify-between">
-                      <span>Deleted Boards</span>
+                      <span>{t('sidebar.deletedBoards')}</span>
                       <span>{trashData?.boards?.length ?? 0}</span>
                     </div>
                     <div className="space-y-0.5">
                       {!trashData?.boards?.length ? (
                         <div className="px-3 py-1 text-xs text-ink-muted italic">
-                          No deleted boards
+                          {t('sidebar.noDeletedBoards')}
                         </div>
                       ) : (
                         trashData.boards.slice(0, 6).map((b) => (
@@ -1647,7 +1658,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                   </div>
 
                   <div className="px-3 py-2 text-[11px] text-ink-muted bg-surface2 border border-line">
-                    Items stay in trash until permanently deleted or restored.
+                    {t('sidebar.trashRetentionNotice')}
                   </div>
                 </div>
 
@@ -1657,7 +1668,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                     className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 px-2 bg-surface2 border border-line text-xs font-semibold text-text hover:bg-hi transition"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Open Trash View</span>
+                    <span>{t('sidebar.openTrashView')}</span>
                   </Link>
                 )}
               </div>
@@ -1670,9 +1681,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       {confirmDeleteBoard && (
         <ConfirmDialog
           open
-          title="Delete board"
-          message={`Move "${confirmDeleteBoard.name}" to Trash? You can restore it from Trash if needed.`}
-          confirmLabel="Delete to Trash"
+          title={t('sidebar.confirmDeleteBoardTitle')}
+          message={t('sidebar.confirmDeleteBoardMessage', { name: confirmDeleteBoard.name })}
+          confirmLabel={t('sidebar.deleteBoardToTrash')}
           danger
           busy={deleteBoardMutation.isPending}
           onConfirm={async () => {
@@ -1688,7 +1699,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               }
               setConfirmDeleteBoard(null);
             } catch (err: any) {
-              toast.error(err?.message || 'Failed to delete board');
+              toast.error(err?.message || t('common.error'));
               setConfirmDeleteBoard(null);
             }
           }}
@@ -1698,11 +1709,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
       <PromptDialog
         open={createBoardOpen}
-        title="Create Board"
-        message="Enter a name for the new board."
+        title={t('sidebar.createBoardPromptTitle')}
+        message={t('sidebar.createBoardPromptMessage')}
         defaultValue="Sprint Board"
-        placeholder="Board name"
-        confirmLabel="Create"
+        placeholder={t('sidebar.createBoardPromptPlaceholder')}
+        confirmLabel={t('common.create')}
         busy={createBoardMutation.isPending}
         onConfirm={async (name) => {
           if (!workspaceId || !currentProjectId) return;
@@ -1715,7 +1726,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             setCreateBoardOpen(false);
             navigate(boardTarget(workspaceId!, currentProjectId, res.id));
           } catch (err: any) {
-            toast.error(err?.message || 'Failed to create board');
+            toast.error(err?.message || t('common.error'));
           }
         }}
         onCancel={() => setCreateBoardOpen(false)}
@@ -1723,16 +1734,16 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
       <ConfirmDialog
         open={confirmSignOut}
-        title="Log out"
-        message="Are you sure you want to log out of your account?"
-        confirmLabel="Log out"
+        title={t('sidebar.confirmSignOutTitle')}
+        message={t('sidebar.confirmSignOutMessage')}
+        confirmLabel={t('sidebar.logOut')}
         danger={false}
         busy={signOutMutation.isPending}
         onConfirm={async () => {
           try {
             await signOutMutation.mutateAsync();
           } catch (err: any) {
-            toast.error(err?.message || 'Failed to sign out');
+            toast.error(err?.message || t('common.error'));
             setConfirmSignOut(false);
           }
         }}

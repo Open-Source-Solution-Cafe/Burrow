@@ -24,7 +24,15 @@ export function detectBrowserLocale(): Locale {
   return 'en';
 }
 
+function applyHtmlLang(locale: Locale): void {
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.lang = locale;
+  }
+}
+
 let activeLocale: Locale = detectBrowserLocale();
+applyHtmlLang(activeLocale);
+
 const subscribers = new Set<() => void>();
 
 export function getLocale(): Locale {
@@ -34,6 +42,7 @@ export function getLocale(): Locale {
 export function setLocale(nextLocale: Locale): void {
   if (activeLocale === nextLocale) return;
   activeLocale = nextLocale;
+  applyHtmlLang(nextLocale);
   if (typeof window !== 'undefined') {
     try {
       localStorage.setItem(STORAGE_LOCALE_KEY, nextLocale);
@@ -51,6 +60,18 @@ function subscribe(callback: () => void): () => void {
   return () => {
     subscribers.delete(callback);
   };
+}
+
+export function formatDate(
+  value: number | Date,
+  options?: Intl.DateTimeFormatOptions,
+): string {
+  try {
+    const date = typeof value === 'number' ? new Date(value) : value;
+    return new Intl.DateTimeFormat(activeLocale, options).format(date);
+  } catch {
+    return new Date(value).toLocaleDateString();
+  }
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
@@ -93,10 +114,11 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 export function useTranslation() {
-  const locale = useSyncExternalStore(subscribe, getLocale, () => 'en');
+  const locale: Locale = useSyncExternalStore(subscribe, getLocale, () => 'en' as Locale);
   return {
     t,
     locale,
     setLocale,
+    formatDate,
   };
 }

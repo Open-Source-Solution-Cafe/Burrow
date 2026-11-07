@@ -12,7 +12,7 @@ A lightweight Notion-style workspace with **project separation**, **Kanban board
 2. Commit after every task using Conventional Commits (`feat:`, `fix:`, `chore:`, `test:`).
 3. If a requirement is ambiguous, choose the simpler option, record it in `DECISIONS.md` (one line: decision, reason), and keep going. Only stop if you are truly blocked.
 4. Do not add dependencies beyond those listed in this plan without recording why in `DECISIONS.md`.
-5. Never hardcode secrets. Use `.dev.vars` locally and `wrangler secret put` in production. Commit a `.dev.vars.example`.
+5. Never hardcode secrets. Use `.env` locally and `wrangler secret put` in production. Commit a `.env.example`.
 6. Every phase must leave the app runnable with `pnpm dev` and deployable with `pnpm deploy`.
 7. Every API route validates input with zod and checks workspace membership and role (see section 7).
 8. Keep the codebase small. Prefer deleting code over adding abstractions.
@@ -188,7 +188,7 @@ Set by the setup script, never committed:
 | `BETTER_AUTH_URL`    | The deployed origin (workers.dev URL or custom domain).                                                                                         |
 | `BOOTSTRAP_TOKEN`    | One-time code required for the very first sign-up, so nobody else can claim the owner account in the gap between deploy and your first sign-up. |
 
-Local values live in `.dev.vars` (git-ignored); commit `.dev.vars.example`.
+Local values live in `.env` (git-ignored); commit `.env.example`.
 
 ### `pnpm setup` (first time, one command, idempotent)
 

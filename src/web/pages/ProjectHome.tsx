@@ -7,6 +7,7 @@ import { useBoards, useCreateBoard, useProjects, useRecentNotepads } from '../li
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PromptDialog } from '../components/ui/PromptDialog';
+import { useTranslation } from '../lib/i18n';
 import {
   boardTarget,
   notepadTarget,
@@ -17,6 +18,7 @@ import {
 export function ProjectHome() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
   const { workspaceId, projectId } = useParams({ strict: false }) as {
     workspaceId?: string;
     projectId?: string;
@@ -38,12 +40,12 @@ export function ProjectHome() {
     return (
       <div className="flex-1 p-8 text-sm text-[var(--muted)]" role="status">
         {projectsLoading
-          ? 'Loading project…'
+          ? t('project.loadingProject')
           : projectsError
-            ? 'Unable to load projects. Please try again.'
+            ? t('project.unableToLoad')
             : projectId !== undefined
-              ? 'Project not found or no longer available. Select a project from the sidebar.'
-              : 'No projects available. Create a project from the sidebar.'}
+              ? t('project.projectNotFound')
+              : t('project.noProjectsAvailable')}
       </div>
     );
   }
@@ -63,17 +65,17 @@ export function ProjectHome() {
         body: JSON.stringify({ title: 'Untitled' }),
       });
       if (!res.ok) {
-        throw new Error('Failed to create notepad');
+        throw new Error(t('common.error'));
       }
       const data = (await res.json()) as { id: string };
       queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, currentProjectId] });
       queryClient.invalidateQueries({
         queryKey: ['recent-notepads', workspaceId, currentProjectId],
       });
-      toast.success('Notepad created');
+      toast.success(t('project.notepadCreated'));
       navigate(notepadTarget(workspaceId, currentProjectId, data.id));
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to create notepad');
+      toast.error(err?.message || t('common.error'));
     } finally {
       setCreateNotepadPending(false);
     }
@@ -86,16 +88,16 @@ export function ProjectHome() {
         <div className="space-y-2 border-b border-[var(--hair)] pb-6">
           <div className="text-4xl mb-2">{project?.icon || '📁'}</div>
           <h1 className="text-2xl font-bold tracking-tight text-[var(--text)]">
-            {project?.name || 'Project Overview'}
+            {project?.name || t('project.overview')}
           </h1>
           <p className="text-sm text-[var(--muted)]">
-            Manage notepads, cards, and boards scoped to this project.
+            {t('project.manageScopedResources')}
           </p>
           <Link
             {...projectLibraryTarget(workspaceId!, project.id)}
             className="inline-flex min-h-11 items-center text-sm text-[var(--accent)] underline"
           >
-            Open project library
+            {t('project.openLibrary')}
           </Link>
         </div>
 
@@ -105,7 +107,7 @@ export function ProjectHome() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium text-sm text-[var(--text)]">
                 <FileText className="w-4 h-4 text-[var(--accent)]" />
-                <span>Notepads</span>
+                <span>{t('project.notepadsTitle')}</span>
               </div>
               <Button
                 variant="ghost"
@@ -113,18 +115,18 @@ export function ProjectHome() {
                 onClick={handleCreateNotepad}
                 disabled={createNotepadPending}
                 className="p-1 min-w-[32px] min-h-[32px] text-[var(--muted)] hover:text-[var(--text)]"
-                title="Add Notepad"
+                title={t('project.addNotepad')}
               >
                 <Plus className="w-3.5 h-3.5" />
               </Button>
             </div>
             <p className="text-xs text-[var(--muted)]">
-              Rich-text notes with nested tree organisation, slash commands, and covers.
+              {t('project.notepadsDesc')}
             </p>
             <div className="pt-2 space-y-1">
               {recentNotepads.length === 0 ? (
                 <span className="text-xs text-[var(--muted)] italic">
-                  No notepads yet. Click + in sidebar to create one.
+                  {t('project.noNotepadsYet')}
                 </span>
               ) : (
                 recentNotepads.slice(0, 5).map((np) => (
@@ -134,7 +136,7 @@ export function ProjectHome() {
                     className="flex items-center gap-2 text-xs font-medium text-[var(--text)] hover:text-[var(--accent)] transition py-1"
                   >
                     <span>{np.icon || '📄'}</span>
-                    <span className="truncate">{np.title || 'Untitled'}</span>
+                    <span className="truncate">{np.title || t('common.untitled')}</span>
                   </Link>
                 ))
               )}
@@ -145,25 +147,25 @@ export function ProjectHome() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium text-sm text-[var(--text)]">
                 <Kanban className="w-4 h-4 text-emerald-500" />
-                <span>Kanban Boards</span>
+                <span>{t('project.kanbanBoardsTitle')}</span>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleCreateBoard}
                 className="p-1 min-w-[32px] min-h-[32px] text-[var(--muted)] hover:text-[var(--text)]"
-                title="Add Board"
+                title={t('project.addBoard')}
               >
                 <Plus className="w-3.5 h-3.5" />
               </Button>
             </div>
             <p className="text-xs text-[var(--muted)]">
-              Visual task boards with drag-and-drop columns, priorities, assignees, and quick-add.
+              {t('project.kanbanBoardsDesc')}
             </p>
             <div className="pt-2 space-y-1">
               {boards.length === 0 ? (
                 <span className="text-xs text-[var(--muted)] italic">
-                  No boards yet. Click + to create one.
+                  {t('project.noBoardsYet')}
                 </span>
               ) : (
                 boards.map((b) => (
@@ -183,11 +185,11 @@ export function ProjectHome() {
 
       <PromptDialog
         open={createBoardOpen}
-        title="Create Board"
-        message="Enter a name for the new board."
-        defaultValue="Sprint Board"
-        placeholder="Board name"
-        confirmLabel="Create"
+        title={t('project.createBoardDialogTitle')}
+        message={t('project.createBoardDialogMessage')}
+        defaultValue={t('project.createBoardDialogDefault')}
+        placeholder={t('project.createBoardDialogPlaceholder')}
+        confirmLabel={t('common.create')}
         busy={createBoardMutation.isPending}
         onConfirm={async (name) => {
           if (!currentProjectId || !workspaceId) return;
@@ -200,7 +202,7 @@ export function ProjectHome() {
             setCreateBoardOpen(false);
             navigate(boardTarget(workspaceId, currentProjectId, res.id));
           } catch (err: any) {
-            toast.error(err?.message || 'Failed to create board');
+            toast.error(err?.message || t('common.error'));
           }
         }}
         onCancel={() => setCreateBoardOpen(false)}

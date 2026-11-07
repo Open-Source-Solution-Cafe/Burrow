@@ -19,6 +19,7 @@ import {
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { StatusDiamond } from '../ui/StatusDiamond';
+import { useTranslation } from '../../lib/i18n';
 
 interface SubtasksSectionProps {
   workspaceId: string;
@@ -41,6 +42,7 @@ function SubtaskRow({
   cardId: string;
   boardId: string;
 }) {
+  const { t } = useTranslation();
   const updateSubtask = useUpdateSubtask();
   const deleteSubtask = useDeleteSubtask();
   const [editing, setEditing] = useState(false);
@@ -101,8 +103,8 @@ function SubtaskRow({
             completed: !subtask.completed,
           })
         }
-        title={subtask.completed ? 'Mark incomplete' : 'Mark complete'}
-        aria-label={subtask.completed ? 'Mark incomplete' : 'Mark complete'}
+        title={subtask.completed ? t('boards.markIncomplete') : t('boards.markComplete')}
+        aria-label={subtask.completed ? t('boards.markIncomplete') : t('boards.markComplete')}
         className={`shrink-0 w-8 h-10 md:w-6 md:h-6 flex items-center justify-center transition cursor-pointer ${
           subtask.completed ? 'text-[var(--c4)]' : 'text-[var(--muted)] hover:text-[var(--c4)]'
         }`}
@@ -133,7 +135,7 @@ function SubtaskRow({
           className={`flex-1 min-w-0 text-xs py-1 cursor-text break-words ${
             subtask.completed ? 'line-through text-[var(--muted)]' : 'text-[var(--text)]'
           }`}
-          title="Click to rename"
+          title={t('boards.clickToRename')}
         >
           {subtask.title}
         </span>
@@ -142,8 +144,8 @@ function SubtaskRow({
       <button
         type="button"
         onClick={() => deleteSubtask.mutate({ workspaceId, projectId, cardId, boardId, subtaskId: subtask.id })}
-        title="Remove subtask"
-        aria-label="Remove subtask"
+        title={t('boards.removeSubtask')}
+        aria-label={t('boards.removeSubtask')}
         className="p-1 w-8 h-10 md:w-6 md:h-6 flex items-center justify-center text-[var(--muted)] hover:text-[var(--danger)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 transition shrink-0 cursor-pointer"
       >
         <X className="w-3.5 h-3.5" />
@@ -153,6 +155,7 @@ function SubtaskRow({
 }
 
 export function SubtasksSection({ workspaceId, projectId, cardId, boardId, subtasks }: SubtasksSectionProps) {
+  const { t } = useTranslation();
   const createSubtask = useCreateSubtask();
   const updateSubtask = useUpdateSubtask();
   const [draft, setDraft] = useState('');
@@ -199,7 +202,7 @@ export function SubtasksSection({ workspaceId, projectId, cardId, boardId, subta
           }}
         >
           <CheckSquare className="w-3.5 h-3.5" />
-          <span>Subtasks</span>
+          <span>{t('boards.subtasks')}</span>
         </h3>
         {total > 0 && (
           <div className="flex items-center gap-2">
@@ -240,12 +243,12 @@ export function SubtasksSection({ workspaceId, projectId, cardId, boardId, subta
               handleAdd();
             }
           }}
-          placeholder="Add a subtask…"
+          placeholder={t('boards.newSubtaskPlaceholder')}
           className="border-none bg-transparent px-0"
         />
         {draft.trim() && (
           <Button variant="ghost" size="sm" onClick={handleAdd} disabled={createSubtask.isPending}>
-            Add
+            {t('common.add')}
           </Button>
         )}
       </div>

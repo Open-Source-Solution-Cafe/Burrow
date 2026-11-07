@@ -17,6 +17,7 @@ import { Badge } from '../components/ui/Badge';
 import { Select } from '../components/ui/Select';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { StatusDiamond } from '../components/ui/StatusDiamond';
+import { useTranslation } from '../lib/i18n';
 
 type StatusFilter = 'all' | 'open' | 'completed';
 
@@ -41,27 +42,27 @@ function startOfToday(): number {
   return d.getTime();
 }
 
-function formatDue(ts: number): string {
-  return new Date(ts).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
 function TaskRow({
   task,
   onOpen,
   onComplete,
   onSnooze,
+  t,
+  formatDate,
 }: {
   task: MyTaskItem;
   onOpen: () => void;
   onComplete: () => void;
   onSnooze: () => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  formatDate: (value: number | Date, options?: Intl.DateTimeFormatOptions) => string;
 }) {
   const overdue = !task.isCompleted && task.dueDate !== null && task.dueDate < startOfToday();
   const priority = task.priority ? PRIORITY_BADGES[task.priority] : undefined;
   const diamond = task.priority ? PRIORITY_DIAMONDS[task.priority] : undefined;
+  const priorityLabel = task.priority
+    ? (t(`common.priorities.${task.priority}` as any) || priority?.label)
+    : undefined;
 
   return (
     <div
@@ -72,8 +73,8 @@ function TaskRow({
       {/* Complete checkbox */}
       <button
         onClick={onComplete}
-        title={task.isCompleted ? 'Mark as open' : 'Mark as complete'}
-        className={`shrink-0 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition ${
+        title={task.isCompleted ? t('tasks.markAsOpen') : t('tasks.markAsComplete')}
+        className={`shrink-0 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
           task.isCompleted
             ? 'text-[var(--c4)] hover:brightness-110'
             : 'text-[var(--muted)] hover:text-[var(--c4)]'
@@ -85,14 +86,14 @@ function TaskRow({
       {/* Title + meta */}
       <button
         onClick={onOpen}
-        className="flex-1 min-w-0 text-left space-y-1 min-h-[44px] sm:min-h-0"
+        className="flex-1 min-w-0 text-left space-y-1 min-h-[44px] sm:min-h-0 cursor-pointer"
       >
         <div
           className={`text-sm font-medium leading-snug truncate ${
             task.isCompleted ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
           }`}
         >
-          {task.title || 'Untitled'}
+          {task.title || t('common.untitled')}
         </div>
         <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-[var(--muted)]">
           <Badge>
@@ -123,7 +124,7 @@ function TaskRow({
         {priority && (
           <Badge className={priority.class}>
             <StatusDiamond color={diamond ?? 'var(--c1)'} size={6} />
-            {priority.label}
+            {priorityLabel}
           </Badge>
         )}
 
@@ -134,14 +135,14 @@ function TaskRow({
             }`}
           >
             <Calendar className="w-3 h-3" />
-            {formatDue(task.dueDate)}
+            {formatDate(task.dueDate, { month: 'short', day: 'numeric' })}
           </span>
         )}
 
         {!task.isCompleted && (
           <button
             onClick={onSnooze}
-            title="Snooze to tomorrow"
+            title={t('tasks.snoozeTomorrow')}
             className="p-1 min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--c2)] hover:bg-[var(--hi)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition cursor-pointer"
           >
             <AlarmClock className="w-3.5 h-3.5" />
@@ -177,6 +178,7 @@ function SectionHeader({
 
 export function MyTasksView() {
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
+  const { t, formatDate } = useTranslation();
   const [status, setStatus] = useState<StatusFilter>('open');
   const [projectId, setProjectId] = useState<string>('all');
   const [selected, setSelected] = useState<MyTaskItem | null>(null);
@@ -246,7 +248,7 @@ export function MyTasksView() {
         const board = (await res.json()) as { columns: Array<{ id: string; name: string }> };
         const openCol = board.columns.find((c) => !/done|completed|closed|shipped/i.test(c.name));
         if (!openCol) {
-          toast.error('No open column found on this board');
+          toast.error(t('common.error'));
           return;
         }
         await moveCardMutation.mutateAsync({
@@ -257,9 +259,9 @@ export function MyTasksView() {
           columnId: openCol.id,
         });
         queryClient.invalidateQueries({ queryKey: ['my-tasks'] });
-        toast.success('Task re-opened');
+        toast.success(t('tasks.taskReopened'));
       } catch (err: any) {
-        toast.error(err?.message || 'Failed to update task');
+        toast.error(err?.message || t('common.error'));
       }
       return;
     }
@@ -283,9 +285,9 @@ export function MyTasksView() {
         columnId: doneCol.id,
       });
       queryClient.invalidateQueries({ queryKey: ['my-tasks'] });
-      toast.success('Task marked as complete');
+      toast.success(t('tasks.taskMarkedComplete'));
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to update task');
+      toast.error(err?.message || t('common.error'));
     }
   };
 
@@ -302,9 +304,9 @@ export function MyTasksView() {
         dueDate: tomorrow.getTime(),
       });
       queryClient.invalidateQueries({ queryKey: ['my-tasks'] });
-      toast.success('Task snoozed until tomorrow');
+      toast.success(t('tasks.snoozedSuccess'));
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to update task');
+      toast.error(err?.message || t('common.error'));
     }
   };
 
@@ -315,7 +317,7 @@ export function MyTasksView() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-2.5">
             <Inbox className="w-6 h-6 text-[var(--accent)]" />
-            <h1 className="text-xl sm:text-2xl font-bold text-[var(--text)]">My Tasks</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-[var(--text)]">{t('tasks.title')}</h1>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
@@ -326,9 +328,9 @@ export function MyTasksView() {
               value={status}
               onValueChange={(v) => setStatus(v as StatusFilter)}
               options={[
-                { value: 'open', label: 'Open' },
-                { value: 'completed', label: 'Completed' },
-                { value: 'all', label: 'All' },
+                { value: 'open', label: t('tasks.open') },
+                { value: 'completed', label: t('tasks.completed') },
+                { value: 'all', label: t('tasks.all') },
               ]}
             />
 
@@ -338,7 +340,7 @@ export function MyTasksView() {
               onChange={(e) => setProjectId(e.target.value)}
               className="w-full sm:w-auto"
             >
-              <option value="all">All Projects</option>
+              <option value="all">{t('tasks.allProjects')}</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.icon || '📁'} {p.name}
@@ -350,21 +352,21 @@ export function MyTasksView() {
 
         {/* Grouped task sections */}
         {isLoading ? (
-          <div className="py-16 text-center text-sm text-[var(--muted)]">Loading tasks…</div>
+          <div className="py-16 text-center text-sm text-[var(--muted)]">{t('tasks.loadingTasks')}</div>
         ) : tasks.length === 0 ? (
           <div className="py-16 flex flex-col items-center gap-2 text-[var(--muted)]">
             <ListTodo className="w-8 h-8" />
             <p className="text-sm">
               {status === 'completed'
-                ? 'No completed tasks yet.'
-                : 'No tasks assigned to you. Enjoy the quiet!'}
+                ? t('tasks.noCompletedTasks')
+                : t('tasks.noTasksAssigned')}
             </p>
           </div>
         ) : (
           <div className="space-y-1">
             <SectionHeader
               icon={<AlarmClock className="w-4 h-4" />}
-              title="Overdue"
+              title={t('tasks.overdue')}
               count={groups.overdue.length}
               tone="text-[var(--danger)]"
             />
@@ -375,12 +377,14 @@ export function MyTasksView() {
                 onOpen={() => setSelected(task)}
                 onComplete={() => handleComplete(task)}
                 onSnooze={() => handleSnooze(task)}
+                t={t}
+                formatDate={formatDate}
               />
             ))}
 
             <SectionHeader
               icon={<Calendar className="w-4 h-4" />}
-              title="Due Today"
+              title={t('tasks.dueToday')}
               count={groups.today.length}
               tone="text-[var(--c2)]"
             />
@@ -391,12 +395,14 @@ export function MyTasksView() {
                 onOpen={() => setSelected(task)}
                 onComplete={() => handleComplete(task)}
                 onSnooze={() => handleSnooze(task)}
+                t={t}
+                formatDate={formatDate}
               />
             ))}
 
             <SectionHeader
               icon={<Calendar className="w-4 h-4" />}
-              title="Upcoming / This Week"
+              title={t('tasks.upcoming')}
               count={groups.upcoming.length}
               tone="text-[var(--c4)]"
             />
@@ -407,12 +413,14 @@ export function MyTasksView() {
                 onOpen={() => setSelected(task)}
                 onComplete={() => handleComplete(task)}
                 onSnooze={() => handleSnooze(task)}
+                t={t}
+                formatDate={formatDate}
               />
             ))}
 
             <SectionHeader
               icon={<ListTodo className="w-4 h-4" />}
-              title="Later & No Due Date"
+              title={t('tasks.later')}
               count={groups.later.length}
               tone="text-[var(--muted)]"
             />
@@ -423,12 +431,14 @@ export function MyTasksView() {
                 onOpen={() => setSelected(task)}
                 onComplete={() => handleComplete(task)}
                 onSnooze={() => handleSnooze(task)}
+                t={t}
+                formatDate={formatDate}
               />
             ))}
 
             <SectionHeader
               icon={<CheckCircle2 className="w-4 h-4" />}
-              title="Completed"
+              title={t('tasks.completed')}
               count={groups.completed.length}
               tone="text-[var(--c4)]"
             />
@@ -439,6 +449,8 @@ export function MyTasksView() {
                 onOpen={() => setSelected(task)}
                 onComplete={() => handleComplete(task)}
                 onSnooze={() => handleSnooze(task)}
+                t={t}
+                formatDate={formatDate}
               />
             ))}
           </div>

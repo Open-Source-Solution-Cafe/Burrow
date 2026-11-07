@@ -9,6 +9,7 @@ import { projectMediaKey, useProjectMedia, type ProjectMediaItem } from '../../l
 import { createMediaUploader } from '../../editor/mediaUpload';
 import { useUploadPolicy } from '../../lib/uploadPolicy';
 import { DEFAULT_UPLOAD_POLICY, UPLOAD_FILE_TYPES, getUploadFileType } from '../../../shared/uploadPolicy';
+import { useTranslation } from '../../lib/i18n';
 
 interface ProjectScope {
   workspaceId: string;
@@ -27,6 +28,7 @@ export function MediaUploadControl({
   onBusyChange?: (busy: boolean) => void;
   compact?: boolean;
 }) {
+  const { t } = useTranslation();
   const { data: account } = useAccount();
   const membership = account?.workspaces.find((workspace) => workspace.id === workspaceId);
   const canUpload = Boolean(membership && membership.role !== 'viewer');
@@ -54,13 +56,13 @@ export function MediaUploadControl({
         className={`inline-flex min-h-10 items-center gap-2 border border-[var(--line)] bg-[var(--surface)] px-3 text-xs font-medium text-[var(--text)] theme-radius-xs focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--accent)] ${busy ? 'opacity-60' : 'cursor-pointer hover:bg-[var(--hi)]'}`}
       >
         <Upload className="w-3.5 h-3.5" />
-        <span role={busy ? 'status' : undefined}>{busy ? 'Uploading…' : 'Upload file'}</span>
+        <span role={busy ? 'status' : undefined}>{busy ? t('media.uploading') : t('media.uploadFile')}</span>
       </button>
         <input
           ref={fileInput}
           hidden
           type="file"
-          aria-label="Upload file"
+          aria-label={t('media.uploadFile')}
           accept={accept}
           disabled={busy}
           onChange={async (event) => {
@@ -81,9 +83,9 @@ export function MediaUploadControl({
                   try {
                     onUploaded({ url, name: file.name, contentType: getUploadFileType(file)?.mimeType ?? file.type });
                   } catch (error) {
-                    toast.error(error instanceof Error ? error.message : 'Could not insert the uploaded file');
+                    toast.error(error instanceof Error ? error.message : t('media.couldNotInsert'));
                   }
-                } else toast.success('File added to project library');
+                } else toast.success(t('media.fileAddedSuccess'));
               }
             } catch {
               // The canonical uploader reports failures to the user.
@@ -95,9 +97,9 @@ export function MediaUploadControl({
             }
           }}
         />
-      {policyQuery.error && <p role="alert" className="text-xs">Could not load upload settings. <button type="button" onClick={() => void policyQuery.refetch()}>Retry</button></p>}
+      {policyQuery.error && <p role="alert" className="text-xs">{t('media.couldNotLoadPolicy')} <button type="button" onClick={() => void policyQuery.refetch()}>{t('common.retry')}</button></p>}
       {!compact && (
-        <p className="text-xs text-[var(--muted)]">{policy.allowedMimeTypes.length} allowed file types · Up to {policy.maxFileSizeBytes / (1024 * 1024)} MB</p>
+        <p className="text-xs text-[var(--muted)]">{t('media.allowedSummary', { count: policy.allowedMimeTypes.length, sizeMb: policy.maxFileSizeBytes / (1024 * 1024) })}</p>
       )}
     </div>
   );
@@ -111,6 +113,7 @@ export function ProjectMediaBrowser({
 }: ProjectScope & {
   onSelect?: (item: ProjectMediaItem) => void;
 }) {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const library = useProjectMedia(workspaceId, projectId);
   const images = library.data ?? [];
@@ -125,34 +128,34 @@ export function ProjectMediaBrowser({
           className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted)]"
         />
         <Input
-          aria-label="Search project media"
-          placeholder="Search files…"
+          aria-label={t('media.searchFilesPlaceholder')}
+          placeholder={t('media.searchFilesPlaceholder')}
           className="pl-9 text-sm"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
       </div>
-      {library.isPending && <p role="status">Loading files…</p>}
+      {library.isPending && <p role="status">{t('media.loadingFiles')}</p>}
       {library.error && (
         <div role="alert">
           {library.error.message}{' '}
           <Button variant="secondary" onClick={() => library.refetch()}>
-            Retry
+            {t('common.retry')}
           </Button>
         </div>
       )}
       {library.isSuccess && matches.length === 0 && (
         <p className="text-sm text-[var(--muted)]">
           {images.length === 0
-            ? 'No files uploaded to this project yet.'
-            : 'No files match your search.'}
+            ? t('media.noFilesYet')
+            : t('media.noFilesMatch')}
         </p>
       )}
       <div
         className={`grid gap-x-5 gap-y-6 ${onSelect ? 'grid-cols-2 max-h-80 overflow-y-auto' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4'}`}
       >
         {matches.map((item) => {
-          const name = item.filename || item.key.split('/').pop() || 'Project image';
+          const name = item.filename || item.key.split('/').pop() || t('media.projectImageDefault');
           const content = (
             <>
               <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border border-[var(--line)] bg-[var(--surface2)] theme-radius-xs transition-colors group-hover:border-[var(--muted)]">
@@ -205,12 +208,13 @@ export function ProjectMediaBrowser({
 }
 
 export function ProjectMediaLibrary({ workspaceId, projectId }: ProjectScope) {
+  const { t } = useTranslation();
   return (
     <section className="flex-1 min-h-0 overflow-y-auto p-6 md:p-10 space-y-8 w-full max-w-6xl mx-auto">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-display font-bold text-[var(--text)]">Project library</h1>
-          <p className="mt-1 text-xs text-[var(--muted)]">Files shared across this project.</p>
+          <h1 className="text-xl font-display font-bold text-[var(--text)]">{t('media.projectLibraryTitle')}</h1>
+          <p className="mt-1 text-xs text-[var(--muted)]">{t('media.projectLibrarySubtitle')}</p>
         </div>
         <MediaUploadControl
           key={`${workspaceId}/${projectId}`}

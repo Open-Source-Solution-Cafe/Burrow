@@ -5,7 +5,8 @@ import { Avatar } from '../../ui/Avatar';
 import { Badge } from '../../ui/Badge';
 import { ModalShell } from '../../ui/ModalShell';
 import { priorityBadgeTone } from '../../ui/status';
-import { PRIORITY_BADGES, PRIORITIES, type CardItem, type Priority } from './types';
+import { PRIORITIES, type CardItem, type Priority } from './types';
+import { useTranslation } from '../../../lib/i18n';
 
 function Backdrop({
   children,
@@ -37,6 +38,7 @@ function useEscape(onClose: () => void) {
 }
 
 function CardHeading({ card, columnName }: { card: CardItem; columnName?: string }) {
+  const { t } = useTranslation();
   return (
     <div className="mb-3 flex items-start justify-between gap-3">
       <div className="min-w-0">
@@ -47,15 +49,17 @@ function CardHeading({ card, columnName }: { card: CardItem; columnName?: string
             fontVariationSettings: "'wdth' 122, 'wght' 700",
           }}
         >
-          {card.title || 'Untitled'}
+          {card.title || t('common.untitled')}
         </div>
         {columnName && (
-          <div className="mt-0.5 text-[11px] text-[var(--muted)]">in {columnName}</div>
+          <div className="mt-0.5 text-[11px] text-[var(--muted)]">
+            {t('boards.inColumn', { name: columnName })}
+          </div>
         )}
       </div>
-      {card.priority && PRIORITY_BADGES[card.priority] && (
+      {card.priority && (
         <Badge tone={priorityBadgeTone(card.priority)}>
-          {PRIORITY_BADGES[card.priority]!.label}
+          {t(`common.priorities.${card.priority}`)}
         </Badge>
       )}
     </div>
@@ -72,10 +76,11 @@ export function QuickPeekModal({
   columnName?: string;
   onClose: () => void;
 }) {
+  const { t, formatDate } = useTranslation();
   useEscape(onClose);
 
   const dueLabel = card.dueDate
-    ? new Date(card.dueDate).toLocaleDateString(undefined, {
+    ? formatDate(card.dueDate, {
         weekday: 'short',
         month: 'short',
         day: 'numeric',
@@ -93,7 +98,7 @@ export function QuickPeekModal({
           {dueLabel ? (
             <span className={overdue ? 'font-medium text-[var(--danger)]' : ''}>{dueLabel}</span>
           ) : (
-            <span className="text-[var(--muted)]">No due date</span>
+            <span className="text-[var(--muted)]">{t('boards.noDueDate')}</span>
           )}
         </div>
 
@@ -102,13 +107,13 @@ export function QuickPeekModal({
           {card.assignees.length > 0 ? (
             <span className="truncate">{card.assignees.map((a) => a.name).join(', ')}</span>
           ) : (
-            <span className="text-[var(--muted)]">Unassigned</span>
+            <span className="text-[var(--muted)]">{t('boards.unassigned')}</span>
           )}
         </div>
 
         {(card.totalSubtasks ?? 0) > 0 && (
           <div className="text-[var(--muted)]">
-            Subtasks: {card.completedSubtasks ?? 0}/{card.totalSubtasks} done
+            {t('boards.subtasks')}: {card.completedSubtasks ?? 0}/{card.totalSubtasks}
           </div>
         )}
 
@@ -137,7 +142,7 @@ export function QuickPeekModal({
           onClick={onClose}
           className="px-2.5 py-1 min-h-[44px] text-xs text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]"
         >
-          Close (Esc)
+          {t('common.close')} (Esc)
         </button>
       </div>
     </Backdrop>
@@ -158,6 +163,7 @@ export function PriorityPickerModal({
   boardId: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   useEscape(onClose);
   const updateCard = useUpdateCard();
 
@@ -167,7 +173,7 @@ export function PriorityPickerModal({
   };
 
   return (
-    <Backdrop onClose={onClose} title="Set priority">
+    <Backdrop onClose={onClose} title={t('boards.priority')}>
       <div className="grid grid-cols-5 gap-1.5">
         <button
           type="button"
@@ -178,7 +184,7 @@ export function PriorityPickerModal({
               : 'border-[var(--line)] text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--text)]'
           }`}
         >
-          None
+          {t('common.none')}
         </button>
         {PRIORITIES.map((p) => (
           <button
@@ -191,7 +197,7 @@ export function PriorityPickerModal({
                 : 'border-[var(--line)] text-[var(--text)] hover:bg-[var(--hi)]'
             }`}
           >
-            {p}
+            {t(`common.priorities.${p}`)}
           </button>
         ))}
       </div>
@@ -213,6 +219,7 @@ export function AssignPickerModal({
   boardId: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   useEscape(onClose);
   const { data: members = [] } = useMembers(workspaceId);
   const updateCard = useUpdateCard();
@@ -235,10 +242,10 @@ export function AssignPickerModal({
   };
 
   return (
-    <Backdrop onClose={onClose} title="Assign member">
+    <Backdrop onClose={onClose} title={t('boards.assignee')}>
       <div className="max-h-64 space-y-1 overflow-y-auto">
         {members.length === 0 && (
-          <div className="px-1 py-2 text-xs italic text-[var(--muted)]">No members</div>
+          <div className="px-1 py-2 text-xs italic text-[var(--muted)]">{t('boards.noWorkspaceMembers')}</div>
         )}
         {members.map((m) => {
           const assigned = currentIds.includes(m.userId);
