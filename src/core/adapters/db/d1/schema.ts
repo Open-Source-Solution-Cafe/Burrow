@@ -6,6 +6,7 @@ import {
   index,
   uniqueIndex,
   check,
+  foreignKey,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
@@ -105,7 +106,7 @@ export const bootstrapState = sqliteTable(
 export const workspaces = sqliteTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  createdBy: text('created_by').notNull(),
+  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
   createdAt: integer('created_at').notNull(),
 });
 
@@ -115,7 +116,9 @@ export const members = sqliteTable(
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     role: text('role', { enum: ['owner', 'editor', 'viewer'] }).notNull(),
     joinedAt: integer('joined_at').notNull(),
   },
@@ -132,7 +135,7 @@ export const invites = sqliteTable(
     email: text('email').notNull(),
     role: text('role', { enum: ['editor', 'viewer'] }).notNull(),
     tokenHash: text('token_hash').notNull().unique(),
-    invitedBy: text('invited_by').notNull(),
+    invitedBy: text('invited_by').references(() => user.id, { onDelete: 'set null' }),
     expiresAt: integer('expires_at').notNull(),
     acceptedAt: integer('accepted_at'),
     createdAt: integer('created_at').notNull(),
@@ -159,7 +162,10 @@ export const projects = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [index('projects_ws').on(t.workspaceId, t.position)],
+  (t) => [
+    index('projects_ws').on(t.workspaceId, t.position),
+    uniqueIndex('projects_id_ws_uq').on(t.id, t.workspaceId),
+  ],
 );
 
 export const projectFiles = sqliteTable(
@@ -172,7 +178,7 @@ export const projectFiles = sqliteTable(
     contentType: text('content_type').notNull(),
     filename: text('filename'),
     byteSize: integer('byte_size'),
-    createdBy: text('created_by').notNull(),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [
@@ -206,7 +212,7 @@ export const notepads = sqliteTable(
     isFavorite: integer('is_favorite', { mode: 'boolean' }).notNull().default(false),
     deletedAt: integer('deleted_at'),
     deletionOperationId: text('deletion_operation_id'),
-    createdBy: text('created_by').notNull(),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
@@ -215,6 +221,11 @@ export const notepads = sqliteTable(
     index('notepads_deleted_idx').on(t.projectId, t.deletedAt),
     index('notepads_project_deleted_position_idx').on(t.projectId, t.deletedAt, t.position),
     index('notepads_deletion_operation_idx').on(t.deletionOperationId),
+    uniqueIndex('notepads_id_kind_uq').on(t.id, t.kind),
+    foreignKey({
+      columns: [t.projectId, t.workspaceId],
+      foreignColumns: [projects.id, projects.workspaceId],
+    }).onDelete('cascade'),
   ],
 );
 
@@ -238,7 +249,13 @@ export const boards = sqliteTable(
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [index('boards_project').on(t.projectId, t.position)],
+  (t) => [
+    index('boards_project').on(t.projectId, t.position),
+    foreignKey({
+      columns: [t.projectId, t.workspaceId],
+      foreignColumns: [projects.id, projects.workspaceId],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const boardColumns = sqliteTable(
@@ -254,7 +271,10 @@ export const boardColumns = sqliteTable(
     /** Kanban WIP constraint; null = unlimited. */
     wipLimit: integer('wip_limit'),
   },
-  (t) => [index('columns_board').on(t.boardId, t.position)],
+  (t) => [
+    index('columns_board').on(t.boardId, t.position),
+    uniqueIndex('columns_id_board_uq').on(t.id, t.boardId),
+  ],
 );
 
 export const cards = sqliteTable(
@@ -271,12 +291,23 @@ export const cards = sqliteTable(
       .notNull()
       .unique()
       .references(() => notepads.id, { onDelete: 'cascade' }), // notepads.kind = 'card'
+    kind: text('kind', { enum: ['notepad', 'card'] }).notNull().default('card'),
     position: text('position').notNull(),
     priority: text('priority', { enum: ['low', 'medium', 'high', 'urgent'] }),
     dueDate: integer('due_date'),
     createdAt: integer('created_at').notNull(),
   },
-  (t) => [index('cards_column').on(t.columnId, t.position)],
+  (t) => [
+    index('cards_column').on(t.columnId, t.position),
+    foreignKey({
+      columns: [t.columnId, t.boardId],
+      foreignColumns: [boardColumns.id, boardColumns.boardId],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.notepadId, t.kind],
+      foreignColumns: [notepads.id, notepads.kind],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const cardAssignees = sqliteTable(
@@ -285,7 +316,9 @@ export const cardAssignees = sqliteTable(
     cardId: text('card_id')
       .notNull()
       .references(() => cards.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.cardId, t.userId] })],
 );
@@ -384,9 +417,13 @@ export const notifications = sqliteTable(
   {
     id: text('id').primaryKey(),
     workspaceId: text('workspace_id').notNull(),
-    userId: text('user_id').notNull(), // recipient
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }), // recipient
     type: text('type', { enum: ['mention', 'assigned'] }).notNull(),
-    actorId: text('actor_id').notNull(),
+    actorId: text('actor_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     notepadId: text('notepad_id').references(() => notepads.id, { onDelete: 'cascade' }),
     cardId: text('card_id').references(() => cards.id, { onDelete: 'cascade' }),
     readAt: integer('read_at'),
@@ -403,7 +440,9 @@ export const editLocks = sqliteTable('edit_locks', {
   notepadId: text('notepad_id')
     .primaryKey()
     .references(() => notepads.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   clientId: text('client_id').notNull(), // random per editor instance (tab)
   expiresAt: integer('expires_at').notNull(),
 });

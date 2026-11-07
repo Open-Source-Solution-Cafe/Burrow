@@ -91,15 +91,15 @@ it('upgrades populated legacy PostgreSQL data without relocating corrupt scope r
       Array.from(
         await client`
           SELECT
-            (SELECT count(*) FROM workspaces) AS workspaces,
-            (SELECT count(*) FROM projects) AS projects,
-            (SELECT count(*) FROM notepads) AS notepads,
-            (SELECT count(*) FROM boards) AS boards,
-            (SELECT count(*) FROM board_columns) AS board_columns,
-            (SELECT count(*) FROM cards) AS cards,
-            (SELECT count(*) FROM tags) AS tags,
-            (SELECT count(*) FROM notepad_tags) AS notepad_tags,
-            (SELECT count(*) FROM notepad_links) AS notepad_links`,
+            (SELECT count(*) FROM workspaces)::int AS workspaces,
+            (SELECT count(*) FROM projects)::int AS projects,
+            (SELECT count(*) FROM notepads)::int AS notepads,
+            (SELECT count(*) FROM boards)::int AS boards,
+            (SELECT count(*) FROM board_columns)::int AS board_columns,
+            (SELECT count(*) FROM cards)::int AS cards,
+            (SELECT count(*) FROM tags)::int AS tags,
+            (SELECT count(*) FROM notepad_tags)::int AS notepad_tags,
+            (SELECT count(*) FROM notepad_links)::int AS notepad_links`,
       ),
     ).toEqual([
       {
@@ -171,7 +171,7 @@ it('upgrades populated legacy PostgreSQL data without relocating corrupt scope r
 
     expect(
       Array.from(
-        await client`SELECT project_id, storage_key, content_type, created_by, created_at
+        await client`SELECT project_id, storage_key, content_type, created_by, created_at::int
           FROM project_files WHERE storage_key = ${`${workspaceA}/shared.png`}
           ORDER BY project_id`,
       ),

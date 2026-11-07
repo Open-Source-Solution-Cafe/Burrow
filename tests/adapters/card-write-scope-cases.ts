@@ -23,7 +23,7 @@ export function cardWriteScopeCases(fixture: () => { cards: ICardRepository; que
     await query("INSERT INTO boards (id, workspace_id, project_id, name, position, created_at, updated_at) VALUES (?, ?, ?, 'Board', 'a0', ?, ?)",
       [boardId, workspaceId, projectId, now, now]);
     await query("INSERT INTO board_columns (id, board_id, name, position) VALUES (?, ?, 'Todo', 'a0')", [columnId, boardId]);
-    await query("INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, is_favorite, created_by, created_at, updated_at) VALUES (?, ?, ?, 'card', 'Card', '[]', 1, 'a0', 0, ?, ?, ?)",
+    await query("INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, is_favorite, created_by, created_at, updated_at) VALUES (?, ?, ?, 'card', 'Card', '[]', 1, 'a0', false, ?, ?, ?)",
       [notepadId, workspaceId, projectId, userId, now, now]);
     await query('INSERT INTO cards (id, board_id, column_id, notepad_id, position, priority, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [cardId, boardId, columnId, notepadId, 'a0', null, now]);

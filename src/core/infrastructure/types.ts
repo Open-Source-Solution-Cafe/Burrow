@@ -130,7 +130,7 @@ export interface ProjectFile {
   projectId: string;
   storageKey: string;
   contentType: string;
-  createdBy: string;
+  createdBy: string | null;
   createdAt: number;
   /** Original display filename when known; legacy registrations may omit it. */
   filename?: string | null;
@@ -522,7 +522,7 @@ export interface IInviteRepository {
 export interface Workspace {
   id: string;
   name: string;
-  createdBy: string;
+  createdBy: string | null;
   createdAt: number;
 }
 
@@ -708,7 +708,7 @@ export interface Notepad {
   isFavorite: boolean;
   deletedAt: number | null;
   deletionOperationId: string | null;
-  createdBy: string;
+  createdBy: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -823,7 +823,7 @@ export interface Invite {
   email: string;
   role: 'editor' | 'viewer';
   tokenHash: string;
-  invitedBy: string;
+  invitedBy: string | null;
   expiresAt: number;
   acceptedAt: number | null;
   createdAt: number;
@@ -835,7 +835,7 @@ export interface CreateInviteData {
   email: string;
   role: 'editor' | 'viewer';
   tokenHash: string;
-  invitedBy: string;
+  invitedBy: string | null;
   expiresAt: number;
   createdAt: number;
 }

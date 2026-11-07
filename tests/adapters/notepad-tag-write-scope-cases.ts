@@ -38,7 +38,8 @@ export function notepadWriteScopeCases(
     expect(await notepads.restore(root, deletionAt, scope)).toBeNull();
     expect(await notepads.hardDelete(root, { ...scope, minimumRole: 'owner' })).toBeNull();
     expect(await query('SELECT id FROM notepads WHERE id IN (?, ?) ORDER BY id', [root, child])).toHaveLength(2);
-    expect(await query('SELECT id, title, deleted_at FROM notepads WHERE id IN (?, ?) ORDER BY id', [root, child]))
+    const rows = await query('SELECT id, title, deleted_at FROM notepads WHERE id IN (?, ?) ORDER BY id', [root, child]);
+    expect(rows.map((r) => ({ ...r, deleted_at: Number(r.deleted_at) })))
       .toEqual(expect.arrayContaining([{ id: root, title: 'Original', deleted_at: deletionAt }, { id: child, title: 'Original', deleted_at: deletionAt }]));
   });
 }
@@ -64,6 +65,7 @@ export function tagWriteScopeCases(
     expect(await tags.updateGuarded(tagId, { name: 'Changed' }, scope)).toBe(false);
     expect(await tags.deleteGuarded(tagId, scope)).toBe(false);
     expect(await query('SELECT name FROM tags WHERE id = ?', [tagId])).toEqual([{ name: 'Original' }]);
-    expect(await query('SELECT COUNT(*) AS n FROM tags WHERE project_id = ?', [projectId])).toEqual([{ n: 1 }]);
+    const countRows = await query('SELECT COUNT(*) AS n FROM tags WHERE project_id = ?', [projectId]);
+    expect(Number(countRows[0]?.n)).toBe(1);
   });
 }

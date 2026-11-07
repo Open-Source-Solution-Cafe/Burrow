@@ -40,7 +40,7 @@ export async function assertProjectDeleteGuard(
   const workspaceId = id();
   const otherWorkspaceId = id();
   const now = Date.now();
-  const authTimes = dialect === 'postgres' ? 'createdAt, updatedAt' : '"createdAt", "updatedAt"';
+  const authTimes = dialect === 'postgres' ? 'created_at, updated_at' : '"createdAt", "updatedAt"';
   const authTime = dialect === 'postgres' ? new Date(now).toISOString() : now;
 
   for (const userId of [ownerId, viewerId]) {

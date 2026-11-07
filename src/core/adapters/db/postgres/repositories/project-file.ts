@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import type { IProjectFileRepository, ProjectFile } from '../../../../infrastructure/types';
 import type { PostgresDb } from '../index';
 import { projectFiles } from '../schema';
@@ -55,7 +55,7 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
       .selectDistinct({ projectId: projectFiles.projectId })
       .from(projectFiles)
       .where(eq(projectFiles.storageKey, storageKey))
-      .orderBy(sql`${projectFiles.projectId} COLLATE "C"`);
+      .orderBy(asc(projectFiles.projectId));
     return rows.map(({ projectId }) => projectId);
   }
 
@@ -64,7 +64,7 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
       .selectDistinct({ storageKey: projectFiles.storageKey })
       .from(projectFiles)
       .where(eq(projectFiles.projectId, projectId))
-      .orderBy(sql`${projectFiles.storageKey} COLLATE "C"`);
+      .orderBy(asc(projectFiles.storageKey));
     return rows.map(({ storageKey }) => storageKey);
   }
 
@@ -72,7 +72,7 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
     const rows = await this.db
       .selectDistinct({ storageKey: projectFiles.storageKey })
       .from(projectFiles)
-      .orderBy(sql`${projectFiles.storageKey} COLLATE "C"`);
+      .orderBy(asc(projectFiles.storageKey));
     return rows.map(({ storageKey }) => storageKey);
   }
 }

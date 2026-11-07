@@ -46,6 +46,12 @@ FOR EACH ROW EXECUTE FUNCTION guard_project_scope_delete();
 CREATE OR REPLACE FUNCTION guard_notepad_scope_delete() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM projects p WHERE p.id = OLD.project_id
+  ) THEN
+    RETURN OLD;
+  END IF;
+
   IF EXISTS (
     SELECT 1 FROM projects p
     WHERE p.id = OLD.project_id AND p.workspace_id <> OLD.workspace_id
@@ -79,6 +85,12 @@ FOR EACH ROW EXECUTE FUNCTION guard_notepad_scope_delete();
 CREATE OR REPLACE FUNCTION guard_board_scope_delete() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM projects p WHERE p.id = OLD.project_id
+  ) THEN
+    RETURN OLD;
+  END IF;
+
   IF EXISTS (
     SELECT 1 FROM projects p
     WHERE p.id = OLD.project_id AND p.workspace_id <> OLD.workspace_id

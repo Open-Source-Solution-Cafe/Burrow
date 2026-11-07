@@ -125,7 +125,7 @@ export async function assertCardSourceScope(
   const foreignBodyId = (await query('SELECT notepad_id AS id FROM cards WHERE id = ?', [foreignCard]))[0]!.id as string;
   const subtaskId = id();
   await query(
-    'INSERT INTO card_subtasks (id, card_id, title, completed, position, created_at) VALUES (?, ?, ?, 0, ?, ?)',
+    'INSERT INTO card_subtasks (id, card_id, title, completed, position, created_at) VALUES (?, ?, ?, false, ?, ?)',
     [subtaskId, valid, 'Local', 'a0', now],
   );
   const commentId = id();

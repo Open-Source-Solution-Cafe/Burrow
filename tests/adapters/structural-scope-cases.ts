@@ -7,7 +7,27 @@ type Query = (
 
 const id = () => crypto.randomUUID();
 
+async function ensureScopeUser(query: Query) {
+  try {
+    const existing = await query('SELECT id FROM "user" WHERE id = ?', ['scope-test-user']);
+    if (existing.length) return;
+  } catch {}
+  try {
+    await query(
+      'INSERT INTO "user" (id, name, email, "emailVerified", "createdAt", "updatedAt") VALUES (?, ?, ?, ?, ?, ?)',
+      ['scope-test-user', 'Scope User', 'scope@test.com', 0, 1, 1],
+    );
+  } catch {
+    try {
+      await query(
+        "INSERT INTO \"user\" (id, name, email, email_verified, created_at, updated_at) VALUES ('scope-test-user', 'Scope User', 'scope@test.com', false, now(), now())",
+      );
+    } catch {}
+  }
+}
+
 async function createWorkspaceAndProject(query: Query, workspaceId = id(), projectId = id()) {
+  await ensureScopeUser(query);
   const now = Date.now();
   if (!(await query('SELECT id FROM workspaces WHERE id = ?', [workspaceId])).length) {
     await query(
@@ -26,6 +46,7 @@ async function createNotepad(
   query: Query,
   args: { id?: string; workspaceId: string; projectId: string; parentId?: string | null; kind?: string },
 ) {
+  await ensureScopeUser(query);
   const noteId = args.id ?? id();
   const now = Date.now();
   await query(

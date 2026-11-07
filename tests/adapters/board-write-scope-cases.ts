@@ -87,7 +87,7 @@ export function boardWriteScopeCases(fixture: () => Fixture) {
     const cardId = id();
     const now = Date.now();
     await query(`INSERT INTO notepads (id, workspace_id, project_id, kind, title, content, version, position, is_favorite, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, 'card', 'Body', '[]', 1, 'a0', 0, ?, ?, ?)`,
+      VALUES (?, ?, ?, 'card', 'Body', '[]', 1, 'a0', false, ?, ?, ?)`,
       [noteId, data.workspaceId, data.projectId, data.ownerId, now, now]);
     await query('INSERT INTO cards (id, board_id, column_id, notepad_id, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       [cardId, data.boardId, data.sourceColumnId, noteId, 'a0', now]);

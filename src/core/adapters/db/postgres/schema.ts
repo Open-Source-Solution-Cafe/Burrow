@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   pgEnum,
   check,
+  foreignKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -126,7 +127,7 @@ export const bootstrapState = pgTable(
 export const workspaces = pgTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
-  createdBy: text('created_by').notNull(),
+  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -136,7 +137,9 @@ export const members = pgTable(
     workspaceId: text('workspace_id')
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     role: roleEnum('role').notNull(),
     joinedAt: bigint('joined_at', { mode: 'number' }).notNull(),
   },
@@ -153,7 +156,7 @@ export const invites = pgTable(
     email: text('email').notNull(),
     role: inviteRoleEnum('role').notNull(),
     tokenHash: text('token_hash').notNull().unique(),
-    invitedBy: text('invited_by').notNull(),
+    invitedBy: text('invited_by').references(() => user.id, { onDelete: 'set null' }),
     expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
     acceptedAt: bigint('accepted_at', { mode: 'number' }),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
@@ -180,7 +183,10 @@ export const projects = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('projects_ws').on(t.workspaceId, t.position)],
+  (t) => [
+    index('projects_ws').on(t.workspaceId, t.position),
+    uniqueIndex('projects_id_ws_uq').on(t.id, t.workspaceId),
+  ],
 );
 
 export const projectFiles = pgTable(
@@ -193,7 +199,7 @@ export const projectFiles = pgTable(
     contentType: text('content_type').notNull(),
     filename: text('filename'),
     byteSize: integer('byte_size'),
-    createdBy: text('created_by').notNull(),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [
@@ -227,7 +233,7 @@ export const notepads = pgTable(
     isFavorite: boolean('is_favorite').notNull().default(false),
     deletedAt: bigint('deleted_at', { mode: 'number' }),
     deletionOperationId: text('deletion_operation_id'),
-    createdBy: text('created_by').notNull(),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     // Plain text extracted from content JSON for FTS
@@ -242,6 +248,11 @@ export const notepads = pgTable(
     index('notepads_project_deleted_position_idx').on(t.projectId, t.deletedAt, t.position),
     index('notepads_deletion_operation_idx').on(t.deletionOperationId),
     index('notepads_fts_idx').using('gin', t.searchVector),
+    uniqueIndex('notepads_id_kind_uq').on(t.id, t.kind),
+    foreignKey({
+      columns: [t.projectId, t.workspaceId],
+      foreignColumns: [projects.id, projects.workspaceId],
+    }).onDelete('cascade'),
   ],
 );
 
@@ -265,7 +276,13 @@ export const boards = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('boards_project').on(t.projectId, t.position)],
+  (t) => [
+    index('boards_project').on(t.projectId, t.position),
+    foreignKey({
+      columns: [t.projectId, t.workspaceId],
+      foreignColumns: [projects.id, projects.workspaceId],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const boardColumns = pgTable(
@@ -280,7 +297,10 @@ export const boardColumns = pgTable(
     position: text('position').notNull(),
     wipLimit: integer('wip_limit'),
   },
-  (t) => [index('columns_board').on(t.boardId, t.position)],
+  (t) => [
+    index('columns_board').on(t.boardId, t.position),
+    uniqueIndex('columns_id_board_uq').on(t.id, t.boardId),
+  ],
 );
 
 export const cards = pgTable(
@@ -297,12 +317,23 @@ export const cards = pgTable(
       .notNull()
       .unique()
       .references(() => notepads.id, { onDelete: 'cascade' }),
+    kind: notepadKindEnum('kind').notNull().default('card'),
     position: text('position').notNull(),
     priority: cardPriorityEnum('priority'),
     dueDate: bigint('due_date', { mode: 'number' }),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('cards_column').on(t.columnId, t.position)],
+  (t) => [
+    index('cards_column').on(t.columnId, t.position),
+    foreignKey({
+      columns: [t.columnId, t.boardId],
+      foreignColumns: [boardColumns.id, boardColumns.boardId],
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.notepadId, t.kind],
+      foreignColumns: [notepads.id, notepads.kind],
+    }).onDelete('cascade'),
+  ],
 );
 
 export const cardAssignees = pgTable(
@@ -311,7 +342,9 @@ export const cardAssignees = pgTable(
     cardId: text('card_id')
       .notNull()
       .references(() => cards.id, { onDelete: 'cascade' }),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.cardId, t.userId] })],
 );
@@ -410,9 +443,13 @@ export const notifications = pgTable(
   {
     id: text('id').primaryKey(),
     workspaceId: text('workspace_id').notNull(),
-    userId: text('user_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     type: notificationTypeEnum('type').notNull(),
-    actorId: text('actor_id').notNull(),
+    actorId: text('actor_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
     notepadId: text('notepad_id').references(() => notepads.id, { onDelete: 'cascade' }),
     cardId: text('card_id').references(() => cards.id, { onDelete: 'cascade' }),
     readAt: bigint('read_at', { mode: 'number' }),
@@ -429,7 +466,9 @@ export const editLocks = pgTable('edit_locks', {
   notepadId: text('notepad_id')
     .primaryKey()
     .references(() => notepads.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
   clientId: text('client_id').notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
 });
