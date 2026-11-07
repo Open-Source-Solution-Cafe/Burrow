@@ -364,6 +364,7 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS projects_scope_delete_guard ON projects;
 CREATE TRIGGER projects_scope_delete_guard
 BEFORE DELETE ON projects
 FOR EACH ROW EXECUTE FUNCTION guard_project_scope_delete();
@@ -404,6 +405,7 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS notepads_scope_delete_guard ON notepads;
 CREATE TRIGGER notepads_scope_delete_guard
 BEFORE DELETE ON notepads
 FOR EACH ROW EXECUTE FUNCTION guard_notepad_scope_delete();
@@ -444,6 +446,7 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS boards_scope_delete_guard ON boards;
 CREATE TRIGGER boards_scope_delete_guard
 BEFORE DELETE ON boards
 FOR EACH ROW EXECUTE FUNCTION guard_board_scope_delete();
@@ -463,6 +466,7 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS board_columns_scope_delete_guard ON board_columns;
 CREATE TRIGGER board_columns_scope_delete_guard
 BEFORE DELETE ON board_columns
 FOR EACH ROW EXECUTE FUNCTION guard_board_column_scope_delete();
@@ -585,24 +589,34 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS notepads_scope_write_guard ON notepads;
 CREATE TRIGGER notepads_scope_write_guard BEFORE INSERT OR UPDATE OF project_id, workspace_id, parent_id, kind ON notepads FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS projects_scope_write_guard ON projects;
 CREATE TRIGGER projects_scope_write_guard BEFORE UPDATE OF workspace_id ON projects FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS boards_scope_write_guard ON boards;
 CREATE TRIGGER boards_scope_write_guard BEFORE INSERT OR UPDATE OF project_id, workspace_id ON boards FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS cards_scope_write_guard ON cards;
 CREATE TRIGGER cards_scope_write_guard BEFORE INSERT OR UPDATE OF board_id, column_id, notepad_id, kind ON cards FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS notepad_tags_scope_write_guard ON notepad_tags;
 CREATE TRIGGER notepad_tags_scope_write_guard BEFORE INSERT OR UPDATE OF notepad_id, tag_id ON notepad_tags FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS tags_scope_write_guard ON tags;
 CREATE TRIGGER tags_scope_write_guard BEFORE UPDATE OF project_id ON tags FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS notepad_links_scope_write_guard ON notepad_links;
 CREATE TRIGGER notepad_links_scope_write_guard BEFORE INSERT OR UPDATE OF source_id, target_type, target_id ON notepad_links FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS card_assignees_scope_write_guard ON card_assignees;
 CREATE TRIGGER card_assignees_scope_write_guard BEFORE INSERT OR UPDATE OF card_id, user_id ON card_assignees FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS card_comments_scope_write_guard ON card_comments;
 CREATE TRIGGER card_comments_scope_write_guard BEFORE INSERT OR UPDATE OF card_id, user_id ON card_comments FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS notifications_scope_write_guard ON notifications;
 CREATE TRIGGER notifications_scope_write_guard BEFORE INSERT OR UPDATE OF workspace_id, user_id, notepad_id, card_id ON notifications FOR EACH ROW EXECUTE FUNCTION enforce_scope_write();
 --> statement-breakpoint
 
@@ -624,12 +638,16 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS notepads_cleanup_links ON notepads;
 CREATE TRIGGER notepads_cleanup_links AFTER DELETE ON notepads FOR EACH ROW EXECUTE FUNCTION cleanup_notepad_links_target();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS cards_cleanup_links ON cards;
 CREATE TRIGGER cards_cleanup_links AFTER DELETE ON cards FOR EACH ROW EXECUTE FUNCTION cleanup_notepad_links_target();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS boards_cleanup_links ON boards;
 CREATE TRIGGER boards_cleanup_links AFTER DELETE ON boards FOR EACH ROW EXECUTE FUNCTION cleanup_notepad_links_target();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS user_cleanup_links ON "user";
 CREATE TRIGGER user_cleanup_links AFTER DELETE ON "user" FOR EACH ROW EXECUTE FUNCTION cleanup_notepad_links_target();
 --> statement-breakpoint
 
@@ -658,6 +676,7 @@ END;
 $$;
 --> statement-breakpoint
 
+DROP TRIGGER IF EXISTS members_cleanup_workspace_assignments ON members;
 CREATE TRIGGER members_cleanup_workspace_assignments
 AFTER DELETE ON members
 FOR EACH ROW EXECUTE FUNCTION members_cleanup_workspace_assignments();
