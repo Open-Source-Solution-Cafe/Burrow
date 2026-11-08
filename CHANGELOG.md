@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reactive Translation Hook & Parity Testing**: Integrated `useTranslation` with `Intl` date formatting and synchronous external store updates, accompanied by automated dictionary key parity validation across English, Spanish, and French.
 
 ### Changed
+- Hardened decoupling verification scanner rules to enforce boundaries on all schemas, migrations, and source definitions.
 
 ### Deprecated
 
