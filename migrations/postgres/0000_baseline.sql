@@ -680,4 +680,33 @@ DROP TRIGGER IF EXISTS members_cleanup_workspace_assignments ON members;
 CREATE TRIGGER members_cleanup_workspace_assignments
 AFTER DELETE ON members
 FOR EACH ROW EXECUTE FUNCTION members_cleanup_workspace_assignments();
+--> statement-breakpoint
+
+-- 10. User Deletion Guard (Prevents deleting sole owner)
+CREATE OR REPLACE FUNCTION prevent_sole_owner_user_delete()
+RETURNS trigger AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM members m1
+    WHERE m1.user_id = OLD.id AND m1.role = 'owner'
+    AND NOT EXISTS (
+      SELECT 1 FROM members m2
+      WHERE m2.workspace_id = m1.workspace_id
+        AND m2.user_id <> OLD.id
+        AND m2.role = 'owner'
+    )
+  ) THEN
+    RAISE EXCEPTION 'cannot_delete_sole_owner: user % is the sole owner of one or more workspaces', OLD.id
+      USING ERRCODE = '23503';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+
+DROP TRIGGER IF EXISTS trg_prevent_sole_owner_user_delete ON "user";
+CREATE TRIGGER trg_prevent_sole_owner_user_delete
+  BEFORE DELETE ON "user"
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_sole_owner_user_delete();
 

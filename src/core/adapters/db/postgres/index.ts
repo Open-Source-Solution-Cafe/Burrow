@@ -18,6 +18,8 @@ import { PostgresInviteRepository } from './repositories/invite';
 import { PostgresSearchAdapter } from './search';
 import { PostgresLockAdapter } from './lock';
 import { createPostgresAuthProvider } from './auth';
+import { APIError } from 'better-auth/api';
+import { MemberService } from '../../../services/members';
 import { createEmailFromEnv } from '../../email/factory';
 import { createStorageFromEnv } from '../../storage/factory';
 
@@ -91,6 +93,7 @@ export async function createPostgresInfrastructure(
     throw new Error('BETTER_AUTH_SECRET must be set in production');
   }
 
+  const memberService = new MemberService(repositories);
   const auth = createPostgresAuthProvider(
     db,
     authSecret,
@@ -104,6 +107,17 @@ export async function createPostgresInfrastructure(
       GOOGLE_CLIENT_SECRET: (config as any).GOOGLE_CLIENT_SECRET,
       GITHUB_CLIENT_ID: (config as any).GITHUB_CLIENT_ID,
       GITHUB_CLIENT_SECRET: (config as any).GITHUB_CLIENT_SECRET,
+    },
+    {
+      onBeforeDeleteUser: async (userId: string) => {
+        try {
+          await memberService.assertCanDeleteUser(userId, repositories.workspaces);
+        } catch (err) {
+          throw new APIError('BAD_REQUEST', {
+            message: err instanceof Error ? err.message : 'cannot_delete_sole_owner',
+          });
+        }
+      },
     },
   );
 

@@ -748,4 +748,23 @@ BEGIN
       SELECT n.id FROM notepads n WHERE n.workspace_id = OLD.workspace_id
     );
 END;
+--> statement-breakpoint
+
+-- 10. User Deletion Guard (Prevents deleting sole owner)
+CREATE TRIGGER IF NOT EXISTS trg_prevent_sole_owner_user_delete
+BEFORE DELETE ON `user`
+FOR EACH ROW
+WHEN EXISTS (
+  SELECT 1 FROM members m1
+  WHERE m1.user_id = OLD.id AND m1.role = 'owner'
+  AND NOT EXISTS (
+    SELECT 1 FROM members m2
+    WHERE m2.workspace_id = m1.workspace_id
+      AND m2.user_id <> OLD.id
+      AND m2.role = 'owner'
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'cannot_delete_sole_owner: user is the sole owner of one or more workspaces');
+END;
 

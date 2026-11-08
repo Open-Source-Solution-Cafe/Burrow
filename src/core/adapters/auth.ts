@@ -19,6 +19,10 @@ export interface AuthEnv {
   emailProvider?: IEmailProvider;
 }
 
+export interface AuthProviderOptions {
+  onBeforeDeleteUser?: (userId: string) => Promise<void>;
+}
+
 const oauth = (clientId?: string, clientSecret?: string, disableImplicitSignUp = true) =>
   clientId && clientSecret ? { clientId, clientSecret, disableImplicitSignUp } : undefined;
 
@@ -29,6 +33,7 @@ export function createAuthProvider(
   env: AuthEnv,
   signupMode?: SignupMode,
   emailProvider?: IEmailProvider,
+  options?: AuthProviderOptions,
 ): AuthProvider {
   const isProd =
     (typeof process !== 'undefined' && process.env?.NODE_ENV === 'production') ||
@@ -105,6 +110,16 @@ export function createAuthProvider(
       updateAge: 60 * 60 * 24,
       cookieCache: { enabled: true, maxAge: 60 },
     },
+    user: {
+      deleteUser: {
+        enabled: true,
+        beforeDelete: async (user) => {
+          if (options?.onBeforeDeleteUser) {
+            await options.onBeforeDeleteUser(user.id);
+          }
+        },
+      },
+    },
   });
   return {
     async getSession(headers: Headers) {
@@ -118,6 +133,17 @@ export function createAuthProvider(
           }
         : null;
     },
-    handler: (request) => auth.handler(request),
+    handler: (request) =>
+      auth.handler(request).catch((err) => {
+        if (err && (typeof err.statusCode === 'number' || err.status)) {
+          const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
+          const body = err.body || { message: err.message || 'Authentication error' };
+          return new Response(JSON.stringify(body), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw err;
+      }),
   };
 }

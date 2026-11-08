@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sole Owner User Deletion Guards**: Added `user.deleteUser.beforeDelete` Better Auth lifecycle hook and database `BEFORE DELETE` trigger `trg_prevent_sole_owner_user_delete` preventing user deletion if the user is the sole owner of any workspace.
+- **Line Ending Normalization**: Added `.gitattributes` enforcing consistent LF line endings across all files (`* text=auto eol=lf`).
 - **Database Baseline Migration Squashing & Inline Integrity**: Squashed historical migration steps into a unified, zero-overhead baseline migration (`migrations/0000_baseline.sql` for SQLite/D1 and `migrations/postgres/0000_baseline.sql` for PostgreSQL) with all referential integrity constraints defined directly inline:
   - Composite unique constraint `projects (id, workspace_id)` and composite foreign keys on `notepads` and `boards` referencing `(project_id, workspace_id)`.
   - Composite foreign keys on `cards (column_id, board_id) REFERENCES board_columns(id, board_id)` and `(notepad_id, project_id, kind) REFERENCES notepads(id, project_id, kind)`.
@@ -19,13 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reactive Translation Hook & Parity Testing**: Integrated `useTranslation` with `Intl` date formatting and synchronous external store updates, accompanied by automated dictionary key parity validation across English, Spanish, and French.
 
 ### Changed
-- Hardened decoupling verification scanner rules to enforce boundaries on all schemas, migrations, and source definitions.
+- **Decoupling Scanner Hardening**: Extended `scripts/check-decoupling.mjs` to detect `cloud_` prefixed identifiers and schema-qualified `cloud.` references across all schemas, migrations, and source files.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **Cross-package Error Handling**: Hardened `isHttpError` in `core/services/errors.ts` to identify status and error codes duck-typed across dual-bundle and package boundaries, preventing unhandled 500 errors.
+- **Auth Endpoint Rejection Handling**: Wrapped Better Auth route handler in `core/adapters/auth.ts` to cleanly catch and map lifecycle hook rejections to HTTP error responses.
 - **Cascade Scope Delete Guard**: Updated PostgreSQL cascade delete triggers on `notepads` and `boards` to recognize when the parent project is being atomically deleted in the same cascade, preventing false-positive `scope_cascade_conflict` rejections during full project deletions.
 - **Complete UI Translation Coverage**: Localized previously hardcoded English strings in `WorkspaceSwitcher` (workspaces header, creation modal, settings links), `ProjectSwitcher` (creation modal, dropdown options), member role tags (`OWNER`, `EDITOR`, `VIEWER`), keyboard shortcuts modal, filter controls, command palette footer, board column action buttons (`Add Column`, WIP limit menu), and card quick-add menus/toasts across English, Spanish, and French.
 

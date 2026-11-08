@@ -13,6 +13,8 @@ import { createTagRepository } from './repositories/tag';
 import { createNotificationRepository } from './repositories/notification';
 import { createMemberRepository } from './repositories/member';
 import { createInviteRepository } from './repositories/invite';
+import { APIError } from 'better-auth/api';
+import { MemberService } from '../../../services/members';
 import type { Infrastructure } from '../../../infrastructure/types';
 import type { DB } from './client';
 
@@ -43,7 +45,6 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
   const locks = new SqlLockAdapter(db);
   const storage = createStorageFromEnv(env);
   const email = createEmailFromEnv(env);
-  const auth = createAuthProviderWithDB(db, { ...env, emailProvider: email }, email);
 
   // Create repositories (stateless, can be shared)
   const repositories = {
@@ -58,6 +59,25 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     members: createMemberRepository(db),
     invites: createInviteRepository(db),
   };
+
+  const memberService = new MemberService(repositories);
+  const auth = createAuthProviderWithDB(
+    db,
+    { ...env, emailProvider: email },
+    email,
+    undefined,
+    {
+      onBeforeDeleteUser: async (userId: string) => {
+        try {
+          await memberService.assertCanDeleteUser(userId, repositories.workspaces);
+        } catch (err) {
+          throw new APIError('BAD_REQUEST', {
+            message: err instanceof Error ? err.message : 'cannot_delete_sole_owner',
+          });
+        }
+      },
+    },
+  );
 
   return {
     repositories,

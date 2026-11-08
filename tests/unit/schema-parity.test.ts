@@ -228,6 +228,7 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
         'cards_cleanup_links',
         'boards_cleanup_links',
         'members_cleanup_workspace_assignments',
+        'trg_prevent_sole_owner_user_delete',
       ];
 
       for (const trg of expectedTriggers) {
@@ -346,6 +347,7 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
         'boards_cleanup_links',
         'user_cleanup_links',
         'members_cleanup_workspace_assignments',
+        'trg_prevent_sole_owner_user_delete',
       ];
 
       for (const trg of expectedPgTriggers) {

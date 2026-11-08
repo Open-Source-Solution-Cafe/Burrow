@@ -455,24 +455,13 @@ export function createCoreApp(
         const req = c.req.raw;
         const contentType = req.headers.get('content-type') || '';
         let res: Response;
-        if (
-          req.method !== 'GET' &&
-          req.method !== 'HEAD' &&
-          contentType.includes('application/json')
-        ) {
-          if (req.headers.get('content-length') === '0') {
-            const headers = new Headers(req.headers);
-            const fixedReq = new Request(req.url, {
-              method: req.method,
-              headers,
-              body: JSON.stringify({}),
-              duplex: 'half',
-            } as RequestInit);
-            res = await auth.handler(fixedReq);
-          } else {
-            const cloned = req.clone();
-            const text = await cloned.text();
-            if (!text || text.trim() === '') {
+        try {
+          if (
+            req.method !== 'GET' &&
+            req.method !== 'HEAD' &&
+            contentType.includes('application/json')
+          ) {
+            if (req.headers.get('content-length') === '0') {
               const headers = new Headers(req.headers);
               const fixedReq = new Request(req.url, {
                 method: req.method,
@@ -482,14 +471,33 @@ export function createCoreApp(
               } as RequestInit);
               res = await auth.handler(fixedReq);
             } else {
-              res = await auth.handler(req);
+              const cloned = req.clone();
+              const text = await cloned.text();
+              if (!text || text.trim() === '') {
+                const headers = new Headers(req.headers);
+                const fixedReq = new Request(req.url, {
+                  method: req.method,
+                  headers,
+                  body: JSON.stringify({}),
+                  duplex: 'half',
+                } as RequestInit);
+                res = await auth.handler(fixedReq);
+              } else {
+                res = await auth.handler(req);
+              }
             }
+          } else {
+            res = await auth.handler(req);
           }
-        } else {
-          res = await auth.handler(req);
+          return res;
+        } catch (err: any) {
+          if (err && (typeof err.statusCode === 'number' || err.status)) {
+            const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
+            const message = err.body?.message || err.message || 'Authentication error';
+            return c.json({ message, error: message }, status as any);
+          }
+          throw err;
         }
-
-        return res;
       })
 
       // ---------------------------------------------------------------------------

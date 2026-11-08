@@ -23,6 +23,7 @@ describe('check-decoupling: unit tests', () => {
       'enterprise',
       'burrow-cloud',
       'cloud.',
+      'cloud_',
       'organization',
       'org_id',
       'tenant',
@@ -37,6 +38,7 @@ describe('check-decoupling: unit tests', () => {
       ['enterprise', 'if (isEnterprise) { /* ... */ }'],
       ['burrow-cloud', 'import { cloud } from "burrow-cloud";'],
       ['cloud.', 'SELECT * FROM cloud.organizations;'],
+      ['cloud_', 'const cloud_tenant_id = "t_123";'],
       ['organization', 'const organizationName = "Acme Corp";'],
       ['org_id', 'SELECT * FROM users WHERE org_id = $1;'],
       ['tenant', 'function getTenantConfig(tenantId: string) {}'],
@@ -55,6 +57,7 @@ describe('check-decoupling: unit tests', () => {
         const EnterpriseCustomer = class {};
         // Burrow-Cloud reference
         const CLOUD_SCHEMA = 'CLOUD.TABLE';
+        const CLOUD_PREFIX = 'CLOUD_TENANTS';
         const CurrentOrganization = 'Acme';
         const ORG_ID = '123';
         const CurrentTenant = 't1';
