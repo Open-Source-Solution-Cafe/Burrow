@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import { MAX_UPLOAD_BYTES } from '../shared/uploadPolicy';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
@@ -510,6 +511,9 @@ export function createCoreApp(
       .onError((err, c) => {
         if (isHttpError(err)) {
           return c.json({ error: { code: err.code, message: err.message } }, err.status as any);
+        }
+        if (err instanceof HTTPException) {
+          return err.res ?? c.json({ error: { code: 'bad_request', message: err.message } }, err.status as any);
         }
         const mapped = policy.mapError?.(err);
         if (mapped) {
