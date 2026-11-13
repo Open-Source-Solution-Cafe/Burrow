@@ -124,26 +124,70 @@ export const securityHeaders = createMiddleware(async (c, next) => {
 
 /**
  * Request body size limiter middleware.
- * Inspects Content-Length before or during stream read to return 413 quickly.
+ * Inspects Content-Length and wraps streaming bodies to return 413 even when Content-Length is missing or spoofed.
  */
 export function bodyLimit(maxBytes = DEFAULT_MAX_BODY_BYTES) {
   return createMiddleware(async (c, next) => {
+    const payloadTooLarge = () =>
+      c.json(
+        {
+          error: {
+            code: 'payload_too_large',
+            message: `Request body exceeds limit of ${maxBytes} bytes`,
+          },
+        },
+        413,
+      );
+
     const contentLength = c.req.header('content-length');
     if (contentLength) {
       const len = Number.parseInt(contentLength, 10);
       if (!Number.isNaN(len) && len > maxBytes) {
-        return c.json(
-          {
-            error: {
-              code: 'payload_too_large',
-              message: `Request body exceeds limit of ${maxBytes} bytes`,
-            },
-          },
-          413,
-        );
+        return payloadTooLarge();
       }
     }
-    await next();
+
+    let exceeded = false;
+    const method = c.req.method.toUpperCase();
+    if (
+      (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') &&
+      c.req.raw.body
+    ) {
+      let bytesRead = 0;
+      const limiter = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          bytesRead += chunk.byteLength;
+          if (bytesRead > maxBytes) {
+            exceeded = true;
+            controller.error(new Error(`Request body exceeds limit of ${maxBytes} bytes`));
+            return;
+          }
+          controller.enqueue(chunk);
+        },
+      });
+      const limitedBody = c.req.raw.body.pipeThrough(limiter);
+      c.req.raw = new Request(c.req.raw, {
+        body: limitedBody,
+        duplex: 'half',
+      } as RequestInit);
+    }
+
+    try {
+      await next();
+    } catch (error) {
+      if (exceeded) {
+        c.error = undefined;
+        c.res = payloadTooLarge();
+        return c.res;
+      }
+      throw error;
+    }
+
+    if (exceeded) {
+      c.error = undefined;
+      c.res = payloadTooLarge();
+      return c.res;
+    }
   });
 }
 

@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { uploadPolicyStorageKey } from '../../shared/uploadPolicy';
+import { deleteStorageObjectWithRetry } from '../shared/storage-cleanup';
 import type {
   IProjectRepository,
   INotepadRepository,
@@ -219,8 +220,11 @@ export class ProjectService {
     }
 
     if (this.storage) {
-      await this.storage.delete(uploadPolicyStorageKey(args.workspaceId, args.projectId))
-        .catch((error) => console.error('[projects] failed to clean up upload policy:', error));
+      await deleteStorageObjectWithRetry(
+        this.storage,
+        uploadPolicyStorageKey(args.workspaceId, args.projectId),
+        '[projects] failed to clean up upload policy',
+      );
     }
     if (this.storage && coverKeys.length > 0) {
       await Promise.allSettled(
@@ -230,7 +234,11 @@ export class ProjectService {
             this.repos.notepads.countByCoverKey(key),
           ]);
           if (registrations === 0 && covers === 0) {
-            await this.storage!.delete(key);
+            await deleteStorageObjectWithRetry(
+              this.storage!,
+              key,
+              '[projects] failed to clean up deleted cover object',
+            );
           }
         }),
       );

@@ -23,6 +23,7 @@ import { assertResetDirectory, selectDatabaseTarget } from '../src/server/databa
 import {
   assertDemoResetAllowed,
   bin,
+  inspectOrCleanRemoteR2References,
   loadEnv,
   migrateDatabase,
   parseCliArgs,
@@ -295,6 +296,12 @@ async function main() {
       configArgs,
       databaseName: profile.dbName,
       allowPreBaselineReset: true,
+    });
+
+    inspectOrCleanRemoteR2References({
+      configArgs,
+      profile,
+      cleanR2,
     });
 
     step(`Cleaning all records from Remote D1 (${profile.dbName})`);

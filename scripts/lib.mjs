@@ -1201,3 +1201,53 @@ function printWranglerTroubleshooting(printable, rawOutput = '') {
   console.error('  - Run `pnpm run setup -r` for automatic one-command provisioning.');
   console.error('='.repeat(80) + '\n');
 }
+
+export function inspectOrCleanRemoteR2References({
+  configArgs,
+  profile,
+  cleanR2 = false,
+  runFn = run,
+}) {
+  const query = [
+    'SELECT storage_key AS key FROM project_files',
+    "UNION SELECT cover_key AS key FROM notepads WHERE cover_key IS NOT NULL AND cover_key != ''",
+  ].join(' ');
+  const check = runFn(
+    bin('wrangler'),
+    [...configArgs, 'd1', 'execute', profile.dbName, '--remote', `--command=${query}`, '--json'],
+    { capture: true, allowFail: true, quiet: true },
+  );
+  if (check.status !== 0) return [];
+
+  const parsed = parseFirstJson(check.stdout);
+  const resultSets = Array.isArray(parsed) ? parsed : [parsed];
+  const rows = resultSets[0]?.results ?? resultSets[0]?.rows ?? [];
+  const keys = Array.from(
+    new Set(rows.map((row) => row?.key).filter((k) => typeof k === 'string' && k.length > 0)),
+  );
+  if (keys.length === 0) return [];
+
+  if (cleanR2) {
+    console.log(
+      `  💡 Cleaning ${keys.length} R2 object reference(s) from bucket "${profile.bucketName}" before wiping D1...`,
+    );
+    for (const key of keys) {
+      const del = runFn(
+        bin('wrangler'),
+        [...configArgs, 'r2', 'object', 'delete', `${profile.bucketName}/${key}`, '--remote'],
+        { capture: true, allowFail: true, quiet: true },
+      );
+      if (del.status !== 0) {
+        console.warn(`  ⚠️  Failed to delete R2 object "${key}" from "${profile.bucketName}"`);
+      }
+    }
+  } else {
+    console.warn(
+      `  ⚠️  Found ${keys.length} referenced R2 object(s) in bucket "${profile.bucketName}" before wiping D1.`,
+    );
+    console.warn(
+      `     Those objects will become unreferenced after reset; inspect them with \`pnpm run inventory:storage\`.`,
+    );
+  }
+  return keys;
+}

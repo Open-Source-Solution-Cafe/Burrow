@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import type {
   IMemberRepository,
   INotepadRepository,
+  IProjectFileRepository,
   ITagRepository,
   Notepad,
   NotepadContent,
@@ -9,6 +10,8 @@ import type {
   EditLock,
   ProjectScope,
 } from '../infrastructure/types';
+import type { IStorageAdapter } from '../adapters/storage/types';
+import { deleteStorageObjectWithRetry } from '../shared/storage-cleanup';
 import {
   notFound,
   forbidden,
@@ -111,8 +114,10 @@ export class NotepadService {
       notepads: INotepadRepository;
       tags: ITagRepository;
       members: IMemberRepository;
+      projectFiles?: IProjectFileRepository;
     },
     private readonly locks: ILockAdapter,
+    private readonly storage?: IStorageAdapter,
   ) {}
 
   /** Only disclose lock-holder identity after verifying membership in the resource's workspace. */
@@ -370,6 +375,31 @@ export class NotepadService {
       workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'owner',
     });
     if (removed === null) throw forbidden('forbidden', 'Owner access changed while deleting the notepad');
+
+    const coverKeys = Array.from(
+      new Set(
+        removed
+          .map((item) => item.coverKey)
+          .filter((key): key is string => typeof key === 'string' && key.length > 0),
+      ),
+    );
+    if (this.storage && this.repos.projectFiles && coverKeys.length > 0) {
+      await Promise.allSettled(
+        coverKeys.map(async (key) => {
+          const [registrations, covers] = await Promise.all([
+            this.repos.projectFiles!.countByStorageKey(key),
+            this.repos.notepads.countByCoverKey(key),
+          ]);
+          if (registrations === 0 && covers === 0) {
+            await deleteStorageObjectWithRetry(
+              this.storage!,
+              key,
+              '[notepads] failed to clean up deleted cover object',
+            );
+          }
+        }),
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------

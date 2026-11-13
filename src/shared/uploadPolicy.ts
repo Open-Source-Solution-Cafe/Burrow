@@ -1,6 +1,14 @@
 export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+export const WORKER_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export const uploadPolicyStorageKey = (workspaceId: string, projectId: string) => `${workspaceId}/${projectId}/.upload-policy.json`;
 export const isUploadPolicyStorageKey = (key: string) => /^[^/]+\/[^/]+\/\.upload-policy\.json$/.test(key);
+
+export function isCloudflareWorkersRuntime(env?: Record<string, unknown>): boolean {
+  if (typeof navigator !== 'undefined' && navigator.userAgent === 'Cloudflare-Workers') {
+    return true;
+  }
+  return Boolean(env && (env.CF_WORKERS === true || 'FILES' in env || 'ASSETS' in env));
+}
 export const UPLOAD_FILE_TYPES = [
   { mimeType: 'image/png', extension: 'png', label: 'PNG image' },
   { mimeType: 'image/jpeg', extension: 'jpg', label: 'JPEG image' },

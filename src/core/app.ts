@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { MAX_UPLOAD_BYTES } from '../shared/uploadPolicy';
+import {
+  MAX_UPLOAD_BYTES,
+  WORKER_MAX_UPLOAD_BYTES,
+  isCloudflareWorkersRuntime,
+} from '../shared/uploadPolicy';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Infrastructure } from './infrastructure/types';
@@ -74,8 +78,10 @@ export function createCoreApp(
       notepads: repositories.notepads,
       tags: repositories.tags,
       members: repositories.members,
+      projectFiles: repositories.projectFiles,
     },
     locks,
+    storage,
   );
   const boards = new BoardService({
     boards: repositories.boards,
@@ -130,12 +136,17 @@ export function createCoreApp(
     notifications,
     search,
   });
+  const maxUploadBytes = isCloudflareWorkersRuntime(infra.env)
+    ? WORKER_MAX_UPLOAD_BYTES
+    : MAX_UPLOAD_BYTES;
   const projectFileRoutes = createProjectFileRoutes({
     projects: repositories.projects,
     members: repositories.members,
     files: repositories.projectFiles,
+    notepads: repositories.notepads,
     storage,
     policy,
+    maxUploadBytes,
   });
   const systemRoutes = createSystemRoutes({
     policy,
@@ -160,7 +171,7 @@ export function createCoreApp(
       .use('*', securityHeaders)
       .use('/api/*', (c, next) => {
         if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
-          return bodyLimit(MAX_UPLOAD_BYTES + 1024 * 1024)(c, next);
+          return bodyLimit(maxUploadBytes + 1024 * 1024)(c, next);
         }
         return bodyLimit()(c, next);
       })

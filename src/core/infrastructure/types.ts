@@ -143,6 +143,8 @@ export interface ProjectFile {
 export interface IProjectFileRepository {
   /** Register a project/key pair once; a shared key may have one registration per project. */
   register(file: ProjectFile): Promise<boolean>;
+  /** Remove a project/key registration; returns true if a row was deleted. */
+  unregister?(projectId: string, storageKey: string): Promise<boolean>;
   /** Finds metadata only for the requested project/key pair. */
   findByProjectAndKey(projectId: string, storageKey: string): Promise<ProjectFile | null>;
   /** Counts registrations across all projects that reference this storage key. */

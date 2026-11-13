@@ -75,4 +75,12 @@ export class PostgresProjectFileRepository implements IProjectFileRepository {
       .orderBy(asc(projectFiles.storageKey));
     return rows.map(({ storageKey }) => storageKey);
   }
+
+  async unregister(projectId: string, storageKey: string): Promise<boolean> {
+    const deleted = await this.db
+      .delete(projectFiles)
+      .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.storageKey, storageKey)))
+      .returning({ storageKey: projectFiles.storageKey });
+    return deleted.length > 0;
+  }
 }

@@ -66,5 +66,18 @@ export function createProjectFileRepository(db: DB): IProjectFileRepository {
         .orderBy(sql`${t.projectFiles.storageKey} COLLATE BINARY`);
       return rows.map(({ storageKey }) => storageKey);
     },
+
+    async unregister(projectId: string, storageKey: string): Promise<boolean> {
+      const existing = await db
+        .select({ storageKey: t.projectFiles.storageKey })
+        .from(t.projectFiles)
+        .where(and(eq(t.projectFiles.projectId, projectId), eq(t.projectFiles.storageKey, storageKey)))
+        .limit(1);
+      if (existing.length === 0) return false;
+      await db
+        .delete(t.projectFiles)
+        .where(and(eq(t.projectFiles.projectId, projectId), eq(t.projectFiles.storageKey, storageKey)));
+      return true;
+    },
   };
 }

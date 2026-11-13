@@ -406,4 +406,55 @@ describe('project-scoped storage and uploads', () => {
     expect(legacySharedRead.status).toBe(200);
     await expectInvariantsHold(env.DB);
   });
+
+  it('deletes unreferenced project files while blocking deletion of active notepad covers (#005)', async () => {
+    const uploadRes = await upload(
+      workspaceId,
+      projectId,
+      editorCookie,
+      'deletable.png',
+      new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+      'image/png',
+    );
+    expect(uploadRes.status).toBe(200);
+    const { key } = (await uploadRes.json()) as { key: string };
+
+    // Create a notepad using it as cover
+    const createNote = await postJson(
+      `${projectPath(workspaceId, projectId)}/notepads`,
+      { title: 'Cover guard note' },
+      ownerCookie,
+    );
+    expect(createNote.status).toBe(201);
+    const { id: notepadId } = (await createNote.json()) as { id: string };
+    const setCover = await request(
+      `${projectPath(workspaceId, projectId)}/notepads/${notepadId}`,
+      ownerCookie,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coverKey: key }) },
+    );
+    expect(setCover.status).toBe(200);
+
+    // Deleting while active cover must fail with 409
+    const blockedDelete = await request(filePath(workspaceId, projectId, key), editorCookie, {
+      method: 'DELETE',
+    });
+    expect(blockedDelete.status).toBe(409);
+    expect(await env.FILES.get(key)).not.toBeNull();
+
+    // Detach cover and delete file
+    const clearCover = await request(
+      `${projectPath(workspaceId, projectId)}/notepads/${notepadId}`,
+      ownerCookie,
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coverKey: null }) },
+    );
+    expect(clearCover.status).toBe(200);
+
+    const deleteRes = await request(filePath(workspaceId, projectId, key), editorCookie, {
+      method: 'DELETE',
+    });
+    expect(deleteRes.status).toBe(200);
+    expect(await env.FILES.get(key)).toBeNull();
+    expect((await request(filePath(workspaceId, projectId, key), editorCookie)).status).toBe(404);
+    await expectInvariantsHold(env.DB);
+  });
 });

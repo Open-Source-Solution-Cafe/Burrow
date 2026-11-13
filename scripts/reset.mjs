@@ -21,6 +21,7 @@ import {
   bin,
   hasFlag,
   getDatabaseTarget,
+  inspectOrCleanRemoteR2References,
   migrateDatabase,
   parseCliArgs,
   parseJsonc,
@@ -151,6 +152,12 @@ async function main() {
     configArgs,
     databaseName: profile.dbName,
     allowPreBaselineReset: true,
+  });
+
+  inspectOrCleanRemoteR2References({
+    configArgs,
+    profile,
+    cleanR2: hasFlag('--clean-r2'),
   });
 
   step(`Cleaning all records from ${targetName} D1 database`);

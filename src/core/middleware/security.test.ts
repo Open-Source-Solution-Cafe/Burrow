@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { csrfProtection, rateLimiter, resolveClientIp, securityHeaders } from './security';
+import { bodyLimit, csrfProtection, rateLimiter, resolveClientIp, securityHeaders } from './security';
 
 describe('security headers', () => {
   it('allows only the supported YouTube iframe origin', async () => {
@@ -74,5 +74,68 @@ describe('client IP & proxy trust safeguards (#009)', () => {
     } finally {
       if (prev !== undefined) process.env.TRUST_PROXY = prev;
     }
+  });
+});
+
+describe('streaming bodyLimit safeguards (#008)', () => {
+  it('rejects chunked requests without Content-Length when streamed bytes exceed maxBytes', async () => {
+    const app = new Hono();
+    app.use('/api/*', bodyLimit(64));
+    app.post('/api/data', async (c) => {
+      const text = await c.req.text();
+      return c.json({ len: text.length });
+    });
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(40).fill(65));
+        controller.enqueue(new Uint8Array(40).fill(66));
+        controller.close();
+      },
+    });
+
+    const res = await app.request('http://burrow.example.com/api/data', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'payload_too_large' } });
+  });
+
+  it('rejects requests with spoofed small Content-Length when actual stream exceeds maxBytes', async () => {
+    const app = new Hono();
+    app.use('/api/*', bodyLimit(64));
+    app.post('/api/data', async (c) => {
+      const text = await c.req.text();
+      return c.json({ len: text.length });
+    });
+
+    const res = await app.request('http://burrow.example.com/api/data', {
+      method: 'POST',
+      headers: { 'Content-Length': '10' },
+      body: 'x'.repeat(128),
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: { code: 'payload_too_large' } });
+  });
+
+  it('allows streamed payloads within maxBytes', async () => {
+    const app = new Hono();
+    app.use('/api/*', bodyLimit(64));
+    app.post('/api/data', async (c) => {
+      const text = await c.req.text();
+      return c.json({ len: text.length });
+    });
+
+    const res = await app.request('http://burrow.example.com/api/data', {
+      method: 'POST',
+      body: 'x'.repeat(32),
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ len: 32 });
   });
 });

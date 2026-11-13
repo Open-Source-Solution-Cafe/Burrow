@@ -4,6 +4,7 @@ import type { Env } from '../app';
 import type {
   IProjectRepository,
   IProjectFileRepository,
+  INotepadRepository,
   IMemberRepository,
 } from '../infrastructure/types';
 import type { IStorageAdapter } from '../adapters/storage';
@@ -14,7 +15,14 @@ import { createExplicitWorkspaceMiddleware, requireRole } from '../middleware/se
 import { httpError } from '../services/errors';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import { DEFAULT_UPLOAD_POLICY, MAX_UPLOAD_BYTES, UPLOAD_FILE_TYPES, getUploadFileType, uploadPolicyStorageKey } from '../../shared/uploadPolicy';
+import {
+  DEFAULT_UPLOAD_POLICY,
+  MAX_UPLOAD_BYTES,
+  UPLOAD_FILE_TYPES,
+  getUploadFileType,
+  isUploadPolicyStorageKey,
+  uploadPolicyStorageKey,
+} from '../../shared/uploadPolicy';
 import type { AccessPolicy } from '../policy';
 
 const policySchema = z.object({
@@ -26,16 +34,28 @@ export function createProjectFileRoutes(args: {
   projects: IProjectRepository;
   members: IMemberRepository;
   files: IProjectFileRepository;
+  notepads?: INotepadRepository;
   storage: IStorageAdapter;
   policy?: AccessPolicy;
+  maxUploadBytes?: number;
 }) {
-  const { projects, members, files, storage, policy } = args;
+  const { projects, members, files, notepads, storage, policy } = args;
+  const effectiveMaxUploadBytes = Math.min(args.maxUploadBytes ?? MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES);
   const route = new Hono<Env>();
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const readPolicy = async (workspaceId: string, projectId: string) => {
     const object = await storage.get(uploadPolicyStorageKey(workspaceId, projectId));
-    if (!object) return DEFAULT_UPLOAD_POLICY;
-    return policySchema.parse(await new Response(object.body as BodyInit).json());
+    if (!object) {
+      return {
+        ...DEFAULT_UPLOAD_POLICY,
+        maxFileSizeBytes: Math.min(DEFAULT_UPLOAD_POLICY.maxFileSizeBytes, effectiveMaxUploadBytes),
+      };
+    }
+    const parsed = policySchema.parse(await new Response(object.body as BodyInit).json());
+    return {
+      ...parsed,
+      maxFileSizeBytes: Math.min(parsed.maxFileSizeBytes, effectiveMaxUploadBytes),
+    };
   };
   const explicitProject = createMiddleware<Env>(async (c, next) => {
     const projectId = c.req.param('pid');
@@ -67,7 +87,13 @@ export function createProjectFileRoutes(args: {
   });
   route.patch('/workspaces/:wid/projects/:pid/upload-policy', explicitWorkspace, explicitProject, requireRole('owner'), async (c) => {
     const parsed = policySchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) throw httpError(400, 'invalid_upload_policy', 'Choose supported file types and a size between 1 byte and 100 MB');
+    if (!parsed.success || parsed.data.maxFileSizeBytes > effectiveMaxUploadBytes) {
+      throw httpError(
+        400,
+        'invalid_upload_policy',
+        `Choose supported file types and a size between 1 byte and ${Math.floor(effectiveMaxUploadBytes / (1024 * 1024))} MB`,
+      );
+    }
     const policy = { ...parsed.data, allowedMimeTypes: [...new Set(parsed.data.allowedMimeTypes)] };
     await storage.put(uploadPolicyStorageKey(c.get('workspaceId'), c.req.param('pid')), new TextEncoder().encode(JSON.stringify(policy)), 'application/json');
     return c.json(policy);
@@ -89,8 +115,9 @@ export function createProjectFileRoutes(args: {
       if (!fileType || !uploadPolicy.allowedMimeTypes.includes(fileType.mimeType)) {
         throw httpError(400, 'invalid_mime_type', `File type ${file.type} not allowed`);
       }
-      if (file.size > uploadPolicy.maxFileSizeBytes) {
-        throw httpError(413, 'payload_too_large', `File exceeds the project's ${uploadPolicy.maxFileSizeBytes / (1024 * 1024)} MB limit`);
+      const effectiveLimit = Math.min(uploadPolicy.maxFileSizeBytes, effectiveMaxUploadBytes);
+      if (file.size > effectiveLimit) {
+        throw httpError(413, 'payload_too_large', `File exceeds the project's ${effectiveLimit / (1024 * 1024)} MB limit`);
       }
 
       const workspaceId = c.get('workspaceId');
@@ -193,6 +220,46 @@ export function createProjectFileRoutes(args: {
       const registration = await files.findByProjectAndKey(c.req.param('pid'), key);
       if (!registration) throw httpError(404, 'not_found', 'File not found');
       return sendFile(key, registration.contentType);
+    },
+  );
+
+  route.delete(
+    '/workspaces/:wid/projects/:pid/files/:key',
+    explicitWorkspace,
+    explicitProject,
+    requireRole('editor'),
+    async (c) => {
+      let key: string;
+      try {
+        key = validateStorageKey(decodeURIComponent(c.req.param('key')));
+      } catch (error) {
+        if (error instanceof URIError) throw httpError(400, 'invalid_key', 'Invalid file key');
+        throw httpError(404, 'not_found', 'File not found');
+      }
+      if (isUploadPolicyStorageKey(key)) {
+        throw httpError(404, 'not_found', 'File not found');
+      }
+      const projectId = c.req.param('pid');
+      const registration = await files.findByProjectAndKey(projectId, key);
+      if (!registration) {
+        throw httpError(404, 'not_found', 'File not found');
+      }
+      if (notepads && (await notepads.countByCoverKey(key)) > 0) {
+        throw httpError(
+          409,
+          'file_in_use',
+          'File is currently used as a notepad cover and cannot be deleted',
+        );
+      }
+
+      const registrationCount = await files.countByStorageKey(key);
+      if (registrationCount <= 1) {
+        // Delete storage object BEFORE unregistering DB metadata so a transient
+        // storage failure leaves the database record intact for safe retry.
+        await storage.delete(key);
+      }
+      await files.unregister?.(projectId, key);
+      return c.json({ deleted: true, key });
     },
   );
 

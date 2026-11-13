@@ -2,13 +2,18 @@ import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../src/core/app';
 import { createProjectFileRoutes } from '../../src/core/routes/project-files';
+import { NotepadService } from '../../src/core/services/notepads';
+import type { ILockAdapter } from '../../src/core/adapters/lock';
 import type { IStorageAdapter } from '../../src/core/adapters/storage';
 import type {
   IProjectFileRepository,
   IProjectRepository,
+  INotepadRepository,
+  ITagRepository,
   IMemberRepository,
   ProjectFile,
 } from '../../src/core/infrastructure/types';
+import { WORKER_MAX_UPLOAD_BYTES } from '../../src/shared/uploadPolicy';
 
 describe('upload cleanup contract', () => {
   // A minimal valid 1x1 PNG image
@@ -20,6 +25,10 @@ describe('upload cleanup contract', () => {
   function setupTestHarness(options: {
     registerImpl?: (file: ProjectFile) => Promise<boolean>;
     countImpl?: (storageKey: string) => Promise<number>;
+    deleteStorageImpl?: (key: string) => Promise<void>;
+    coverCountImpl?: (storageKey: string) => Promise<number>;
+    role?: 'owner' | 'editor' | 'viewer';
+    maxUploadBytes?: number;
   }) {
     const storageMap = new Map<string, { body: Uint8Array; contentType: string }>();
     const deleteCalls: string[] = [];
@@ -38,6 +47,9 @@ describe('upload cleanup contract', () => {
       },
       async delete(key) {
         deleteCalls.push(key);
+        if (options.deleteStorageImpl) {
+          await options.deleteStorageImpl(key);
+        }
         storageMap.delete(key);
       },
       async deletePrefix() {},
@@ -56,6 +68,14 @@ describe('upload cleanup contract', () => {
         registeredFiles.push(file);
         return true;
       }),
+      unregister: vi.fn(async (projectId: string, storageKey: string) => {
+        const index = registeredFiles.findIndex(
+          (f) => f.projectId === projectId && f.storageKey === storageKey,
+        );
+        if (index < 0) return false;
+        registeredFiles.splice(index, 1);
+        return true;
+      }),
       findByProjectAndKey: vi.fn(async (projectId: string, storageKey: string) => {
         const found = registeredFiles.find(
           (f) => f.projectId === projectId && f.storageKey === storageKey,
@@ -71,6 +91,12 @@ describe('upload cleanup contract', () => {
       listProjectIdsByStorageKey: vi.fn(async () => []),
       listStorageKeysByProject: vi.fn(async () => []),
       listAllStorageKeys: vi.fn(async () => []),
+    };
+
+    const notepadsRepo: Partial<INotepadRepository> = {
+      countByCoverKey: vi.fn(async (coverKey: string) =>
+        options.coverCountImpl ? options.coverCountImpl(coverKey) : 0,
+      ),
     };
 
     const projects: Partial<IProjectRepository> = {
@@ -98,7 +124,7 @@ describe('upload cleanup contract', () => {
           return {
             workspaceId: 'ws-1',
             userId: 'user-1',
-            role: 'editor' as const,
+            role: options.role ?? ('editor' as const),
             joinedAt: 1000,
           };
         }
@@ -122,11 +148,13 @@ describe('upload cleanup contract', () => {
         projects: projects as IProjectRepository,
         members: members as IMemberRepository,
         files,
+        notepads: notepadsRepo as INotepadRepository,
         storage,
+        maxUploadBytes: options.maxUploadBytes,
       }),
     );
 
-    return { app, storage, storageMap, deleteCalls, putCalls, files };
+    return { app, storage, storageMap, deleteCalls, putCalls, files, notepadsRepo, registeredFiles };
   }
 
   function createUploadRequest(path: string, fileBytes: Uint8Array, fileName: string) {
@@ -225,5 +253,141 @@ describe('upload cleanup contract', () => {
     // storage.delete should NOT be called because another project holds this key
     expect(deleteCalls).not.toContain(uploadedKey);
     expect(storageMap.has(uploadedKey)).toBe(true);
+  });
+
+  it('preserves DB registration when DELETE file storage removal fails so client/job can retry (#005)', async () => {
+    let failDelete = true;
+    const { app, storageMap, files, registeredFiles } = setupTestHarness({
+      deleteStorageImpl: async () => {
+        if (failDelete) throw new Error('R2 temporary failure');
+      },
+    });
+
+    const uploadRes = await app.request(
+      createUploadRequest('/api/workspaces/ws-1/projects/proj-1/uploads', validPngBytes, 'retry.png'),
+    );
+    expect(uploadRes.status).toBe(200);
+    const { key } = (await uploadRes.json()) as { key: string };
+
+    const deleteFail = await app.request(
+      `/api/workspaces/ws-1/projects/proj-1/files/${encodeURIComponent(key)}`,
+      { method: 'DELETE' },
+    );
+    expect(deleteFail.status).toBe(500);
+    // Registration must remain so a retry succeeds cleanly
+    expect(registeredFiles.some((f) => f.storageKey === key)).toBe(true);
+    expect(storageMap.has(key)).toBe(true);
+
+    failDelete = false;
+    const deleteRetry = await app.request(
+      `/api/workspaces/ws-1/projects/proj-1/files/${encodeURIComponent(key)}`,
+      { method: 'DELETE' },
+    );
+    expect(deleteRetry.status).toBe(200);
+    expect(await files.findByProjectAndKey('proj-1', key)).toBeNull();
+    expect(storageMap.has(key)).toBe(false);
+  });
+
+  it('rejects deleting a file actively used as a notepad cover (409) and cleans unregistered notepad covers on delete (#005)', async () => {
+    const { app, storageMap, storage, registeredFiles } = setupTestHarness({
+      coverCountImpl: async () => 1,
+    });
+
+    const uploadRes = await app.request(
+      createUploadRequest('/api/workspaces/ws-1/projects/proj-1/uploads', validPngBytes, 'cover.png'),
+    );
+    const { key } = (await uploadRes.json()) as { key: string };
+
+    const blocked = await app.request(
+      `/api/workspaces/ws-1/projects/proj-1/files/${encodeURIComponent(key)}`,
+      { method: 'DELETE' },
+    );
+    expect(blocked.status).toBe(409);
+    expect(registeredFiles.some((f) => f.storageKey === key)).toBe(true);
+
+    // Unregistered cover cleanup on NotepadService.permanentDeleteNotepad with single retry on transient failure
+    const unregisteredCoverKey = 'ws-1/proj-1/unregistered-cover.png';
+    await storage.put(unregisteredCoverKey, validPngBytes, 'image/png');
+    let attempts = 0;
+    const retryStorage: IStorageAdapter = {
+      ...storage,
+      async delete(k) {
+        attempts++;
+        if (attempts === 1) throw new Error('Transient storage error');
+        storageMap.delete(k);
+      },
+    };
+    const notepadRepo: Partial<INotepadRepository> = {
+      findByIdInScope: vi.fn(async () => ({
+        id: 'note-1',
+        workspaceId: 'ws-1',
+        projectId: 'proj-1',
+        title: 'Trash note',
+        coverKey: unregisteredCoverKey,
+        content: '[]',
+        position: 'a0',
+        isPinned: false,
+        archivedAt: null,
+        deletedAt: 1000,
+        createdBy: 'user-1',
+        createdAt: 1000,
+        updatedAt: 1000,
+      })),
+      hardDelete: vi.fn(async () => [{ id: 'note-1', coverKey: unregisteredCoverKey }]),
+      countByCoverKey: vi.fn(async () => 0),
+    };
+    const fileRepo: Partial<IProjectFileRepository> = {
+      countByStorageKey: vi.fn(async () => 0),
+    };
+    const service = new NotepadService(
+      {
+        notepads: notepadRepo as INotepadRepository,
+        tags: {} as ITagRepository,
+        members: {} as IMemberRepository,
+        projectFiles: fileRepo as IProjectFileRepository,
+      },
+      {} as ILockAdapter,
+      retryStorage,
+    );
+
+    await service.permanentDeleteNotepad({
+      workspaceId: 'ws-1',
+      projectId: 'proj-1',
+      notepadId: 'note-1',
+      actorUserId: 'user-1',
+    });
+
+    expect(attempts).toBe(2);
+    expect(storageMap.has(unregisteredCoverKey)).toBe(false);
+  });
+
+  it('caps Worker project upload policy at WORKER_MAX_UPLOAD_BYTES (25 MB) (#008)', async () => {
+    const { app } = setupTestHarness({
+      role: 'owner',
+      maxUploadBytes: WORKER_MAX_UPLOAD_BYTES,
+    });
+
+    const tooHigh = await app.request('/api/workspaces/ws-1/projects/proj-1/upload-policy', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        maxFileSizeBytes: WORKER_MAX_UPLOAD_BYTES + 1,
+        allowedMimeTypes: ['image/png'],
+      }),
+    });
+    expect(tooHigh.status).toBe(400);
+
+    const withinWorkerLimit = await app.request(
+      '/api/workspaces/ws-1/projects/proj-1/upload-policy',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          maxFileSizeBytes: WORKER_MAX_UPLOAD_BYTES,
+          allowedMimeTypes: ['image/png'],
+        }),
+      },
+    );
+    expect(withinWorkerLimit.status).toBe(200);
   });
 });
