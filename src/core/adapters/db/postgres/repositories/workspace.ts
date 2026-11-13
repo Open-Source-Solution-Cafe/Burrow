@@ -153,4 +153,26 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
     const result = await this.db.select({ count: sql<number>`count(*)` }).from(workspaces);
     return Number(result[0]?.count ?? 0);
   }
+
+  async isInstanceOwner(userId: string): Promise<boolean> {
+    if (!userId) return false;
+    const rows = await this.db
+      .select({ id: bootstrapState.id })
+      .from(bootstrapState)
+      .where(
+        and(
+          eq(bootstrapState.id, 1),
+          eq(bootstrapState.status, 'complete'),
+          eq(bootstrapState.userId, userId),
+          sql`(${bootstrapState.workspaceId} IS NULL OR EXISTS (
+            SELECT 1 FROM members m
+            WHERE m.workspace_id = ${bootstrapState.workspaceId}
+              AND m.user_id = ${userId}
+              AND m.role = 'owner'
+          ))`,
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
 }

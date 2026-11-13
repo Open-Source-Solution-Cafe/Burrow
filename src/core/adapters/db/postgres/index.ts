@@ -103,10 +103,12 @@ export async function createPostgresInfrastructure(
     {
       RESEND_API_KEY: config.RESEND_API_KEY,
       EMAIL_FROM: config.EMAIL_FROM,
-      GOOGLE_CLIENT_ID: (config as any).GOOGLE_CLIENT_ID,
-      GOOGLE_CLIENT_SECRET: (config as any).GOOGLE_CLIENT_SECRET,
-      GITHUB_CLIENT_ID: (config as any).GITHUB_CLIENT_ID,
-      GITHUB_CLIENT_SECRET: (config as any).GITHUB_CLIENT_SECRET,
+      GOOGLE_CLIENT_ID: config.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: config.GOOGLE_CLIENT_SECRET,
+      GITHUB_CLIENT_ID: config.GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: config.GITHUB_CLIENT_SECRET,
+      TRUST_PROXY: config.TRUST_PROXY,
+      TRUSTED_PROXIES: config.TRUSTED_PROXIES,
     },
     {
       onBeforeDeleteUser: async (userId: string) => {

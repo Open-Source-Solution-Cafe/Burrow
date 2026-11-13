@@ -1,6 +1,109 @@
 import { createMiddleware } from 'hono/factory';
+import type { Context } from 'hono';
 
 export const DEFAULT_MAX_BODY_BYTES = 2_000_000; // 2 MB
+
+const VALID_IP_REGEX = /^[0-9a-fA-F:.]{2,45}$/;
+
+function extractValidIp(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().replace(/^::ffff:/i, '');
+  if (!trimmed || trimmed.length > 45 || !VALID_IP_REGEX.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
+ * Resolve client IP from trusted proxy headers only when behind Cloudflare Workers
+ * or when TRUST_PROXY=true. Never blindly trusts client-controlled X-Forwarded-For.
+ */
+export function resolveClientIp(
+  c: Context,
+  options?: { trustProxy?: boolean; env?: Record<string, any> },
+): string {
+  const runtimeEnv =
+    options?.env ??
+    ((c.env as Record<string, any> | undefined) && Object.keys(c.env as object).length > 0
+      ? (c.env as Record<string, any>)
+      : undefined) ??
+    (typeof process !== 'undefined' ? process.env : {});
+
+  const trustProxy =
+    options?.trustProxy ??
+    (runtimeEnv?.TRUST_PROXY === 'true' ||
+      (typeof process !== 'undefined' && process.env?.TRUST_PROXY === 'true'));
+  const isWorkersRuntime =
+    Boolean((c.env as any)?.DB) ||
+    typeof (globalThis as Record<string, unknown>).WebSocketPair !== 'undefined';
+
+  if (isWorkersRuntime || trustProxy) {
+    const cfIp = extractValidIp(c.req.header('cf-connecting-ip'));
+    if (cfIp) return cfIp;
+  }
+
+  if (trustProxy) {
+    const realIp = extractValidIp(c.req.header('x-real-ip'));
+    if (realIp) return realIp;
+    const forwardedFor = c.req.header('x-forwarded-for');
+    if (forwardedFor) {
+      const firstHop = extractValidIp(forwardedFor.split(',')[0]);
+      if (firstHop) return firstHop;
+    }
+  }
+
+  const socketIp = extractValidIp((c.env as any)?.incoming?.socket?.remoteAddress);
+  if (socketIp) return socketIp;
+
+  return '127.0.0.1';
+}
+
+export interface RateLimiterOptions {
+  maxRequests: number;
+  windowMs: number;
+  prefix: string;
+}
+
+/**
+ * Lightweight per-IP sliding-window rate limiter middleware for sensitive public endpoints.
+ */
+export function rateLimiter(options: RateLimiterOptions) {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
+  const { maxRequests, windowMs, prefix } = options;
+
+  return createMiddleware(async (c, next) => {
+    const now = Date.now();
+    if (buckets.size > 10_000) {
+      for (const [k, entry] of buckets) {
+        if (now >= entry.resetAt) buckets.delete(k);
+      }
+    }
+
+    const ip = resolveClientIp(c);
+    const key = `${prefix}:${ip}`;
+    const existing = buckets.get(key);
+
+    if (!existing || now >= existing.resetAt) {
+      buckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+
+    if (existing.count >= maxRequests) {
+      const retryAfterSec = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
+      c.header('Retry-After', String(retryAfterSec));
+      return c.json(
+        {
+          error: {
+            code: 'rate_limit_exceeded',
+            message: 'Too many requests. Please try again later.',
+          },
+        },
+        429,
+      );
+    }
+
+    existing.count += 1;
+    return next();
+  });
+}
 
 /**
  * Standard security headers for all responses.
@@ -69,7 +172,10 @@ export const csrfProtection = createMiddleware(async (c, next) => {
     try {
       const originUrl = new URL(origin);
       const originHost = originUrl.host;
-      const forwardedHost = c.req.header('x-forwarded-host');
+      const trustProxy =
+        (c.env as any)?.TRUST_PROXY === 'true' ||
+        (typeof process !== 'undefined' && process.env?.TRUST_PROXY === 'true');
+      const forwardedHost = trustProxy ? c.req.header('x-forwarded-host') : undefined;
       const requestHost = forwardedHost || new URL(c.req.url).host;
 
       if (originHost !== requestHost) {

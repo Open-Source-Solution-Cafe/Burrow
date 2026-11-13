@@ -14,6 +14,13 @@ export interface Env {
     S3_FORCE_PATH_STYLE?: string;
     RESEND_API_KEY?: string;
     EMAIL_FROM?: string;
+    GOOGLE_CLIENT_ID?: string;
+    GOOGLE_CLIENT_SECRET?: string;
+    GITHUB_CLIENT_ID?: string;
+    GITHUB_CLIENT_SECRET?: string;
+    SELF_UPDATE_WEBHOOK_URL?: string;
+    TRUST_PROXY?: string;
+    TRUSTED_PROXIES?: string;
   };
   Variables: {
     userId: string;

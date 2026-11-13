@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createCoreApp } from '../../src/core/app';
+import { createVerificationRateLimitStorage } from '../../src/core/adapters/auth';
 import { SelfHostedPolicy } from '../../src/core/policy';
+import { createWorkerApp } from '../../src/worker';
 
 function createMockInfra(overrides: Partial<any> = {}) {
   return {
@@ -91,5 +93,51 @@ describe('Auth Config & Auto-Workspace Provisioning', () => {
     const res = await app.request('http://localhost/api/account', { headers });
     expect(res.status).toBe(200);
     expect(infra.repositories.workspaces.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards Cloudflare Worker OAuth and update webhook bindings in createWorkerApp (#006)', async () => {
+    const workerApp = createWorkerApp({
+      DB: {} as any,
+      FILES: {} as any,
+      BETTER_AUTH_SECRET: 'worker-test-secret-minimum-32-characters!!',
+      BETTER_AUTH_URL: 'https://worker.example.com',
+      BOOTSTRAP_TOKEN: 'worker-bootstrap-token-16chars',
+      GOOGLE_CLIENT_ID: 'worker-google-id',
+      GOOGLE_CLIENT_SECRET: 'worker-google-secret',
+      GITHUB_CLIENT_ID: 'worker-github-id',
+      GITHUB_CLIENT_SECRET: 'worker-github-secret',
+      SELF_UPDATE_WEBHOOK_URL: 'https://hooks.example.com/update',
+    });
+
+    const cfgRes = await workerApp.request('https://worker.example.com/api/auth/config');
+    expect(cfgRes.status).toBe(200);
+    const data = (await cfgRes.json()) as any;
+    expect(data.oauthProviders).toEqual([
+      { id: 'google', name: 'Google', kind: 'social' },
+      { id: 'github', name: 'GitHub', kind: 'social' },
+    ]);
+  });
+
+  it('enforces per-key limits in shared createVerificationRateLimitStorage (#009)', async () => {
+    const storage = createVerificationRateLimitStorage(null, null);
+    const rule = { window: 60, max: 2 };
+
+    expect(await storage.consume('198.51.100.1|/sign-in/email', rule)).toEqual({
+      allowed: true,
+      retryAfter: null,
+    });
+    expect(await storage.consume('198.51.100.1|/sign-in/email', rule)).toEqual({
+      allowed: true,
+      retryAfter: null,
+    });
+    const blocked = await storage.consume('198.51.100.1|/sign-in/email', rule);
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfter).toBeGreaterThanOrEqual(1);
+
+    // Distinct IP remains isolated and allowed
+    expect(await storage.consume('198.51.100.2|/sign-in/email', rule)).toEqual({
+      allowed: true,
+      retryAfter: null,
+    });
   });
 });

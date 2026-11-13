@@ -111,9 +111,10 @@ describe('System Version & Update Logic', () => {
       expect(body.error.code).toBe('forbidden');
     });
 
-    it('POST /update triggers webhook if configured', async () => {
+    it('POST /update triggers webhook if configured and caller is instance administrator (#007)', async () => {
       const workspaces = {
         listByUser: vi.fn().mockResolvedValue([{ id: 'w1', role: 'owner' }]),
+        isInstanceOwner: vi.fn().mockResolvedValue(true),
       } as any;
       const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
       vi.stubGlobal('fetch', fetchMock);
@@ -137,6 +138,35 @@ describe('System Version & Update Logic', () => {
       expect(body.ok).toBe(true);
       expect(body.status).toBe('triggered');
       expect(fetchMock).toHaveBeenCalledWith('https://example.com/update-hook', expect.anything());
+    });
+
+    it('POST /update rejects owners of secondary workspaces who are not the instance administrator (#007)', async () => {
+      const workspaces = {
+        listByUser: vi.fn().mockResolvedValue([
+          { id: 'ws-1', role: 'editor' },
+          { id: 'ws-secondary', role: 'owner' },
+        ]),
+        isInstanceOwner: vi.fn().mockResolvedValue(false),
+      } as any;
+      const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const routes = createSystemRoutes({
+        policy: new SelfHostedPolicy(),
+        workspaces,
+        env: { SELF_UPDATE_WEBHOOK_URL: 'https://example.com/update-hook' },
+      });
+
+      const app = new (await import('hono')).Hono<any>();
+      app.use('*', async (ctx, next) => {
+        ctx.set('identity', { userId: 'invited-editor-with-personal-ws' });
+        await next();
+      });
+      app.route('/', routes);
+
+      const res = await app.request('http://localhost/update', { method: 'POST' });
+      expect(res.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 });

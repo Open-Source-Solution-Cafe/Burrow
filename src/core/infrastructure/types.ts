@@ -73,6 +73,8 @@ export interface IWorkspaceRepository {
   create(plan: WorkspaceProvisioningPlan): Promise<Workspace>;
   /** Rename only when the actor is still an owner in this workspace. */
   rename(workspaceId: string, actorUserId: string, name: string): Promise<boolean>;
+  /** Check whether a user is the authorized instance administrator from initial bootstrap. */
+  isInstanceOwner?(userId: string): Promise<boolean>;
   count(): Promise<number>;
   releaseBootstrap?(email: string): Promise<boolean>;
 }

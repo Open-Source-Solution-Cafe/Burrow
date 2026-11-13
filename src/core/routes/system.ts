@@ -96,14 +96,15 @@ export function createSystemRoutes(options: SystemRoutesOptions) {
       );
     }
 
-    const userWorkspaces = await workspaces.listByUser(identity.userId);
-    const isOwner = userWorkspaces.some((w) => w.role === 'owner');
-    if (!isOwner) {
+    const isInstanceAdmin = workspaces.isInstanceOwner
+      ? await workspaces.isInstanceOwner(identity.userId)
+      : false;
+    if (!isInstanceAdmin) {
       return c.json(
         {
           error: {
             code: 'forbidden',
-            message: 'Only workspace owners can initiate system updates',
+            message: 'Only the authorized instance administrator can initiate system updates',
           },
         },
         403,

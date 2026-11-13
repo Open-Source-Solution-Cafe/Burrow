@@ -4,7 +4,7 @@ import { MAX_UPLOAD_BYTES } from '../shared/uploadPolicy';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Infrastructure } from './infrastructure/types';
-import { securityHeaders, bodyLimit, csrfProtection } from './middleware/security';
+import { securityHeaders, bodyLimit, csrfProtection, resolveClientIp } from './middleware/security';
 import {
   createIdentityMiddleware,
   createExplicitWorkspaceMiddleware,
@@ -267,9 +267,11 @@ export function createCoreApp(
 
         const forwardToAuth = async () => {
           const { bootstrapToken: _b, inviteToken: _i, ...betterAuthBody } = body;
+          const headers = new Headers(c.req.raw.headers);
+          headers.set('x-burrow-client-ip', resolveClientIp(c, { env: infra.env }));
           const forwardReq = new Request(c.req.url, {
             method: 'POST',
-            headers: c.req.raw.headers,
+            headers,
             body: JSON.stringify(betterAuthBody),
           });
           return auth.handler(forwardReq);
@@ -454,6 +456,9 @@ export function createCoreApp(
         // Better-auth attempts to parse JSON body if content-type contains application/json,
         // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
         const req = c.req.raw;
+        const clientIp = resolveClientIp(c, { env: infra.env });
+        const stampedHeaders = new Headers(req.headers);
+        stampedHeaders.set('x-burrow-client-ip', clientIp);
         const contentType = req.headers.get('content-type') || '';
         let res: Response;
         try {
@@ -463,10 +468,9 @@ export function createCoreApp(
             contentType.includes('application/json')
           ) {
             if (req.headers.get('content-length') === '0') {
-              const headers = new Headers(req.headers);
               const fixedReq = new Request(req.url, {
                 method: req.method,
-                headers,
+                headers: stampedHeaders,
                 body: JSON.stringify({}),
                 duplex: 'half',
               } as RequestInit);
@@ -475,20 +479,25 @@ export function createCoreApp(
               const cloned = req.clone();
               const text = await cloned.text();
               if (!text || text.trim() === '') {
-                const headers = new Headers(req.headers);
                 const fixedReq = new Request(req.url, {
                   method: req.method,
-                  headers,
+                  headers: stampedHeaders,
                   body: JSON.stringify({}),
                   duplex: 'half',
                 } as RequestInit);
                 res = await auth.handler(fixedReq);
               } else {
-                res = await auth.handler(req);
+                const stampedReq = new Request(req.url, {
+                  method: req.method,
+                  headers: stampedHeaders,
+                  body: text,
+                });
+                res = await auth.handler(stampedReq);
               }
             }
           } else {
-            res = await auth.handler(req);
+            const stampedReq = new Request(req, { headers: stampedHeaders });
+            res = await auth.handler(stampedReq);
           }
           return res;
         } catch (err: any) {

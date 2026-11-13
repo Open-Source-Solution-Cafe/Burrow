@@ -167,5 +167,27 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
       const [row] = await db.select({ count: sql<number>`count(*)` }).from(t.workspaces);
       return row?.count ?? 0;
     },
+
+    async isInstanceOwner(userId: string): Promise<boolean> {
+      if (!userId) return false;
+      const rows = await db.all<{ ok: number }>(sql`
+        SELECT 1 AS ok
+        FROM bootstrap_state b
+        WHERE b.id = 1
+          AND b.status = 'complete'
+          AND b.user_id = ${userId}
+          AND (
+            b.workspace_id IS NULL
+            OR EXISTS (
+              SELECT 1 FROM members m
+              WHERE m.workspace_id = b.workspace_id
+                AND m.user_id = ${userId}
+                AND m.role = 'owner'
+            )
+          )
+        LIMIT 1
+      `);
+      return rows.length > 0;
+    },
   };
 }
