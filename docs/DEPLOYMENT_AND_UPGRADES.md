@@ -185,12 +185,12 @@ pnpm exec wrangler d1 time-travel restore burrow --bookmark="<BOOKMARK_ID>" --re
 
 ```bash
 # Backup
-docker compose exec -T db pg_dump -U burrow burrow > burrow-backup.sql
+docker compose exec -T postgres pg_dump -U burrow burrow > burrow-backup.sql
 
 # Restore (stop app container first to drain writers)
-docker compose stop app
-cat burrow-backup.sql | docker compose exec -T db psql -U burrow burrow
-docker compose start app
+docker compose stop burrow
+cat burrow-backup.sql | docker compose exec -T postgres psql -U burrow burrow
+docker compose start burrow
 ```
 
 **SQLite (Node.js standalone):**

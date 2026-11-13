@@ -4,10 +4,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadEnv as canonicalLoadEnv } from '../src/server/env.ts';
-import { selectDatabaseTarget } from '../src/server/database-target.ts';
+import { parseCliArgs, selectDatabaseTarget } from '../src/server/database-target.ts';
 import { splitSqlStatements } from '../src/server/sql-statements.ts';
 
+export { parseCliArgs };
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+export const KNOWN_SECRET_PLACEHOLDERS = new Set([
+  'dev-secret-change-me-32-bytes-minimum!!',
+  'local-dev-secret-change-me',
+  'burrow-selfhost-secret-key-32-bytes-minimum!!',
+]);
+
+export const KNOWN_BOOTSTRAP_PLACEHOLDERS = new Set([
+  'dev-bootstrap-token',
+  'test-bootstrap-token',
+  'burrow-bootstrap-token-initial-setup',
+]);
 
 /**
  * Resolves the bootstrap token for local development, setup, and click-through tests.
@@ -17,8 +30,7 @@ export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
  */
 export function getBootstrapToken(env = process.env) {
   const token = env.BOOTSTRAP_TOKEN?.trim();
-  const knownPlaceholders = new Set(['dev-bootstrap-token', 'test-bootstrap-token']);
-  return token && !knownPlaceholders.has(token) && token.length >= 16
+  return token && !KNOWN_BOOTSTRAP_PLACEHOLDERS.has(token) && token.length >= 16
     ? token
     : crypto.randomBytes(16).toString('hex');
 }
@@ -50,15 +62,13 @@ export function normalizeDomain(rawDomain) {
 }
 
 function _argValueFrom(args, flag, fallback = undefined) {
-  const i = args.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
-  if (i === -1) return fallback;
-  const a = args[i];
-  if (a.includes('=')) return a.slice(a.indexOf('=') + 1);
-  return args[i + 1];
+  const parsed = parseCliArgs(args);
+  return parsed.values[flag] ?? fallback;
 }
 
 function _hasFlagIn(args, flag) {
-  return args.some((a) => a === flag || a.startsWith(`${flag}=`));
+  const parsed = parseCliArgs(args);
+  return parsed.booleanFlags[flag] === true;
 }
 
 export function argValue(flag, fallback = undefined) {
@@ -75,6 +85,73 @@ function readBaseWranglerConfig() {
   return parseJsonc(fs.readFileSync(configPath, 'utf8'));
 }
 
+export function resolveEnvironmentName(args = [], env = process.env) {
+  const parsed = parseCliArgs(args);
+  const cliEnvRaw = parsed.values['--env'];
+  if (cliEnvRaw !== undefined && cliEnvRaw !== 'production' && cliEnvRaw !== 'staging') {
+    throw new Error(`Invalid --env value "${cliEnvRaw}". Expected "production" or "staging".`);
+  }
+
+  const envVarRaw = env.BURROW_DEPLOY_ENV?.trim();
+  if (envVarRaw && envVarRaw !== 'production' && envVarRaw !== 'staging') {
+    throw new Error(
+      `Invalid BURROW_DEPLOY_ENV value "${envVarRaw}". Expected "production" or "staging".`,
+    );
+  }
+
+  if (parsed.booleanFlags['--staging'] === true || cliEnvRaw === 'staging') {
+    return 'staging';
+  }
+  if (parsed.booleanFlags['--staging'] === false || cliEnvRaw === 'production') {
+    return 'production';
+  }
+  if (envVarRaw === 'staging') {
+    return 'staging';
+  }
+  return 'production';
+}
+
+export function assertEnvironmentTargetIsolation(profile, env = process.env) {
+  const prodDomain = normalizeDomain(env.CLOUDFLARE_DOMAIN);
+  const { isStaging, workerName, dbName, bucketName, domain } = profile;
+
+  if (isStaging) {
+    if (workerName === 'burrow' || !/staging/i.test(workerName)) {
+      throw new Error(
+        `Refusing staging profile with production or unscoped Worker name "${workerName}". Staging Worker names must include "staging".`,
+      );
+    }
+    if (dbName === 'burrow' || !/staging/i.test(dbName)) {
+      throw new Error(
+        `Refusing staging profile with production or unscoped D1 database "${dbName}". Staging D1 names must include "staging".`,
+      );
+    }
+    if (bucketName && (bucketName === 'burrow-files' || !/staging/i.test(bucketName))) {
+      throw new Error(
+        `Refusing staging profile with production or unscoped R2 bucket "${bucketName}". Staging bucket names must include "staging".`,
+      );
+    }
+    if (domain && (domain === prodDomain || domain === 'burrow.osscafe.com' || !/staging/i.test(domain))) {
+      throw new Error(
+        `Refusing to attach production domain "${domain}" to staging Worker "${workerName}".`,
+      );
+    }
+  } else {
+    if (/-staging\b/i.test(workerName) || /\bstaging\b/i.test(workerName)) {
+      throw new Error(`Refusing production profile with staging Worker name "${workerName}".`);
+    }
+    if (/-staging\b/i.test(dbName) || /\bstaging\b/i.test(dbName)) {
+      throw new Error(`Refusing production profile with staging D1 database "${dbName}".`);
+    }
+    if (bucketName && (/-staging\b/i.test(bucketName) || /\bstaging\b/i.test(bucketName))) {
+      throw new Error(`Refusing production profile with staging R2 bucket "${bucketName}".`);
+    }
+    if (domain && /(^|\.)staging(\.|$)|-staging\b/i.test(domain)) {
+      throw new Error(`Refusing production profile with staging domain "${domain}".`);
+    }
+  }
+}
+
 /**
  * Resolve isolated production or staging Cloudflare resource names, domain, and local config file.
  */
@@ -82,15 +159,13 @@ export function resolveRemoteProfile(
   baseConfig = readBaseWranglerConfig(),
   { args = process.argv.slice(2), env = process.env } = {},
 ) {
-  const envFlag = _argValueFrom(args, '--env');
-  const isStaging =
-    _hasFlagIn(args, '--staging') ||
-    envFlag === 'staging' ||
-    env.BURROW_DEPLOY_ENV === 'staging';
+  const parsed = parseCliArgs(args);
+  const envName = resolveEnvironmentName(args, env);
+  const isStaging = envName === 'staging';
 
-  const explicitName = _argValueFrom(args, '--name');
-  const explicitDomain = _argValueFrom(args, '--domain') || _argValueFrom(args, '--domains');
-  const hasWorkersDevFlag = _hasFlagIn(args, '--workers-dev');
+  const explicitName = parsed.values['--name'];
+  const explicitDomain = parsed.values['--domain'] || parsed.values['--domains'];
+  const hasWorkersDevFlag = parsed.booleanFlags['--workers-dev'] === true;
 
   const baseWorkerName = baseConfig?.name || 'burrow';
   const baseDbName = baseConfig?.d1_databases?.[0]?.database_name || 'burrow';
@@ -117,13 +192,6 @@ export function resolveRemoteProfile(
     domain = hasWorkersDevFlag
       ? undefined
       : normalizeDomain(explicitDomain || env.STAGING_CLOUDFLARE_DOMAIN);
-
-    const prodDomain = normalizeDomain(env.CLOUDFLARE_DOMAIN);
-    if (domain && (domain === prodDomain || domain === 'burrow.osscafe.com')) {
-      throw new Error(
-        `Refusing to attach production domain "${domain}" to staging Worker "${workerName}".`,
-      );
-    }
   } else {
     workerName = explicitName || baseWorkerName;
     dbName = baseDbName;
@@ -136,7 +204,9 @@ export function resolveRemoteProfile(
       : normalizeDomain(explicitDomain || env.CLOUDFLARE_DOMAIN);
   }
 
-  const effectiveConfig = JSON.parse(JSON.stringify(baseConfig && typeof baseConfig === 'object' ? baseConfig : {}));
+  const effectiveConfig = JSON.parse(
+    JSON.stringify(baseConfig && typeof baseConfig === 'object' ? baseConfig : {}),
+  );
   effectiveConfig.name = workerName;
   if (Array.isArray(effectiveConfig.d1_databases) && effectiveConfig.d1_databases[0]) {
     effectiveConfig.d1_databases[0].database_name = dbName;
@@ -145,9 +215,9 @@ export function resolveRemoteProfile(
     effectiveConfig.r2_buckets[0].bucket_name = bucketName;
   }
 
-  return {
+  const profile = {
     isStaging,
-    envName: isStaging ? 'staging' : 'production',
+    envName,
     workerName,
     dbName,
     bucketName,
@@ -157,6 +227,99 @@ export function resolveRemoteProfile(
     domain,
     effectiveConfig,
   };
+
+  assertEnvironmentTargetIsolation(profile, env);
+  return profile;
+}
+
+export const resolveDeployProfile = resolveRemoteProfile;
+
+/**
+ * Fail-closed authorization guard for remote destructive operations (reset, teardown).
+ * Never treats CI=true or --force alone as authorization to mutate production.
+ */
+export function assertProductionOperationAllowed({
+  operation,
+  profile,
+  args = process.argv.slice(2),
+  env = process.env,
+  isInteractive = Boolean(process.stdin.isTTY),
+}) {
+  if (!profile || profile.isStaging) {
+    return { mode: 'staging' };
+  }
+
+  const parsed = parseCliArgs(args);
+  const force = parsed.booleanFlags['--force'] === true;
+  const confirmTarget = parsed.values['--confirm'];
+
+  if (operation === 'reset') {
+    const confirmReset = parsed.values['--confirm-production-reset'];
+    if (confirmReset === 'RESET-PRODUCTION-BURROW' && confirmTarget === profile.workerName) {
+      return { mode: 'explicit-flags' };
+    }
+    if (force || env.CI || !isInteractive) {
+      throw new Error(
+        `Refusing --force reset on PRODUCTION ("${profile.dbName}"). Destructive test resets must target staging (--staging). To reset production non-interactively, pass BOTH --confirm-production-reset=RESET-PRODUCTION-BURROW and --confirm=${profile.workerName}.`,
+      );
+    }
+    return { mode: 'interactive' };
+  }
+
+  if (operation === 'teardown') {
+    const confirmTeardown = parsed.values['--confirm-production-teardown'];
+    if (confirmTeardown === 'DELETE-PRODUCTION-BURROW' && confirmTarget === profile.workerName) {
+      return { mode: 'explicit-flags' };
+    }
+    if (force || env.CI || !isInteractive) {
+      throw new Error(
+        `Refusing --force teardown on PRODUCTION ("${profile.workerName}"). Destructive test teardowns must target staging (--staging). To tear down production non-interactively, pass BOTH --confirm-production-teardown=DELETE-PRODUCTION-BURROW and --confirm=${profile.workerName}.`,
+      );
+    }
+    return { mode: 'interactive' };
+  }
+
+  throw new Error(`Unsupported destructive operation: ${operation}`);
+}
+
+/**
+ * Fail-closed authorization guard for remote demo resets.
+ * Requires explicit BURROW_ALLOW_DEMO_RESET=true and explicit confirmation token for non-staging targets.
+ */
+export function assertDemoResetAllowed({
+  profile,
+  args = process.argv.slice(2),
+  env = process.env,
+  isInteractive = Boolean(process.stdin.isTTY),
+}) {
+  const parsed = parseCliArgs(args);
+  const force = parsed.booleanFlags['--force'] === true;
+
+  if (profile.isStaging) {
+    if (force) return { mode: 'staging-force' };
+    if (!isInteractive) {
+      throw new Error(
+        `Refusing non-interactive demo reset on staging ("${profile.dbName}") without --force.`,
+      );
+    }
+    return { mode: 'staging-interactive' };
+  }
+
+  const demoAllowed = env.BURROW_ALLOW_DEMO_RESET === 'true';
+  const confirmDemo =
+    parsed.values['--confirm-demo-reset'] || env.BURROW_DEMO_RESET_CONFIRM?.trim();
+
+  if (demoAllowed && confirmDemo === 'RESET-DEMO-BURROW') {
+    return { mode: 'explicit-demo' };
+  }
+
+  if (!demoAllowed || force || env.CI || !isInteractive) {
+    throw new Error(
+      `Refusing remote demo reset on non-staging database "${profile.dbName}". Set BURROW_ALLOW_DEMO_RESET=true and pass --confirm-demo-reset=RESET-DEMO-BURROW (CI=true and --force alone never authorize production resets).`,
+    );
+  }
+
+  return { mode: 'interactive-demo' };
 }
 
 /** Update or append a KEY=VALUE entry inside an .env file without touching unrelated keys. */
@@ -693,10 +856,6 @@ export function buildSecretPlan({
         ),
   );
 
-  const knownAuthSecretPlaceholders = new Set([
-    'dev-secret-change-me-32-bytes-minimum!!',
-    'local-dev-secret-change-me',
-  ]);
   const toUpload = {};
   const preserved = [];
   let generatedBootstrapToken = null;
@@ -708,7 +867,7 @@ export function buildSecretPlan({
     const isStrongProdSecret =
       Boolean(candidate) &&
       candidate.length >= 32 &&
-      !knownAuthSecretPlaceholders.has(candidate);
+      !KNOWN_SECRET_PLACEHOLDERS.has(candidate);
     toUpload.BETTER_AUTH_SECRET = isStrongProdSecret
       ? candidate
       : randomBytesFn(32).toString('base64url');
@@ -728,11 +887,19 @@ export function buildSecretPlan({
     toUpload.BETTER_AUTH_URL = originForAuth;
   }
 
-  if (env.RESEND_API_KEY?.trim()) {
-    toUpload.RESEND_API_KEY = env.RESEND_API_KEY.trim();
-  }
-  if (env.EMAIL_FROM?.trim()) {
-    toUpload.EMAIL_FROM = env.EMAIL_FROM.trim();
+  for (const optionalKey of [
+    'RESEND_API_KEY',
+    'EMAIL_FROM',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GITHUB_CLIENT_ID',
+    'GITHUB_CLIENT_SECRET',
+    'SELF_UPDATE_WEBHOOK_URL',
+  ]) {
+    const val = env[optionalKey]?.trim();
+    if (val) {
+      toUpload[optionalKey] = val;
+    }
   }
 
   return {

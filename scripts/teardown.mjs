@@ -15,11 +15,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import {
-  argValue,
+  assertProductionOperationAllowed,
   bin,
   hasFlag,
   isRemoteTarget,
   loadEnv,
+  parseCliArgs,
   parseJsonc,
   printTargetBanner,
   resolveRemoteProfile,
@@ -29,9 +30,9 @@ import {
   upsertEnvVar,
 } from './lib.mjs';
 
+parseCliArgs(process.argv.slice(2));
 const isRemote = isRemoteTarget();
 const force = hasFlag('--force');
-const confirmProdFlag = argValue('--confirm-production-teardown');
 
 function readWranglerConfig() {
   const configPath = path.join(root, 'wrangler.jsonc');
@@ -96,14 +97,14 @@ async function main() {
   console.log('======================================================\n');
 
   if (!profile.isStaging) {
-    if (force) {
-      if (confirmProdFlag !== 'DELETE-PRODUCTION-BURROW') {
-        console.error(
-          `❌ Refusing --force teardown on PRODUCTION ("${workerName}"). Destructive test teardowns must target staging (--staging). To force-delete production non-interactively, pass --confirm-production-teardown=DELETE-PRODUCTION-BURROW.`,
-        );
-        process.exit(1);
-      }
-    } else {
+    const auth = assertProductionOperationAllowed({
+      operation: 'teardown',
+      profile,
+      args: process.argv.slice(2),
+      env: process.env,
+      isInteractive: Boolean(process.stdin.isTTY),
+    });
+    if (auth.mode === 'interactive') {
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const confirmPhrase = await rl.question(
         'Type "TEARDOWN-PRODUCTION" to confirm deleting production resources: ',
@@ -123,6 +124,11 @@ async function main() {
       }
     }
   } else if (!force) {
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        `Refusing non-interactive staging teardown on "${workerName}" without --force.`,
+      );
+    }
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(
       'Type "TEARDOWN-STAGING" to confirm deleting staging resources: ',

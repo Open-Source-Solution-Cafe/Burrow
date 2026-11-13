@@ -55,4 +55,10 @@ describe('database command targets', () => {
       expect(() => assertResetDirectory(unsafe, root)).toThrow('Unsafe reset directory');
     }
   });
+
+  it('rejects unknown CLI flags instead of silently defaulting to local or production targets (#010)', () => {
+    expect(() => selectDatabaseTarget(['--remtoe'], {}, root)).toThrow('Unknown CLI argument');
+    expect(() => selectDatabaseTarget(['--worker=false'], {}, root)).not.toThrow();
+    expect(selectDatabaseTarget(['--worker=false'], {}, root).kind).toBe('node');
+  });
 });

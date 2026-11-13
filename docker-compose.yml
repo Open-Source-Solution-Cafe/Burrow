@@ -10,12 +10,13 @@ services:
       - NODE_ENV=production
       - PORT=3005
       - DATABASE_URL=postgres://burrow:burrowpassword@postgres:5432/burrow
-      # Set to your publicly accessible domain or IP in production (e.g. https://notes.example.com)
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://burrow.local:3005}
-      # Generate a secure 32+ character random string for production
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-burrow-selfhost-secret-key-32-bytes-minimum!!}
-      # Initial setup bootstrap token (16+ chars) to create your first owner workspace account
-      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:-burrow-bootstrap-token-initial-setup}
+      # Local quick-start evaluation mode (auto-generates ephemeral credentials if left unset on localhost).
+      # For internet-accessible production, set BETTER_AUTH_URL=https://notes.example.com,
+      # generate unique BETTER_AUTH_SECRET & BOOTSTRAP_TOKEN in .env, and set ALLOW_LOCAL_DOCKER_EVAL=false.
+      - ALLOW_LOCAL_DOCKER_EVAL=${ALLOW_LOCAL_DOCKER_EVAL:-true}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3005}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
+      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:-}
       # Persistent local storage for project files and attachments
       - LOCAL_STORAGE_PATH=/app/data/uploads
       # Automatically run migrations on container start
@@ -27,7 +28,7 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       - POSTGRES_USER=burrow

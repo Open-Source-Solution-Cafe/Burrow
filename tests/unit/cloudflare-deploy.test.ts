@@ -5,18 +5,28 @@ import { describe, expect, it } from 'vitest';
 
 // @ts-expect-error untyped local .mjs script
 import * as deployLib from '../../scripts/lib.mjs';
+// @ts-expect-error untyped local .mjs script
+import * as demoResetLib from '../../scripts/demo-reset.mjs';
 
 const {
+  assertDemoResetAllowed,
+  assertProductionOperationAllowed,
   buildSecretPlan,
   classifyWranglerError,
   collectAccounts,
+  KNOWN_BOOTSTRAP_PLACEHOLDERS,
+  KNOWN_SECRET_PLACEHOLDERS,
   migrateDatabase,
+  parseCliArgs,
   resolveCloudflareAccount,
+  resolveDeployProfile,
   resolveRemoteProfile,
   validateEnvironmentPreflight,
   validateWranglerResourceConfig,
   verifyDeployment,
 } = deployLib as any;
+
+const { buildDemoSeedSql, resolveDemoResetContext, validateDemoEmail } = demoResetLib as any;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -513,6 +523,139 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       );
       expect(resetRes.status).not.toBe(0);
       expect(resetRes.stderr).toContain('Refusing --force reset on PRODUCTION');
+    });
+
+    it('blocks CI=true and --force alone in demo-reset.mjs without explicit demo authorization (#001)', () => {
+      const demoResCi = spawnSync(
+        process.execPath,
+        [path.join(root, 'scripts', 'demo-reset.mjs'), '--remote', '--force'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, CI: 'true', BURROW_ALLOW_DEMO_RESET: '' },
+        },
+      );
+      expect(demoResCi.status).not.toBe(0);
+      expect(demoResCi.stderr).toContain('Refusing remote demo reset');
+
+      expect(() =>
+        resolveDemoResetContext({
+          args: ['--remote', '--force'],
+          env: { CI: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow('Refusing remote demo reset');
+
+      const authorized = resolveDemoResetContext({
+        args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW'],
+        env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+        isInteractive: false,
+      });
+      expect(authorized.isRemote).toBe(true);
+      expect(authorized.profile.dbName).toBe('burrow');
+    });
+
+    it('rejects SQL injection in DEMO_EMAIL when building demo seed SQL (#001)', () => {
+      expect(() => validateDemoEmail("demo@osscafe.com', 1); DROP TABLE user; --")).toThrow(
+        /Invalid DEMO_EMAIL/,
+      );
+      expect(() => buildDemoSeedSql('hash123', "bad'user@example.com")).toThrow(/Invalid DEMO_EMAIL/);
+      expect(() => buildDemoSeedSql('hash123', 'demo@osscafe.com')).not.toThrow();
+    });
+
+    it('requires both confirmation token and matching worker name for non-interactive production reset/teardown (#001)', () => {
+      const prodProfile = resolveDeployProfile(baseConfig, { args: ['-r'], env: {} });
+
+      expect(() =>
+        assertProductionOperationAllowed({
+          operation: 'teardown',
+          profile: prodProfile,
+          args: ['-r', '--force', '--confirm-production-teardown=DELETE-PRODUCTION-BURROW'],
+          env: { CI: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow('--confirm=burrow');
+
+      expect(
+        assertProductionOperationAllowed({
+          operation: 'teardown',
+          profile: prodProfile,
+          args: [
+            '-r',
+            '--confirm-production-teardown=DELETE-PRODUCTION-BURROW',
+            '--confirm=burrow',
+          ],
+          env: { CI: 'true' },
+          isInteractive: false,
+        }).mode,
+      ).toBe('explicit-flags');
+
+      expect(() =>
+        assertDemoResetAllowed({
+          profile: prodProfile,
+          args: ['-r', '--force'],
+          env: { CI: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow('Refusing remote demo reset');
+    });
+
+    it('rejects unknown, contradictory, and malformed CLI arguments instead of defaulting to production (#010)', () => {
+      expect(() => parseCliArgs(['-r', '--stage'])).toThrow('Unknown CLI argument: --stage');
+      expect(() => parseCliArgs(['-r', '--domain'])).toThrow('Missing value for CLI argument: --domain');
+      expect(() => parseCliArgs(['-r', '--staging=maybe'])).toThrow('Invalid boolean value');
+      expect(() => parseCliArgs(['-r', '--staging', '--env=production'])).toThrow(
+        'Contradictory CLI arguments',
+      );
+      expect(() =>
+        resolveRemoteProfile(baseConfig, { args: ['-r', '--env=stage'], env: {} }),
+      ).toThrow('Invalid --env value');
+
+      // --staging=false must evaluate to production rather than matching --staging substring
+      const explicitProd = resolveRemoteProfile(baseConfig, {
+        args: ['-r', '--staging=false'],
+        env: { BURROW_DEPLOY_ENV: 'staging' },
+      });
+      expect(explicitProd.isStaging).toBe(false);
+      expect(explicitProd.workerName).toBe('burrow');
+
+      // --env=production must override BURROW_DEPLOY_ENV=staging
+      const envOverride = resolveRemoteProfile(baseConfig, {
+        args: ['-r', '--env=production'],
+        env: { BURROW_DEPLOY_ENV: 'staging' },
+      });
+      expect(envOverride.isStaging).toBe(false);
+      expect(envOverride.dbName).toBe('burrow');
+    });
+
+    it('prevents staging profiles from resolving to production resources and vice versa (#002)', () => {
+      expect(() =>
+        resolveRemoteProfile(baseConfig, {
+          args: ['-r', '--staging', '--name', 'burrow'],
+          env: {},
+        }),
+      ).toThrow('Staging Worker names must include "staging"');
+
+      expect(() =>
+        resolveRemoteProfile(baseConfig, {
+          args: ['-r', '--staging', '--domain', 'notes.example.com'],
+          env: {},
+        }),
+      ).toThrow('Refusing to attach production domain');
+
+      expect(() =>
+        resolveRemoteProfile(baseConfig, {
+          args: ['-r', '--name', 'burrow-staging'],
+          env: {},
+        }),
+      ).toThrow('Refusing production profile with staging Worker name');
+    });
+
+    it('treats newly identified Docker fallback secrets as insecure placeholders (#003)', () => {
+      expect(KNOWN_SECRET_PLACEHOLDERS.has('burrow-selfhost-secret-key-32-bytes-minimum!!')).toBe(
+        true,
+      );
+      expect(KNOWN_BOOTSTRAP_PLACEHOLDERS.has('burrow-bootstrap-token-initial-setup')).toBe(true);
     });
   });
 });

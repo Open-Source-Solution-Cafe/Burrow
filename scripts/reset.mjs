@@ -17,11 +17,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { assertResetDirectory } from '../src/server/database-target.ts';
 import {
-  argValue,
+  assertProductionOperationAllowed,
   bin,
   hasFlag,
   getDatabaseTarget,
   migrateDatabase,
+  parseCliArgs,
   parseJsonc,
   printTargetBanner,
   resolveRemoteProfile,
@@ -31,10 +32,10 @@ import {
   getWranglerConfigArgs,
 } from './lib.mjs';
 
+parseCliArgs(process.argv.slice(2));
 const target = getDatabaseTarget();
 const isRemote = target.kind === 'remote';
 const force = hasFlag('--force');
-const confirmProdReset = argValue('--confirm-production-reset');
 const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
 const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
 
@@ -103,14 +104,20 @@ async function main() {
     ? `REMOTE Cloudflare Staging (${profile.dbName})`
     : `REMOTE Cloudflare Production (${profile.dbName})`;
 
-  if (!profile.isStaging && force && confirmProdReset !== 'RESET-PRODUCTION-BURROW') {
-    console.error(
-      `❌ Refusing --force reset on PRODUCTION ("${profile.dbName}"). Destructive test resets must target staging (--staging). To force-reset production non-interactively, pass --confirm-production-reset=RESET-PRODUCTION-BURROW.`,
-    );
-    process.exit(1);
-  }
+  const auth = assertProductionOperationAllowed({
+    operation: 'reset',
+    profile,
+    args: process.argv.slice(2),
+    env: process.env,
+    isInteractive: Boolean(process.stdin.isTTY),
+  });
 
-  if (!force) {
+  if (auth.mode === 'interactive' || (profile.isStaging && !force)) {
+    if (!process.stdin.isTTY) {
+      throw new Error(
+        `Refusing non-interactive staging reset on "${profile.dbName}" without --force.`,
+      );
+    }
     console.log('======================================================');
     console.log(`⚠️  DANGER: RESET ${targetName} DATABASE`);
     console.log('======================================================');

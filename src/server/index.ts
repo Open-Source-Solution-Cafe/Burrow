@@ -110,11 +110,20 @@ const server = serve(
   },
   (info) => {
     const isProd = process.env.NODE_ENV === 'production';
+    const isLocalDockerEval =
+      process.env.ALLOW_LOCAL_DOCKER_EVAL === 'true' &&
+      (config.BETTER_AUTH_URL.includes('localhost') || config.BETTER_AUTH_URL.includes('127.0.0.1'));
+    const showBootstrapToken = !isProd || isLocalDockerEval;
     console.log('\n======================================================');
     console.log('Burrow Node Server');
     console.log(`  Listening URL:      http://localhost:${info.port}`);
+    if (isLocalDockerEval) {
+      console.log(
+        '  Mode:               Local evaluation (localhost) — set BETTER_AUTH_URL & secrets for production',
+      );
+    }
     console.log(
-      `  BOOTSTRAP_TOKEN:    ${isProd ? '[REDACTED in production]' : config.BOOTSTRAP_TOKEN}`,
+      `  BOOTSTRAP_TOKEN:    ${showBootstrapToken ? config.BOOTSTRAP_TOKEN : '[REDACTED in production]'}`,
     );
     console.log(
       `  Email Delivery:     ${config.RESEND_API_KEY ? `Resend (${config.EMAIL_FROM || 'default'})` : 'Console log fallback'}`,

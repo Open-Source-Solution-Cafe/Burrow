@@ -43,7 +43,8 @@ export function createAuthProvider(
     (!env.BETTER_AUTH_SECRET ||
       env.BETTER_AUTH_SECRET.length < 32 ||
       env.BETTER_AUTH_SECRET === 'dev-secret-change-me-32-bytes-minimum!!' ||
-      env.BETTER_AUTH_SECRET === 'local-dev-secret-change-me')
+      env.BETTER_AUTH_SECRET === 'local-dev-secret-change-me' ||
+      env.BETTER_AUTH_SECRET === 'burrow-selfhost-secret-key-32-bytes-minimum!!')
   ) {
     throw new Error('BETTER_AUTH_SECRET must be at least 32 characters in production');
   }

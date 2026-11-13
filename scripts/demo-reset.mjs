@@ -17,14 +17,15 @@
 import readline from 'node:readline/promises';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { hashPassword } from 'better-auth/crypto';
-import { assertResetDirectory } from '../src/server/database-target.ts';
+import { assertResetDirectory, selectDatabaseTarget } from '../src/server/database-target.ts';
 import {
-  argValue,
+  assertDemoResetAllowed,
   bin,
-  hasFlag,
-  getDatabaseTarget,
+  loadEnv,
   migrateDatabase,
+  parseCliArgs,
   parseJsonc,
   printTargetBanner,
   resolveRemoteProfile,
@@ -35,13 +36,45 @@ import {
   executeDatabaseFile,
 } from './lib.mjs';
 
-const target = getDatabaseTarget();
-const isRemote = target.kind === 'remote';
-const force = hasFlag('--force') || Boolean(process.env.CI);
-const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
-const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
-const demoEmail = argValue('--email') || process.env.DEMO_EMAIL || 'demo@osscafe.com';
-const demoPassword = argValue('--password') || process.env.DEMO_PASSWORD || 'demopassword123';
+const EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export function validateDemoEmail(email) {
+  const trimmed = String(email ?? '').trim();
+  if (!trimmed || trimmed.length > 254 || !EMAIL_REGEX.test(trimmed)) {
+    throw new Error(`Invalid DEMO_EMAIL "${trimmed}": must be a plain RFC email address without quotes or whitespace.`);
+  }
+  return trimmed;
+}
+
+function escapeSqlLiteral(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+export function resolveDemoResetContext({
+  args = process.argv.slice(2),
+  env = process.env,
+  isInteractive = Boolean(process.stdin.isTTY),
+  rootDir = root,
+} = {}) {
+  const parsed = parseCliArgs(args);
+  const target = selectDatabaseTarget(args, env, rootDir);
+  const isRemote = target.kind === 'remote';
+  const baseCfg = parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
+  const profile = isRemote ? resolveRemoteProfile(baseCfg, { args, env }) : null;
+  if (isRemote && profile) {
+    assertDemoResetAllowed({ profile, args, env, isInteractive });
+  }
+  const demoEmail = validateDemoEmail(parsed.values['--email'] || env.DEMO_EMAIL || 'demo@osscafe.com');
+  const demoPassword = parsed.values['--password'] || env.DEMO_PASSWORD || 'demopassword123';
+  return {
+    target,
+    isRemote,
+    profile,
+    demoEmail,
+    demoPassword,
+    cleanR2: parsed.booleanFlags['--clean-r2'] === true,
+  };
+}
 
 const cleanSql = [
   "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
@@ -70,20 +103,22 @@ const cleanSql = [
   'DELETE FROM user;',
 ].join(' ');
 
-function buildDemoSeedSql(passwordHash, email) {
+export function buildDemoSeedSql(passwordHash, email) {
+  const safeEmail = escapeSqlLiteral(validateDemoEmail(email));
+  const safeHash = escapeSqlLiteral(passwordHash);
   const now = Date.now();
   return `
 -- 1. Demo Users
 INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt)
 VALUES
-  ('usr_demo', 'Demo User', '${email}', 1, ${now}, ${now}),
+  ('usr_demo', 'Demo User', '${safeEmail}', 1, ${now}, ${now}),
   ('usr_alice', 'Alice Smith', 'alice@osscafe.com', 1, ${now}, ${now}),
   ('usr_bob', 'Bob Jones', 'bob@osscafe.com', 1, ${now}, ${now});
 
 -- 2. Account (Credentials Provider for Demo Login)
 INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
 VALUES
-  ('acc_demo', 'usr_demo', 'credential', 'usr_demo', '${passwordHash}', ${now}, ${now});
+  ('acc_demo', 'usr_demo', 'credential', 'usr_demo', '${safeHash}', ${now}, ${now});
 
 -- 3. Workspace
 INSERT INTO workspaces (id, name, created_by, created_at)
@@ -91,7 +126,7 @@ VALUES ('ws_demo_acme', 'OSSCafe Demo Workspace', 'usr_demo', ${now});
 
 -- 4. Mark Bootstrap Complete
 INSERT OR REPLACE INTO bootstrap_state (id, status, claim_email, user_id, workspace_id)
-VALUES (1, 'complete', '${email}', 'usr_demo', 'ws_demo_acme');
+VALUES (1, 'complete', '${safeEmail}', 'usr_demo', 'ws_demo_acme');
 
 -- 5. Members
 INSERT INTO members (workspace_id, user_id, role, joined_at)
@@ -186,18 +221,34 @@ VALUES
 }
 
 async function main() {
+  loadEnv();
+  const isInteractive = Boolean(process.stdin.isTTY);
+  const { target, isRemote, profile, demoEmail, demoPassword } = resolveDemoResetContext({
+    args: process.argv.slice(2),
+    env: process.env,
+    isInteractive,
+  });
+
   printTargetBanner('Demo Reset & Seed', target, { profile });
 
-  if (isRemote && !force) {
-    const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-DEMO';
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await rl.question(
-      `Type "${expectedPhrase}" to confirm resetting and seeding remote ${profile.envName}: `,
-    );
-    rl.close();
-    if (answer.trim() !== expectedPhrase) {
-      console.log('Reset cancelled.');
-      process.exit(0);
+  if (isRemote && isInteractive && process.env.BURROW_DEMO_RESET_CONFIRM !== 'RESET-DEMO-BURROW') {
+    const auth = assertDemoResetAllowed({
+      profile,
+      args: process.argv.slice(2),
+      env: process.env,
+      isInteractive,
+    });
+    if (auth.mode === 'staging-interactive' || auth.mode === 'interactive-demo') {
+      const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-DEMO-BURROW';
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await rl.question(
+        `Type "${expectedPhrase}" to confirm resetting and seeding remote ${profile.envName}: `,
+      );
+      rl.close();
+      if (answer.trim() !== expectedPhrase) {
+        console.log('Reset cancelled.');
+        process.exit(0);
+      }
     }
   }
 
@@ -302,12 +353,18 @@ async function main() {
   console.log('\n======================================================');
   console.log('✅ Demo reset & seed completed successfully!');
   console.log(`Demo Account:  ${demoEmail}`);
-  console.log(`Demo Password: ${demoPassword}`);
+  console.log(`Demo Password: [configured]`);
   console.log('All 13 database invariants hold.');
   console.log('======================================================\n');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const isDirectExecution =
+  Boolean(process.argv[1]) &&
+  path.resolve(process.argv[1]).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error('❌ Demo reset aborted:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

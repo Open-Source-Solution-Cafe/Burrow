@@ -7,7 +7,7 @@
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg)](https://vite.dev/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers_D1_R2-F38020.svg)](https://workers.cloudflare.com/)
-[![Docker and PostgreSQL](https://img.shields.io/badge/Docker-PostgreSQL_17-2496ED.svg)](compose.yaml)
+[![Docker and PostgreSQL](https://img.shields.io/badge/Docker-PostgreSQL_17-2496ED.svg)](./docker-compose.yml)
 
 ---
 
@@ -93,9 +93,20 @@ Best for zero-maintenance hosting inside Cloudflare's free-tier limits.
 
 Best for self-hosted servers, VPS environments, and Docker Compose stacks.
 
+**Local Docker evaluation (`http://localhost:3005`):**
+
 ```bash
 cp .env.example .env
-# Set a unique BETTER_AUTH_SECRET (32+ bytes) and BOOTSTRAP_TOKEN in .env
+docker compose up -d --build
+# Run `docker compose logs burrow` to see the generated BOOTSTRAP_TOKEN
+```
+
+**Production Docker deployment (internet-accessible):**
+
+```bash
+cp .env.example .env
+# Set ALLOW_LOCAL_DOCKER_EVAL=false, BETTER_AUTH_URL=https://notes.example.com,
+# BETTER_AUTH_SECRET=$(openssl rand -hex 32), and BOOTSTRAP_TOKEN=$(openssl rand -hex 16) in .env
 docker compose up -d --build
 ```
 

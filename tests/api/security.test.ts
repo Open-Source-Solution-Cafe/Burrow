@@ -869,6 +869,62 @@ describe('Security Contract Suite', () => {
         }),
       ).toThrow(/BETTER_AUTH_URL/);
     });
+
+    it('rejects publicly known Docker fallback secrets in production (#003)', () => {
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_SECRET: 'burrow-selfhost-secret-key-32-bytes-minimum!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+          BETTER_AUTH_URL: 'https://burrow.example.com',
+        }),
+      ).toThrow(/BETTER_AUTH_SECRET/);
+
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'burrow-bootstrap-token-initial-setup',
+          BETTER_AUTH_URL: 'https://burrow.example.com',
+        }),
+      ).toThrow(/BOOTSTRAP_TOKEN/);
+    });
+
+    it('supports local-only Docker quick-start evaluation on localhost with unique generated credentials while keeping non-localhost strict (#003)', () => {
+      const localEval1 = loadConfig({
+        NODE_ENV: 'production',
+        ALLOW_LOCAL_DOCKER_EVAL: 'true',
+        BETTER_AUTH_URL: 'http://localhost:3005',
+      });
+      const localEval2 = loadConfig({
+        NODE_ENV: 'production',
+        ALLOW_LOCAL_DOCKER_EVAL: 'true',
+        BETTER_AUTH_URL: 'http://localhost:3005',
+      });
+      expect(localEval1.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(32);
+      expect(localEval1.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
+      expect(localEval1.BETTER_AUTH_SECRET).not.toBe(localEval2.BETTER_AUTH_SECRET);
+      expect(localEval1.BOOTSTRAP_TOKEN).not.toBe(localEval2.BOOTSTRAP_TOKEN);
+
+      // Even with ALLOW_LOCAL_DOCKER_EVAL=true, public hostnames still enforce unique non-empty secrets
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          ALLOW_LOCAL_DOCKER_EVAL: 'true',
+          BETTER_AUTH_URL: 'https://notes.example.com',
+        }),
+      ).toThrow(/BETTER_AUTH_SECRET/);
+
+      // Known hardcoded Docker fallback secrets remain rejected even in local eval mode
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          ALLOW_LOCAL_DOCKER_EVAL: 'true',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+          BETTER_AUTH_SECRET: 'burrow-selfhost-secret-key-32-bytes-minimum!!',
+        }),
+      ).toThrow(/BETTER_AUTH_SECRET/);
+    });
   });
 
   describe('CSRF, Security Headers & Input Limits', () => {

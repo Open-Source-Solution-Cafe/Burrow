@@ -38,5 +38,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           DEMO_EMAIL: ${{ vars.DEMO_EMAIL || 'demo@osscafe.com' }}
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD || 'demopassword123' }}
+          BURROW_ALLOW_DEMO_RESET: 'true'
         run: |
-          node scripts/demo-reset.mjs --remote --force
+          node scripts/demo-reset.mjs --remote --confirm-demo-reset=RESET-DEMO-BURROW
