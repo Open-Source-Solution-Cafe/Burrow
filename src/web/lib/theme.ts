@@ -6,22 +6,22 @@ const THEME_STORAGE_KEY = 'burrow-theme';
 const THEME_CHANGE_EVENT = 'burrow:theme-change';
 
 export function normalizeTheme(raw: string | null | undefined): BurrowTheme {
-  if (raw === 'modern') return 'modern';
+  if (raw === 'basalt') return 'basalt';
   if (raw === 'light') return 'light';
-  return 'basalt';
+  return 'modern';
 }
 
 export function getStoredTheme(): BurrowTheme {
-  if (typeof window === 'undefined') return 'basalt';
+  if (typeof window === 'undefined') return 'modern';
   try {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
     if (raw === 'modern' || raw === 'light' || raw === 'basalt') return raw;
-    if (raw === 'dark') return 'basalt';
+    if (raw === 'dark') return 'modern';
     const attr = document.documentElement.getAttribute('data-theme');
     if (attr === 'modern' || attr === 'light' || attr === 'basalt') return attr;
-    return 'basalt';
+    return 'modern';
   } catch {
-    return 'basalt';
+    return 'modern';
   }
 }
 
@@ -84,9 +84,9 @@ export function useTheme() {
 
   const cycleTheme = useCallback(() => {
     const current = getStoredTheme();
-    const order: BurrowTheme[] = ['basalt', 'modern', 'light'];
+    const order: BurrowTheme[] = ['modern', 'basalt', 'light'];
     const idx = order.indexOf(current);
-    const next = order[(idx + 1) % order.length] ?? 'basalt';
+    const next = order[(idx + 1) % order.length] ?? 'modern';
     setTheme(next);
     return next;
   }, [setTheme]);

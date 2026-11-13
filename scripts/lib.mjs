@@ -81,6 +81,73 @@ function d1TargetArgs(target) {
     : ['--local', '--persist-to', target.persistTo];
 }
 
+const LEGACY_D1_DROP_TABLES_SQL = [
+  'DROP TABLE IF EXISTS notepads_fts;',
+  'DROP TABLE IF EXISTS project_files;',
+  'DROP TABLE IF EXISTS card_subtasks;',
+  'DROP TABLE IF EXISTS card_comments;',
+  'DROP TABLE IF EXISTS card_assignees;',
+  'DROP TABLE IF EXISTS cards;',
+  'DROP TABLE IF EXISTS board_columns;',
+  'DROP TABLE IF EXISTS boards;',
+  'DROP TABLE IF EXISTS notepad_tags;',
+  'DROP TABLE IF EXISTS notepad_links;',
+  'DROP TABLE IF EXISTS edit_locks;',
+  'DROP TABLE IF EXISTS notifications;',
+  'DROP TABLE IF EXISTS notepads;',
+  'DROP TABLE IF EXISTS tags;',
+  'DROP TABLE IF EXISTS invites;',
+  'DROP TABLE IF EXISTS members;',
+  'DROP TABLE IF EXISTS projects;',
+  'DROP TABLE IF EXISTS bootstrap_state;',
+  'DROP TABLE IF EXISTS workspaces;',
+  'DROP TABLE IF EXISTS session;',
+  'DROP TABLE IF EXISTS account;',
+  'DROP TABLE IF EXISTS verification;',
+  'DROP TABLE IF EXISTS "user";',
+  'DELETE FROM d1_migrations;',
+];
+
+function resetLegacyPreBaselineD1IfNeeded(databaseName, targetArgs) {
+  const check = run(
+    bin('wrangler'),
+    [
+      'd1',
+      'execute',
+      databaseName,
+      ...targetArgs,
+      "--command=SELECT name FROM d1_migrations; SELECT name FROM sqlite_master WHERE type = 'trigger';",
+      '--json',
+    ],
+    { capture: true, allowFail: true, quiet: true },
+  );
+  if (check.status !== 0) return;
+
+  const parsed = parseFirstJson(check.stdout);
+  const resultSets = Array.isArray(parsed) ? parsed : [parsed];
+  const migrationRows = resultSets[0]?.results ?? resultSets[0]?.rows ?? [];
+  if (!Array.isArray(migrationRows) || migrationRows.length === 0) return;
+
+  const appliedNames = new Set(migrationRows.map((r) => r?.name).filter(Boolean));
+  if (appliedNames.has('0000_baseline.sql')) return;
+
+  const triggerRows = resultSets[1]?.results ?? resultSets[1]?.rows ?? [];
+  const dropTriggersSql = (Array.isArray(triggerRows) ? triggerRows : [])
+    .map((r) => r?.name)
+    .filter((name) => typeof name === 'string' && /^[A-Za-z0-9_]+$/.test(name))
+    .map((name) => `DROP TRIGGER IF EXISTS "${name}";`);
+
+  console.log(
+    '  💡 Detected legacy pre-baseline D1 schema; dropping pre-baseline tables to apply 0000_baseline.sql cleanly...',
+  );
+  const dropSql = ['PRAGMA foreign_keys = OFF;', ...dropTriggersSql, ...LEGACY_D1_DROP_TABLES_SQL, 'PRAGMA foreign_keys = ON;'].join(' ');
+  run(
+    bin('wrangler'),
+    ['d1', 'execute', databaseName, ...targetArgs, `--command=${dropSql}`],
+    { allowFail: false },
+  );
+}
+
 export async function migrateDatabase(
   target,
   { dryRun = false, configArgs, databaseName = 'burrow' } = {},
@@ -96,6 +163,9 @@ export async function migrateDatabase(
   }
   const targetArgs =
     target.kind === 'remote' && configArgs ? [...configArgs, '--remote'] : d1TargetArgs(target);
+  if (!dryRun) {
+    resetLegacyPreBaselineD1IfNeeded(databaseName, targetArgs);
+  }
   run(bin('wrangler'), ['d1', 'migrations', 'apply', databaseName, ...targetArgs], {
     dryRun,
     env: { CI: '1' },

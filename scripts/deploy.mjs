@@ -9,6 +9,7 @@ import {
   argValue,
   bin,
   getWranglerConfigArgs,
+  migrateDatabase,
   parseFirstJson,
   printTargetBanner,
   root,
@@ -55,9 +56,7 @@ async function main() {
   }
 
   step('Apply pending migrations to remote D1 (before uploading code)');
-  run(bin('wrangler'), [...configArgs, 'd1', 'migrations', 'apply', 'burrow', '--remote'], {
-    env: { CI: '1' },
-  });
+  await migrateDatabase({ kind: 'remote' }, { configArgs, databaseName: 'burrow' });
 
   step('Deploy');
   const deployArgs = [...configArgs, 'deploy'];

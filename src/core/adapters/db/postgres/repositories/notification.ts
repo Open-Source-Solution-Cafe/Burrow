@@ -34,7 +34,7 @@ export class PostgresNotificationRepository implements INotificationRepository {
         createdAt: notifications.createdAt,
       })
       .from(notifications)
-      .innerJoin(user, eq(user.id, notifications.actorId))
+      .leftJoin(user, eq(user.id, notifications.actorId))
       .leftJoin(notepads, eq(notepads.id, notifications.notepadId))
       .where(and(...whereConditions))
       .orderBy(desc(notifications.createdAt))
@@ -58,8 +58,8 @@ export class PostgresNotificationRepository implements INotificationRepository {
       workspaceId: r.workspaceId,
       userId: r.userId,
       type: r.type,
-      actorId: r.actorId,
-      actorName: r.actorName,
+      actorId: r.actorId ?? null,
+      actorName: r.actorName ?? null,
       actorImage: r.actorImage ?? null,
       targetTitle: r.notepadTitle ?? (r.cardId ? cardTitles.get(r.cardId) : null) ?? null,
       notepadId: r.notepadId,

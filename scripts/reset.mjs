@@ -31,6 +31,8 @@ const isRemote = target.kind === 'remote';
 const force = hasFlag('--force');
 
 const cleanSql = [
+  "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
+  "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
   'DELETE FROM notepads_fts;',
   'DELETE FROM project_files;',
   'DELETE FROM card_subtasks;',
@@ -41,8 +43,8 @@ const cleanSql = [
   'DELETE FROM boards;',
   'DELETE FROM notepad_tags;',
   'DELETE FROM notepad_links;',
-  'DELETE FROM notepads;',
   'DELETE FROM edit_locks;',
+  'DELETE FROM notepads;',
   'DELETE FROM tags;',
   'DELETE FROM projects;',
   'DELETE FROM invites;',
@@ -53,7 +55,6 @@ const cleanSql = [
   'DELETE FROM account;',
   'DELETE FROM verification;',
   'DELETE FROM user;',
-  "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
 ].join(' ');
 
 async function main() {

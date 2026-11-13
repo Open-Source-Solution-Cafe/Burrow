@@ -1,10 +1,5 @@
 [
   {
-    "path": "src/web/components/boards/views/KanbanView.tsx",
-    "pattern": "stripe",
-    "reason": "Visual UI styling referring to card color accent stripe"
-  },
-  {
     "path": "src/core/infrastructure/types.ts",
     "pattern": "tenant",
     "reason": "Infrastructure interface documentation referring to generic actor and tenant scope"

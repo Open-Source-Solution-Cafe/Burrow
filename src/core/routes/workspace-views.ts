@@ -60,7 +60,7 @@ export function createWorkspaceViewRoutes(args: {
         return {
           ...rest,
           actor: {
-            id: actorId,
+            id: actorId ?? '',
             name: actorName || 'Unknown User',
             image: actorImage ?? null,
           },

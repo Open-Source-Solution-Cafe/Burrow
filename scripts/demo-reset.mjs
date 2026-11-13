@@ -40,6 +40,8 @@ const demoEmail = argValue('--email') || process.env.DEMO_EMAIL || 'demo@osscafe
 const demoPassword = argValue('--password') || process.env.DEMO_PASSWORD || 'demopassword123';
 
 const cleanSql = [
+  "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
+  "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
   'DELETE FROM notepads_fts;',
   'DELETE FROM project_files;',
   'DELETE FROM card_subtasks;',
@@ -50,8 +52,8 @@ const cleanSql = [
   'DELETE FROM boards;',
   'DELETE FROM notepad_tags;',
   'DELETE FROM notepad_links;',
-  'DELETE FROM notepads;',
   'DELETE FROM edit_locks;',
+  'DELETE FROM notepads;',
   'DELETE FROM tags;',
   'DELETE FROM projects;',
   'DELETE FROM invites;',
@@ -62,7 +64,6 @@ const cleanSql = [
   'DELETE FROM account;',
   'DELETE FROM verification;',
   'DELETE FROM user;',
-  "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
 ].join(' ');
 
 function buildDemoSeedSql(passwordHash, email) {
@@ -85,9 +86,8 @@ INSERT INTO workspaces (id, name, created_by, created_at)
 VALUES ('ws_demo_acme', 'OSSCafe Demo Workspace', 'usr_demo', ${now});
 
 -- 4. Mark Bootstrap Complete
-UPDATE bootstrap_state
-SET status = 'complete', claim_email = '${email}', user_id = 'usr_demo', workspace_id = 'ws_demo_acme'
-WHERE id = 1;
+INSERT OR REPLACE INTO bootstrap_state (id, status, claim_email, user_id, workspace_id)
+VALUES (1, 'complete', '${email}', 'usr_demo', 'ws_demo_acme');
 
 -- 5. Members
 INSERT INTO members (workspace_id, user_id, role, joined_at)
@@ -290,7 +290,7 @@ async function main() {
   console.log('✅ Demo reset & seed completed successfully!');
   console.log(`Demo Account:  ${demoEmail}`);
   console.log(`Demo Password: ${demoPassword}`);
-  console.log('All 10 database invariants hold.');
+  console.log('All 13 database invariants hold.');
   console.log('======================================================\n');
 }
 

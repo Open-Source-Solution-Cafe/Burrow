@@ -69,7 +69,7 @@ interface KanbanViewProps {
   onCardClick: (cardId: string) => void;
 }
 
-/** Priority → Basalt status token for the 4px left-edge bar. */
+/** Priority → Basalt status token for priority indicators. */
 function priorityStatusColor(priority?: string | null): string {
   switch (priority) {
     case 'urgent':
@@ -104,13 +104,11 @@ function CountPill({ count, wipLimit }: { count: number; wipLimit?: number | nul
 
 function CardTile({
   card,
-  statusColor,
   onClick,
   isOverlay = false,
   focused = false,
 }: {
   card: CardItem;
-  statusColor?: string | null;
   onClick?: () => void;
   isOverlay?: boolean;
   focused?: boolean;
@@ -136,21 +134,14 @@ function CardTile({
       })
     : null;
 
-  // Prioritize card priority color for the left accent stripe so it matches the priority badge;
-  // fall back to column status color only when no priority is set.
-  const activeStatus = card.priority
-    ? priorityStatusColor(card.priority)
-    : statusColor || undefined;
-
   return (
     <Card
       ref={setNodeRef}
-      statusColor={activeStatus}
       style={style}
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className={`group/card p-3 pl-3.5 bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--muted)]/50 hover:bg-[var(--hi)]/20 transition-all cursor-grab active:cursor-grabbing space-y-2 select-none theme-radius-md ${
+      className={`group/card p-3 bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--muted)]/50 hover:bg-[var(--hi)]/20 transition-all cursor-grab active:cursor-grabbing space-y-2 select-none theme-radius-md ${
         isOverlay ? 'rotate-1 scale-105 z-50' : ''
       } ${focused && !isOverlay ? 'ring-2 ring-[var(--accent)] ring-offset-1 ring-offset-[var(--bg)]' : ''}`}
     >
@@ -476,7 +467,6 @@ function ColumnComponent({
             <CardTile
               key={card.id}
               card={card}
-              statusColor={column.color || priorityStatusColor(card.priority)}
               focused={card.id === focusedCardId}
               onClick={() => onCardClick(card.id)}
             />
@@ -785,10 +775,6 @@ export function KanbanView({
   const priorityCard = priorityCardId ? findCard(priorityCardId) : undefined;
   const assignCard = assignCardId ? findCard(assignCardId) : undefined;
 
-  const activeCardColumn = activeCard
-    ? (columns.find((c) => c.cards.some((cc) => cc.id === activeCard.id))?.color ?? null)
-    : null;
-
   return (
     <>
       {/* Columns Container (Horizontal Scroll with mobile snap) */}
@@ -819,9 +805,7 @@ export function KanbanView({
           </SortableContext>
 
           <DragOverlay>
-            {activeCard ? (
-              <CardTile card={activeCard} statusColor={activeCardColumn} isOverlay />
-            ) : null}
+            {activeCard ? <CardTile card={activeCard} isOverlay /> : null}
           </DragOverlay>
         </DndContext>
 

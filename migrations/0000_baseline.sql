@@ -62,23 +62,6 @@ CREATE TABLE `verification` (
 );
 --> statement-breakpoint
 
-CREATE TABLE `bootstrap_state` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`status` text NOT NULL,
-	`claim_email` text,
-	`user_id` text,
-	`workspace_id` text,
-	CONSTRAINT "bootstrap_singleton" CHECK (`bootstrap_state`.`id` = 1),
-	CONSTRAINT "bootstrap_state_valid" CHECK (
-		(`bootstrap_state`.`status` = 'empty' AND `bootstrap_state`.`claim_email` IS NULL AND `bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL)
-		OR (`bootstrap_state`.`status` = 'claimed' AND `bootstrap_state`.`claim_email` IS NOT NULL AND `bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL)
-		OR (`bootstrap_state`.`status` = 'complete' AND ((`bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL) OR (`bootstrap_state`.`claim_email` IS NOT NULL AND `bootstrap_state`.`user_id` IS NOT NULL AND `bootstrap_state`.`workspace_id` IS NOT NULL)))
-	)
-);
---> statement-breakpoint
-INSERT OR IGNORE INTO `bootstrap_state` (`id`, `status`) VALUES (1, 'empty');
---> statement-breakpoint
-
 -- 2. Workspaces, Members, Invites
 CREATE TABLE `workspaces` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -87,6 +70,25 @@ CREATE TABLE `workspaces` (
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`created_by`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
 );
+--> statement-breakpoint
+
+CREATE TABLE `bootstrap_state` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`status` text NOT NULL,
+	`claim_email` text,
+	`user_id` text,
+	`workspace_id` text,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "bootstrap_singleton" CHECK (`bootstrap_state`.`id` = 1),
+	CONSTRAINT "bootstrap_state_valid" CHECK (
+		(`bootstrap_state`.`status` = 'empty' AND `bootstrap_state`.`claim_email` IS NULL AND `bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL)
+		OR (`bootstrap_state`.`status` = 'claimed' AND `bootstrap_state`.`claim_email` IS NOT NULL AND `bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL)
+		OR (`bootstrap_state`.`status` = 'complete' AND ((`bootstrap_state`.`user_id` IS NULL AND `bootstrap_state`.`workspace_id` IS NULL) OR (`bootstrap_state`.`claim_email` IS NOT NULL)))
+	)
+);
+--> statement-breakpoint
+INSERT OR IGNORE INTO `bootstrap_state` (`id`, `status`) VALUES (1, 'empty');
 --> statement-breakpoint
 
 CREATE TABLE `members` (
@@ -318,8 +320,17 @@ CREATE TABLE `notepad_links` (
 	`source_id` text NOT NULL,
 	`target_type` text NOT NULL,
 	`target_id` text NOT NULL,
+	`target_user_id` text GENERATED ALWAYS AS (CASE WHEN target_type = 'user' THEN target_id ELSE NULL END) STORED,
+	`target_notepad_id` text GENERATED ALWAYS AS (CASE WHEN target_type = 'notepad' THEN target_id ELSE NULL END) STORED,
+	`target_card_id` text GENERATED ALWAYS AS (CASE WHEN target_type = 'card' THEN target_id ELSE NULL END) STORED,
+	`target_board_id` text GENERATED ALWAYS AS (CASE WHEN target_type = 'board' THEN target_id ELSE NULL END) STORED,
 	PRIMARY KEY(`source_id`, `target_type`, `target_id`),
-	FOREIGN KEY (`source_id`) REFERENCES `notepads`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`source_id`) REFERENCES `notepads`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`target_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`target_notepad_id`) REFERENCES `notepads`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`target_card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`target_board_id`) REFERENCES `boards`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "notepad_links_single_target_chk" CHECK ((target_user_id IS NOT NULL) + (target_notepad_id IS NOT NULL) + (target_card_id IS NOT NULL) + (target_board_id IS NOT NULL) = 1)
 );
 --> statement-breakpoint
 CREATE INDEX `links_target` ON `notepad_links` (`target_type`,`target_id`);
@@ -331,13 +342,14 @@ CREATE TABLE `notifications` (
 	`workspace_id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`type` text NOT NULL,
-	`actor_id` text NOT NULL,
+	`actor_id` text,
 	`notepad_id` text,
 	`card_id` text,
 	`read_at` integer,
 	`created_at` integer NOT NULL,
+	FOREIGN KEY (`workspace_id`) REFERENCES `workspaces`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`actor_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`actor_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`notepad_id`) REFERENCES `notepads`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`card_id`) REFERENCES `cards`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -707,7 +719,9 @@ BEGIN
   DELETE FROM members WHERE user_id = OLD.id;
   DELETE FROM card_assignees WHERE user_id = OLD.id;
   DELETE FROM edit_locks WHERE user_id = OLD.id;
-  DELETE FROM notifications WHERE user_id = OLD.id OR actor_id = OLD.id;
+  DELETE FROM notifications WHERE user_id = OLD.id;
+  UPDATE notifications SET actor_id = NULL WHERE actor_id = OLD.id;
+  UPDATE bootstrap_state SET user_id = NULL WHERE user_id = OLD.id;
   UPDATE workspaces SET created_by = NULL WHERE created_by = OLD.id;
   UPDATE notepads SET created_by = NULL WHERE created_by = OLD.id;
   UPDATE project_files SET created_by = NULL WHERE created_by = OLD.id;

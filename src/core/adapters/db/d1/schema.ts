@@ -83,14 +83,21 @@ export const verification = sqliteTable('verification', {
 // Workspace / members / invites
 // ---------------------------------------------------------------------------
 
+export const workspaces = sqliteTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: integer('created_at').notNull(),
+});
+
 export const bootstrapState = sqliteTable(
   'bootstrap_state',
   {
     id: integer('id').primaryKey(),
     status: text('status', { enum: ['empty', 'claimed', 'complete'] }).notNull(),
     claimEmail: text('claim_email'),
-    userId: text('user_id'),
-    workspaceId: text('workspace_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
   },
   (t) => [
     check('bootstrap_singleton', sql`${t.id} = 1`),
@@ -98,17 +105,10 @@ export const bootstrapState = sqliteTable(
       'bootstrap_state_valid',
       sql`(${t.status} = 'empty' AND ${t.claimEmail} IS NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
         OR (${t.status} = 'claimed' AND ${t.claimEmail} IS NOT NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
-        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL AND ${t.userId} IS NOT NULL AND ${t.workspaceId} IS NOT NULL)))`,
+        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL)))`,
     ),
   ],
 );
-
-export const workspaces = sqliteTable('workspaces', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
-  createdAt: integer('created_at').notNull(),
-});
 
 export const members = sqliteTable(
   'members',
@@ -401,10 +401,34 @@ export const notepadLinks = sqliteTable(
       .references(() => notepads.id, { onDelete: 'cascade' }),
     targetType: text('target_type', { enum: ['user', 'notepad', 'card', 'board'] }).notNull(),
     targetId: text('target_id').notNull(),
+    targetUserId: text('target_user_id')
+      .generatedAlwaysAs(sql`CASE WHEN target_type = 'user' THEN target_id ELSE NULL END`, {
+        mode: 'stored',
+      })
+      .references(() => user.id, { onDelete: 'cascade' }),
+    targetNotepadId: text('target_notepad_id')
+      .generatedAlwaysAs(sql`CASE WHEN target_type = 'notepad' THEN target_id ELSE NULL END`, {
+        mode: 'stored',
+      })
+      .references(() => notepads.id, { onDelete: 'cascade' }),
+    targetCardId: text('target_card_id')
+      .generatedAlwaysAs(sql`CASE WHEN target_type = 'card' THEN target_id ELSE NULL END`, {
+        mode: 'stored',
+      })
+      .references(() => cards.id, { onDelete: 'cascade' }),
+    targetBoardId: text('target_board_id')
+      .generatedAlwaysAs(sql`CASE WHEN target_type = 'board' THEN target_id ELSE NULL END`, {
+        mode: 'stored',
+      })
+      .references(() => boards.id, { onDelete: 'cascade' }),
   },
   (t) => [
     primaryKey({ columns: [t.sourceId, t.targetType, t.targetId] }),
     index('links_target').on(t.targetType, t.targetId),
+    check(
+      'notepad_links_single_target_chk',
+      sql`(${t.targetUserId} IS NOT NULL) + (${t.targetNotepadId} IS NOT NULL) + (${t.targetCardId} IS NOT NULL) + (${t.targetBoardId} IS NOT NULL) = 1`,
+    ),
   ],
 );
 
@@ -416,14 +440,14 @@ export const notifications = sqliteTable(
   'notifications',
   {
     id: text('id').primaryKey(),
-    workspaceId: text('workspace_id').notNull(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }), // recipient
     type: text('type', { enum: ['mention', 'assigned'] }).notNull(),
-    actorId: text('actor_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
+    actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
     notepadId: text('notepad_id').references(() => notepads.id, { onDelete: 'cascade' }),
     cardId: text('card_id').references(() => cards.id, { onDelete: 'cascade' }),
     readAt: integer('read_at'),

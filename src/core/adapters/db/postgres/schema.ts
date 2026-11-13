@@ -104,14 +104,21 @@ export const verification = pgTable('verification', {
 // Workspace / members / invites
 // ---------------------------------------------------------------------------
 
+export const workspaces = pgTable('workspaces', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+});
+
 export const bootstrapState = pgTable(
   'bootstrap_state',
   {
     id: integer('id').primaryKey(),
     status: text('status', { enum: ['empty', 'claimed', 'complete'] }).notNull(),
     claimEmail: text('claim_email'),
-    userId: text('user_id'),
-    workspaceId: text('workspace_id'),
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
   },
   (t) => [
     check('bootstrap_singleton', sql`${t.id} = 1`),
@@ -119,17 +126,10 @@ export const bootstrapState = pgTable(
       'bootstrap_state_valid',
       sql`(${t.status} = 'empty' AND ${t.claimEmail} IS NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
         OR (${t.status} = 'claimed' AND ${t.claimEmail} IS NOT NULL AND ${t.userId} IS NULL AND ${t.workspaceId} IS NULL)
-        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL AND ${t.userId} IS NOT NULL AND ${t.workspaceId} IS NOT NULL)))`,
+        OR (${t.status} = 'complete' AND ((${t.userId} IS NULL AND ${t.workspaceId} IS NULL) OR (${t.claimEmail} IS NOT NULL)))`,
     ),
   ],
 );
-
-export const workspaces = pgTable('workspaces', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
-  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
-});
 
 export const members = pgTable(
   'members',
@@ -427,10 +427,20 @@ export const notepadLinks = pgTable(
       .references(() => notepads.id, { onDelete: 'cascade' }),
     targetType: linkTargetTypeEnum('target_type').notNull(),
     targetId: text('target_id').notNull(),
+    targetUserId: text('target_user_id').references(() => user.id, { onDelete: 'cascade' }),
+    targetNotepadId: text('target_notepad_id').references(() => notepads.id, {
+      onDelete: 'cascade',
+    }),
+    targetCardId: text('target_card_id').references(() => cards.id, { onDelete: 'cascade' }),
+    targetBoardId: text('target_board_id').references(() => boards.id, { onDelete: 'cascade' }),
   },
   (t) => [
     primaryKey({ columns: [t.sourceId, t.targetType, t.targetId] }),
     index('links_target').on(t.targetType, t.targetId),
+    check(
+      'notepad_links_single_target_chk',
+      sql`num_nonnulls(${t.targetUserId}, ${t.targetNotepadId}, ${t.targetCardId}, ${t.targetBoardId}) = 1 AND ((${t.targetType} = 'user' AND ${t.targetUserId} = ${t.targetId}) OR (${t.targetType} = 'notepad' AND ${t.targetNotepadId} = ${t.targetId}) OR (${t.targetType} = 'card' AND ${t.targetCardId} = ${t.targetId}) OR (${t.targetType} = 'board' AND ${t.targetBoardId} = ${t.targetId}))`,
+    ),
   ],
 );
 
@@ -442,14 +452,14 @@ export const notifications = pgTable(
   'notifications',
   {
     id: text('id').primaryKey(),
-    workspaceId: text('workspace_id').notNull(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     type: notificationTypeEnum('type').notNull(),
-    actorId: text('actor_id')
-      .notNull()
-      .references(() => user.id, { onDelete: 'cascade' }),
+    actorId: text('actor_id').references(() => user.id, { onDelete: 'set null' }),
     notepadId: text('notepad_id').references(() => notepads.id, { onDelete: 'cascade' }),
     cardId: text('card_id').references(() => cards.id, { onDelete: 'cascade' }),
     readAt: bigint('read_at', { mode: 'number' }),

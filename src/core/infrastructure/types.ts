@@ -790,7 +790,7 @@ export interface Notification {
   workspaceId: string;
   userId: string;
   type: 'mention' | 'assigned';
-  actorId: string;
+  actorId: string | null;
   actorName: string | null;
   actorImage?: string | null;
   targetTitle?: string | null;

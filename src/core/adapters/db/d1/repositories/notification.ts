@@ -29,7 +29,7 @@ export function createNotificationRepository(db: DB): INotificationRepository {
           createdAt: t.notifications.createdAt,
         })
         .from(t.notifications)
-        .innerJoin(t.user, eq(t.user.id, t.notifications.actorId))
+        .leftJoin(t.user, eq(t.user.id, t.notifications.actorId))
         .leftJoin(
           t.notepads,
           and(
@@ -180,7 +180,7 @@ function mapNotification(row: {
   workspaceId: string;
   userId: string;
   type: 'mention' | 'assigned';
-  actorId: string;
+  actorId: string | null;
   actorName: string | null;
   actorImage?: string | null;
   notepadId: string | null;
@@ -194,8 +194,8 @@ function mapNotification(row: {
     workspaceId: row.workspaceId,
     userId: row.userId,
     type: row.type,
-    actorId: row.actorId,
-    actorName: row.actorName,
+    actorId: row.actorId ?? null,
+    actorName: row.actorName ?? null,
     actorImage: row.actorImage ?? null,
     targetTitle: row.targetTitle ?? null,
     notepadId: row.notepadId,

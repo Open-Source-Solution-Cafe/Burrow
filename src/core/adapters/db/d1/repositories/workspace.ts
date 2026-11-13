@@ -118,9 +118,9 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
                   AND lower(trim(email)) = ${normalized})
                 AND NOT EXISTS (SELECT 1 FROM workspaces)
             )`),
+          ...provisionStatements(plan),
           db.run(sql`UPDATE bootstrap_state SET status = 'complete', user_id = ${userId},
             workspace_id = ${workspaceId} WHERE id = 1`),
-          ...provisionStatements(plan),
         ]);
         return plan.workspace;
       } catch (error) {

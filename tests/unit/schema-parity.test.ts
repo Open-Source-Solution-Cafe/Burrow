@@ -1,4 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { setTimeout } from 'node:timers/promises';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +12,10 @@ import * as d1Schema from '../../src/core/adapters/db/d1/schema';
 import * as pgSchema from '../../src/core/adapters/db/postgres/schema';
 import { getTableConfig as getSqliteTableConfig } from 'drizzle-orm/sqlite-core';
 import { getTableConfig as getPgTableConfig } from 'drizzle-orm/pg-core';
+
+const exec = promisify(execFile);
+const docker = async (...args: string[]) =>
+  (await exec('docker', args, { windowsHide: true, timeout: 120_000 })).stdout.trim();
 
 const directories: string[] = [];
 function temporaryDatabase() {
@@ -86,7 +94,7 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
 
       // 2. Column Parity
       for (const { name: tableName, config } of drizzleTables) {
-        const tableInfo = sqlite.prepare(`PRAGMA table_info('${tableName}')`).all() as {
+        const tableInfo = sqlite.prepare(`PRAGMA table_xinfo('${tableName}')`).all() as {
           name: string;
           notnull: number;
           pk: number;
@@ -157,12 +165,49 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
 
       // User FK checks (authorship SET NULL, memberships/assignees/locks CASCADE)
       checkFk('workspaces', ['created_by'], 'user', ['id'], 'SET NULL');
+      checkFk('bootstrap_state', ['user_id'], 'user', ['id'], 'SET NULL');
+      checkFk('bootstrap_state', ['workspace_id'], 'workspaces', ['id'], 'SET NULL');
       checkFk('project_files', ['created_by'], 'user', ['id'], 'SET NULL');
       checkFk('notepads', ['created_by'], 'user', ['id'], 'SET NULL');
       checkFk('invites', ['invited_by'], 'user', ['id'], 'SET NULL');
       checkFk('members', ['user_id'], 'user', ['id'], 'CASCADE');
       checkFk('card_assignees', ['user_id'], 'user', ['id'], 'CASCADE');
       checkFk('edit_locks', ['user_id'], 'user', ['id'], 'CASCADE');
+
+      // Notifications & Notepad Links FK checks
+      checkFk('notifications', ['workspace_id'], 'workspaces', ['id'], 'CASCADE');
+      checkFk('notifications', ['user_id'], 'user', ['id'], 'CASCADE');
+      checkFk('notifications', ['actor_id'], 'user', ['id'], 'SET NULL');
+      checkFk('notepad_links', ['source_id'], 'notepads', ['id'], 'CASCADE');
+      checkFk('notepad_links', ['target_user_id'], 'user', ['id'], 'CASCADE');
+      checkFk('notepad_links', ['target_notepad_id'], 'notepads', ['id'], 'CASCADE');
+      checkFk('notepad_links', ['target_card_id'], 'cards', ['id'], 'CASCADE');
+      checkFk('notepad_links', ['target_board_id'], 'boards', ['id'], 'CASCADE');
+
+      // Single-target CHECK constraint & actor ON DELETE SET NULL behavior (SQLite)
+      const notepadLinksDdl = (
+        sqlite
+          .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notepad_links'")
+          .get() as { sql: string }
+      ).sql;
+      expect(notepadLinksDdl).toContain('notepad_links_single_target_chk');
+
+      sqlite.exec(`
+        INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt)
+        VALUES ('u-owner', 'Owner', 'owner@test.local', 1, 1000, 1000),
+               ('u-actor', 'Actor', 'actor@test.local', 1, 1000, 1000);
+        INSERT INTO workspaces (id, name, created_by, created_at)
+        VALUES ('w-1', 'WS', 'u-owner', 1000);
+        INSERT INTO members (workspace_id, user_id, role, joined_at)
+        VALUES ('w-1', 'u-owner', 'owner', 1000), ('w-1', 'u-actor', 'editor', 1000);
+        INSERT INTO notifications (id, workspace_id, user_id, type, actor_id, created_at)
+        VALUES ('n-1', 'w-1', 'u-owner', 'mention', 'u-actor', 1000);
+        DELETE FROM "user" WHERE id = 'u-actor';
+      `);
+      const survivingNotif = sqlite
+        .prepare("SELECT id, actor_id FROM notifications WHERE id = 'n-1'")
+        .get() as { id: string; actor_id: string | null } | undefined;
+      expect(survivingNotif).toEqual({ id: 'n-1', actor_id: null });
 
       // 4. Unique Constraints & Indexes Parity
       const checkUnique = (table: string, cols: string[]) => {
@@ -239,17 +284,51 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
     }
   });
 
-  it('creates tables, columns, foreign keys, unique constraints, and triggers matching PostgreSQL Drizzle schema', async () => {
-    const adminUrl =
-      process.env.BURROW_TEST_POSTGRES_URL ||
-      'postgres://burrow_test:burrow_test@127.0.0.1:49817/postgres';
-
+  it.skipIf(process.env.BURROW_TEST_SQLITE_ONLY === '1')(
+    'creates tables, columns, foreign keys, unique constraints, and triggers matching PostgreSQL Drizzle schema',
+    async () => {
+    let container: string | undefined;
+    let adminUrl = process.env.BURROW_TEST_POSTGRES_URL;
     let admin: postgres.Sql | undefined;
     let client: postgres.Sql | undefined;
     const testDb = `parity_test_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     try {
+      if (!adminUrl) {
+        const candidateContainer = `burrow-test-parity-${randomUUID()}`;
+        await docker(
+          'run',
+          '--detach',
+          '--rm',
+          '--name',
+          candidateContainer,
+          '--publish',
+          '127.0.0.1::5432',
+          '--env',
+          'POSTGRES_USER=burrow_test',
+          '--env',
+          'POSTGRES_PASSWORD=burrow_test',
+          '--env',
+          'POSTGRES_DB=postgres',
+          'postgres:17',
+        );
+        container = candidateContainer;
+        const address = await docker('port', container, '5432/tcp');
+        const port = /^127\.0\.0\.1:(\d+)$/.exec(address)?.[1];
+        if (!port) throw new Error('Disposable PostgreSQL did not publish a loopback port');
+        adminUrl = `postgres://burrow_test:burrow_test@127.0.0.1:${port}/postgres`;
+      }
+
       admin = postgres(adminUrl, { max: 1, onnotice: () => {}, connect_timeout: 2 });
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await admin`SELECT 1`;
+          break;
+        } catch (error) {
+          if (attempt === 39) throw error;
+          await setTimeout(250);
+        }
+      }
       await admin.unsafe(`CREATE DATABASE "${testDb}"`);
 
       const dbUrl = new URL(adminUrl);
@@ -282,17 +361,20 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
       const fks = await client<{
         conname: string;
         relname: string;
+        from_col: string;
         confrelname: string;
         confdeltype: string;
       }[]>`
         SELECT 
           c.conname,
           src.relname,
-          dst.relname as confrelname,
+          a.attname AS from_col,
+          dst.relname AS confrelname,
           c.confdeltype::text
         FROM pg_constraint c
         JOIN pg_class src ON src.oid = c.conrelid
         JOIN pg_class dst ON dst.oid = c.confrelid
+        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
         WHERE c.contype = 'f' AND src.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
       `;
 
@@ -304,6 +386,46 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
       expect(fks.some((f) => f.relname === 'card_assignees' && f.confrelname === 'user' && f.confdeltype === 'c')).toBe(true);
       expect(fks.some((f) => f.relname === 'members' && f.confrelname === 'user' && f.confdeltype === 'c')).toBe(true);
       expect(fks.some((f) => f.relname === 'workspaces' && f.confrelname === 'user' && f.confdeltype === 'n')).toBe(true);
+      expect(fks.some((f) => f.relname === 'bootstrap_state' && f.from_col === 'user_id' && f.confrelname === 'user' && f.confdeltype === 'n')).toBe(true);
+      expect(fks.some((f) => f.relname === 'bootstrap_state' && f.from_col === 'workspace_id' && f.confrelname === 'workspaces' && f.confdeltype === 'n')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notifications' && f.from_col === 'workspace_id' && f.confrelname === 'workspaces' && f.confdeltype === 'c')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notifications' && f.from_col === 'actor_id' && f.confrelname === 'user' && f.confdeltype === 'n')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notepad_links' && f.from_col === 'target_user_id' && f.confrelname === 'user' && f.confdeltype === 'c')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notepad_links' && f.from_col === 'target_notepad_id' && f.confrelname === 'notepads' && f.confdeltype === 'c')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notepad_links' && f.from_col === 'target_card_id' && f.confrelname === 'cards' && f.confdeltype === 'c')).toBe(true);
+      expect(fks.some((f) => f.relname === 'notepad_links' && f.from_col === 'target_board_id' && f.confrelname === 'boards' && f.confdeltype === 'c')).toBe(true);
+
+      // Single-target CHECK constraint & actor ON DELETE SET NULL behavior (Postgres)
+      const checkConstraints = (
+        await client<{ conname: string; relname: string }[]>`
+          SELECT c.conname, src.relname
+          FROM pg_constraint c
+          JOIN pg_class src ON src.oid = c.conrelid
+          WHERE c.contype = 'c' AND src.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+        `
+      );
+      expect(
+        checkConstraints.some(
+          (c) => c.relname === 'notepad_links' && c.conname === 'notepad_links_single_target_chk',
+        ),
+      ).toBe(true);
+
+      await client.unsafe(`
+        INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+        VALUES ('u-owner', 'Owner', 'owner@test.local', true, now(), now()),
+               ('u-actor', 'Actor', 'actor@test.local', true, now(), now());
+        INSERT INTO workspaces (id, name, created_by, created_at)
+        VALUES ('w-1', 'WS', 'u-owner', 1000);
+        INSERT INTO members (workspace_id, user_id, role, joined_at)
+        VALUES ('w-1', 'u-owner', 'owner', 1000), ('w-1', 'u-actor', 'editor', 1000);
+        INSERT INTO notifications (id, workspace_id, user_id, type, actor_id, created_at)
+        VALUES ('n-1', 'w-1', 'u-owner', 'mention', 'u-actor', 1000);
+        DELETE FROM "user" WHERE id = 'u-actor';
+      `);
+      const pgSurvivingNotif = await client<{ id: string; actor_id: string | null }[]>`
+        SELECT id, actor_id FROM notifications WHERE id = 'n-1'
+      `;
+      expect(pgSurvivingNotif).toEqual([{ id: 'n-1', actor_id: null }]);
 
       // 3. Unique Constraints
       const uqs = await client<{ conname: string; relname: string }[]>`
@@ -356,8 +478,14 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
     } finally {
       if (client) await client.end();
       if (admin) {
-        await admin.unsafe(`DROP DATABASE IF EXISTS "${testDb}" WITH (FORCE)`);
-        await admin.end();
+        try {
+          await admin.unsafe(`DROP DATABASE IF EXISTS "${testDb}" WITH (FORCE)`);
+        } finally {
+          await admin.end();
+        }
+      }
+      if (container) {
+        await docker('rm', '--force', container);
       }
     }
   });

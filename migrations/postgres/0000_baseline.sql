@@ -71,23 +71,6 @@ CREATE TABLE "verification" (
 );
 --> statement-breakpoint
 
-CREATE TABLE "bootstrap_state" (
-	"id" integer PRIMARY KEY NOT NULL,
-	"status" text NOT NULL,
-	"claim_email" text,
-	"user_id" text,
-	"workspace_id" text,
-	CONSTRAINT "bootstrap_singleton" CHECK (id = 1),
-	CONSTRAINT "bootstrap_state_valid" CHECK (
-		(status = 'empty' AND claim_email IS NULL AND user_id IS NULL AND workspace_id IS NULL)
-		OR (status = 'claimed' AND claim_email IS NOT NULL AND user_id IS NULL AND workspace_id IS NULL)
-		OR (status = 'complete' AND ((user_id IS NULL AND workspace_id IS NULL) OR (claim_email IS NOT NULL AND user_id IS NOT NULL AND workspace_id IS NOT NULL)))
-	)
-);
---> statement-breakpoint
-INSERT INTO "bootstrap_state" ("id", "status") VALUES (1, 'empty') ON CONFLICT DO NOTHING;
---> statement-breakpoint
-
 -- 2. Workspaces, Members, Invites
 CREATE TABLE "workspaces" (
 	"id" text PRIMARY KEY NOT NULL,
@@ -95,6 +78,23 @@ CREATE TABLE "workspaces" (
 	"created_by" text REFERENCES "user"("id") ON DELETE SET NULL,
 	"created_at" bigint NOT NULL
 );
+--> statement-breakpoint
+
+CREATE TABLE "bootstrap_state" (
+	"id" integer PRIMARY KEY NOT NULL,
+	"status" text NOT NULL,
+	"claim_email" text,
+	"user_id" text REFERENCES "user"("id") ON DELETE SET NULL,
+	"workspace_id" text REFERENCES "workspaces"("id") ON DELETE SET NULL,
+	CONSTRAINT "bootstrap_singleton" CHECK (id = 1),
+	CONSTRAINT "bootstrap_state_valid" CHECK (
+		(status = 'empty' AND claim_email IS NULL AND user_id IS NULL AND workspace_id IS NULL)
+		OR (status = 'claimed' AND claim_email IS NOT NULL AND user_id IS NULL AND workspace_id IS NULL)
+		OR (status = 'complete' AND ((user_id IS NULL AND workspace_id IS NULL) OR (claim_email IS NOT NULL)))
+	)
+);
+--> statement-breakpoint
+INSERT INTO "bootstrap_state" ("id", "status") VALUES (1, 'empty') ON CONFLICT DO NOTHING;
 --> statement-breakpoint
 
 CREATE TABLE "members" (
@@ -294,7 +294,20 @@ CREATE TABLE "notepad_links" (
 	"source_id" text NOT NULL REFERENCES "notepads"("id") ON DELETE CASCADE,
 	"target_type" "link_target_type" NOT NULL,
 	"target_id" text NOT NULL,
-	CONSTRAINT "notepad_links_source_id_target_type_target_id_pk" PRIMARY KEY("source_id","target_type","target_id")
+	"target_user_id" text REFERENCES "user"("id") ON DELETE CASCADE,
+	"target_notepad_id" text REFERENCES "notepads"("id") ON DELETE CASCADE,
+	"target_card_id" text REFERENCES "cards"("id") ON DELETE CASCADE,
+	"target_board_id" text REFERENCES "boards"("id") ON DELETE CASCADE,
+	CONSTRAINT "notepad_links_source_id_target_type_target_id_pk" PRIMARY KEY("source_id","target_type","target_id"),
+	CONSTRAINT "notepad_links_single_target_chk" CHECK (
+		num_nonnulls("target_user_id", "target_notepad_id", "target_card_id", "target_board_id") = 1
+		AND (
+			("target_type" = 'user' AND "target_user_id" = "target_id") OR
+			("target_type" = 'notepad' AND "target_notepad_id" = "target_id") OR
+			("target_type" = 'card' AND "target_card_id" = "target_id") OR
+			("target_type" = 'board' AND "target_board_id" = "target_id")
+		)
+	)
 );
 --> statement-breakpoint
 CREATE INDEX "links_target" ON "notepad_links" USING btree ("target_type","target_id");
@@ -303,10 +316,10 @@ CREATE INDEX "links_target" ON "notepad_links" USING btree ("target_type","targe
 -- 8. Notifications & Edit Locks
 CREATE TABLE "notifications" (
 	"id" text PRIMARY KEY NOT NULL,
-	"workspace_id" text NOT NULL,
+	"workspace_id" text NOT NULL REFERENCES "workspaces"("id") ON DELETE CASCADE,
 	"user_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
 	"type" "notification_type" NOT NULL,
-	"actor_id" text NOT NULL REFERENCES "user"("id") ON DELETE CASCADE,
+	"actor_id" text REFERENCES "user"("id") ON DELETE SET NULL,
 	"notepad_id" text REFERENCES "notepads"("id") ON DELETE CASCADE,
 	"card_id" text REFERENCES "cards"("id") ON DELETE CASCADE,
 	"read_at" bigint,
@@ -533,6 +546,10 @@ BEGIN
       RAISE EXCEPTION 'scope_write_conflict' USING ERRCODE = '23514';
     END IF;
   ELSIF TG_TABLE_NAME = 'notepad_links' THEN
+    NEW.target_user_id := CASE WHEN NEW.target_type = 'user' THEN NEW.target_id ELSE NULL END;
+    NEW.target_notepad_id := CASE WHEN NEW.target_type = 'notepad' THEN NEW.target_id ELSE NULL END;
+    NEW.target_card_id := CASE WHEN NEW.target_type = 'card' THEN NEW.target_id ELSE NULL END;
+    NEW.target_board_id := CASE WHEN NEW.target_type = 'board' THEN NEW.target_id ELSE NULL END;
     IF NOT EXISTS (
       SELECT 1 FROM notepads source WHERE source.id = NEW.source_id AND (
         (NEW.target_type = 'notepad' AND EXISTS (

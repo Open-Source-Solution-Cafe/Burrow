@@ -17,7 +17,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { toast } from 'sonner';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
@@ -42,6 +42,7 @@ import {
   useSystemVersion,
 } from '../../lib/queries';
 import { THEME_LABELS, useTheme, type BurrowTheme } from '../../lib/theme';
+import { useResizableWidth } from '../../lib/useResizableWidth';
 import { useTranslation } from '../../lib/i18n';
 import { NotepadTree } from '../notepads/NotepadTree';
 import { NotificationsBell } from './NotificationsBell';
@@ -64,7 +65,7 @@ interface SidebarProps {
 
 type RailTab = 'overview' | 'notepads' | 'boards' | 'tasks' | 'members' | 'trash' | 'search';
 
-const THEME_OPTIONS: BurrowTheme[] = ['basalt', 'modern', 'light'];
+const THEME_OPTIONS: BurrowTheme[] = ['modern', 'basalt', 'light'];
 
 export function Sidebar({ onCloseMobile }: SidebarProps) {
   const navigate = useNavigate();
@@ -198,49 +199,18 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
     }
   });
 
-  // Resizable Tier-2 secondary panel width
-  const [secondaryPanelWidth, setSecondaryPanelWidth] = useState<number>(() => {
-    try {
-      const saved = localStorage.getItem('sidebar:secondary-width');
-      if (saved) {
-        const val = parseInt(saved, 10);
-        if (!isNaN(val) && val >= 220 && val <= 480) return val;
-      }
-    } catch {
-      /* ignore */
-    }
-    return 260;
+  const modernSidebar = useResizableWidth({
+    storageKey: 'sidebar:modern-width',
+    defaultWidth: 232,
+    minWidth: 200,
+    maxWidth: 480,
   });
-  const [isResizingSecondary, setIsResizingSecondary] = useState(false);
-  const secondaryResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  useEffect(() => {
-    if (!isResizingSecondary) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!secondaryResizeRef.current) return;
-      const delta = e.clientX - secondaryResizeRef.current.startX;
-      const newWidth = Math.max(220, Math.min(480, secondaryResizeRef.current.startWidth + delta));
-      setSecondaryPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizingSecondary(false);
-      secondaryResizeRef.current = null;
-      try {
-        localStorage.setItem('sidebar:secondary-width', String(secondaryPanelWidth));
-      } catch {
-        /* ignore */
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isResizingSecondary, secondaryPanelWidth]);
+  const secondaryPanel = useResizableWidth({
+    storageKey: 'sidebar:secondary-width',
+    defaultWidth: 260,
+    minWidth: 220,
+    maxWidth: 480,
+  });
 
   const toggleNotepads = () => {
     setNotepadsOpen((prev) => {
@@ -416,7 +386,27 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   return (
     <>
       {isModern ? (
-        <aside className="w-full md:w-[232px] h-full md:h-screen flex flex-col bg-side text-side-text border-r border-hair py-3.5 px-2 gap-0.5 select-none overflow-hidden">
+        <aside
+          style={{ '--modern-sidebar-width': `${modernSidebar.width}px` } as CSSProperties}
+          className={`relative w-full md:w-[var(--modern-sidebar-width)] h-full md:h-screen flex flex-col bg-side text-side-text border-r border-hair py-3.5 px-2 gap-0.5 select-none overflow-hidden ${
+            modernSidebar.isResizing ? '' : 'transition-[width] duration-75'
+          }`}
+        >
+          {/* Resizer Handle on right border */}
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('sidebar.resizePanel')}
+            aria-valuemin={200}
+            aria-valuemax={480}
+            aria-valuenow={modernSidebar.width}
+            tabIndex={0}
+            title={t('sidebar.resizePanel')}
+            onMouseDown={modernSidebar.startResize}
+            onDoubleClick={modernSidebar.resetWidth}
+            onKeyDown={modernSidebar.handleKeyDown}
+            className="hidden md:block absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/40 active:bg-accent focus:outline-none focus-visible:bg-accent transition z-20"
+          />
           {/* Workspace header */}
           <div className="flex items-center justify-between px-2.5 pt-0.5 pb-3 gap-1">
             <div className="flex-1 min-w-0">
@@ -502,7 +492,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           </div>
 
           {/* Scrollable sections */}
-          <div className="flex-1 overflow-y-auto space-y-1">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1">
             {/* Favorites */}
             <div>
               <div className="px-2.5 pt-4 pb-1.5 font-eyebrow flex items-center justify-between">
@@ -729,7 +719,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               />
               <span className="truncate font-medium">{account?.user?.name || 'Account'}</span>
             </button>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 shrink-0">
               <LanguageSelector className="hidden sm:inline-flex" />
               <ThemeToggle />
               <button
@@ -944,9 +934,9 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           {/* Tier 2: Contextual Panel (Changes based on Left Rail, resizable)   */}
           {/* ================================================================= */}
           <div
-            style={{ width: `${secondaryPanelWidth}px` }}
+            style={{ width: `${secondaryPanel.width}px` }}
             className={`relative shrink-0 bg-side border-r border-hair py-3.5 px-2 flex flex-col text-side-text ${
-              isResizingSecondary ? 'select-none' : 'transition-[width] duration-75'
+              secondaryPanel.isResizing ? 'select-none' : 'transition-[width] duration-75'
             }`}
           >
             {/* Resizer Handle on right border */}
@@ -954,21 +944,15 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               role="separator"
               aria-orientation="vertical"
               aria-label={t('sidebar.resizePanel')}
+              aria-valuemin={220}
+              aria-valuemax={480}
+              aria-valuenow={secondaryPanel.width}
+              tabIndex={0}
               title={t('sidebar.resizePanel')}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                secondaryResizeRef.current = { startX: e.clientX, startWidth: secondaryPanelWidth };
-                setIsResizingSecondary(true);
-              }}
-              onDoubleClick={() => {
-                setSecondaryPanelWidth(260);
-                try {
-                  localStorage.setItem('sidebar:secondary-width', '260');
-                } catch {
-                  /* ignore */
-                }
-              }}
-              className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/40 active:bg-accent transition z-20"
+              onMouseDown={secondaryPanel.startResize}
+              onDoubleClick={secondaryPanel.resetWidth}
+              onKeyDown={secondaryPanel.handleKeyDown}
+              className="hidden md:block absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize hover:bg-accent/40 active:bg-accent focus:outline-none focus-visible:bg-accent transition z-20"
             />
 
             <div className="flex items-center justify-between px-3 pt-0.5 pb-2 gap-1">
