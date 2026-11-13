@@ -38,6 +38,39 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
     return rows.length > 0;
   }
 
+  async releaseBootstrap(email: string): Promise<boolean> {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized) return false;
+    const rows = await this.db
+      .update(bootstrapState)
+      .set({ status: 'empty', claimEmail: null })
+      .where(
+        and(
+          eq(bootstrapState.id, 1),
+          eq(bootstrapState.status, 'claimed'),
+          eq(bootstrapState.claimEmail, normalized),
+          sql`NOT EXISTS (SELECT 1 FROM workspaces)`,
+        ),
+      )
+      .returning({ id: bootstrapState.id });
+    return rows.length > 0;
+  }
+
+  async resetBootstrapClaim(): Promise<boolean> {
+    const rows = await this.db
+      .update(bootstrapState)
+      .set({ status: 'empty', claimEmail: null })
+      .where(
+        and(
+          eq(bootstrapState.id, 1),
+          eq(bootstrapState.status, 'claimed'),
+          sql`NOT EXISTS (SELECT 1 FROM workspaces)`,
+        ),
+      )
+      .returning({ id: bootstrapState.id });
+    return rows.length > 0;
+  }
+
   async listByUser(userId: string): Promise<WorkspaceMembership[]> {
     return this.db
       .select({

@@ -8,7 +8,13 @@ import {
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Infrastructure } from './infrastructure/types';
-import { securityHeaders, bodyLimit, csrfProtection, resolveClientIp } from './middleware/security';
+import {
+  securityHeaders,
+  bodyLimit,
+  csrfProtection,
+  rateLimiter,
+  resolveClientIp,
+} from './middleware/security';
 import {
   createIdentityMiddleware,
   createExplicitWorkspaceMiddleware,
@@ -228,28 +234,42 @@ export function createCoreApp(
         });
       })
 
-      .get('/api/invites/info/:token', async (c) => {
-        const token = c.req.param('token');
-        const invite = await invites.getInviteInfo(token);
-        c.header('Cache-Control', 'private, no-store');
-        return c.json({
-          valid: true,
-          token,
-          email: invite.email,
-          role: invite.role,
-          workspaceId: invite.workspaceId,
-          workspaceName: invite.workspaceName,
-          userExists: invite.userExists,
-          expiresAt: invite.expiresAt,
-        });
-      })
+      .get(
+        '/api/invites/info/:token',
+        rateLimiter({ windowMs: 60_000, maxRequests: 30, prefix: 'invites-info', env: infra.env }),
+        async (c) => {
+          const token = c.req.param('token');
+          const invite = await invites.getInviteInfo(token);
+          c.header('Cache-Control', 'private, no-store');
+          return c.json({
+            valid: true,
+            token,
+            email: invite.email,
+            role: invite.role,
+            workspaceId: invite.workspaceId,
+            workspaceName: invite.workspaceName,
+            userExists: invite.userExists,
+            expiresAt: invite.expiresAt,
+          });
+        },
+      )
 
-      .post('/api/invites/accept', zValidator('json', inviteTokenSchema), async (c) => {
-        const identity = c.get('identity');
-        if (!identity) throw httpError(401, 'unauthorized', 'Authentication required');
-        const result = await invites.acceptInvite(identity.userId, c.req.valid('json').token);
-        return c.json({ ok: true, ...result });
-      })
+      .post(
+        '/api/invites/accept',
+        rateLimiter({
+          windowMs: 60_000,
+          maxRequests: 20,
+          prefix: 'invites-accept',
+          env: infra.env,
+        }),
+        zValidator('json', inviteTokenSchema),
+        async (c) => {
+          const identity = c.get('identity');
+          if (!identity) throw httpError(401, 'unauthorized', 'Authentication required');
+          const result = await invites.acceptInvite(identity.userId, c.req.valid('json').token);
+          return c.json({ ok: true, ...result });
+        },
+      )
 
       .route('/api/workspaces', workspaceRoutes)
       .route('/api/workspaces/:wid/projects', projectRoutes)
@@ -425,11 +445,10 @@ export function createCoreApp(
 
       .post(
         '/api/auth/bootstrap/recover',
-        zValidator('json', z.object({ bootstrapToken: z.string() })),
+        zValidator('json', z.object({ bootstrapToken: z.string(), resetClaim: z.boolean().optional() })),
         async (c) => {
           const identity = c.get('identity');
-          if (!identity?.email) throw httpError(401, 'unauthorized', 'Authentication required');
-          const { bootstrapToken: providedToken } = c.req.valid('json');
+          const { bootstrapToken: providedToken, resetClaim } = c.req.valid('json');
           if (
             !bootstrapToken ||
             bootstrapToken.length < 16 ||
@@ -437,6 +456,25 @@ export function createCoreApp(
           ) {
             throw httpError(403, 'invalid_bootstrap_token', 'Valid bootstrap token required');
           }
+
+          if (resetClaim) {
+            const didReset = await repositories.workspaces.resetBootstrapClaim?.();
+            if (!identity?.email) {
+              if (!didReset) {
+                throw httpError(
+                  409,
+                  'bootstrap_unavailable',
+                  'No pending bootstrap claim can be reset',
+                );
+              }
+              return c.json({ ok: true, reset: true });
+            }
+            if (didReset) {
+              await repositories.workspaces.claimBootstrap(identity.email.trim().toLowerCase());
+            }
+          }
+
+          if (!identity?.email) throw httpError(401, 'unauthorized', 'Authentication required');
           const workspace = await repositories.workspaces.completeBootstrap(
             identity.email.trim().toLowerCase(),
             createWorkspacePlan({

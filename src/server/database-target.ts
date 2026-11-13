@@ -82,7 +82,7 @@ export function parseCliArgs(
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
-    if (arg === '--') continue;
+    if (!arg || arg === '--') continue;
 
     if (!arg.startsWith('-')) {
       positionals.push(arg);

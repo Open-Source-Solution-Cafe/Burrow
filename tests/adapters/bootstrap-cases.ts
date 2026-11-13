@@ -9,7 +9,7 @@ interface Fixture {
 }
 
 export function bootstrapCases(fixture: () => Fixture) {
-  it('claims once, rolls failures back and completes exactly one starter graph with authenticated retry', async () => {
+  it('claims once, supports stale-claim release/reset while empty, rolls failures back, and completes one starter graph', async () => {
     const { workspaces, query, createUser } = fixture();
     const userId = crypto.randomUUID(),
       otherId = crypto.randomUUID(),
@@ -17,6 +17,22 @@ export function bootstrapCases(fixture: () => Fixture) {
     const email = `${userId}@example.com`;
     await createUser(userId, email, now);
     await createUser(otherId, email.toUpperCase(), now);
+
+    // Stale/mistyped claim recovery when 0 workspaces exist (#012)
+    expect(await workspaces.claimBootstrap('mistyped@example.com')).toBe(true);
+    expect(await workspaces.claimBootstrap(email)).toBe(false);
+    expect(await workspaces.resetBootstrapClaim?.()).toBe(true);
+    expect(await query('SELECT status FROM bootstrap_state WHERE id = 1')).toEqual([
+      { status: 'empty' },
+    ]);
+
+    expect(await workspaces.claimBootstrap(email)).toBe(true);
+    expect(await workspaces.releaseBootstrap?.('wrong@example.com')).toBe(false);
+    expect(await workspaces.releaseBootstrap?.(email)).toBe(true);
+    expect(await query('SELECT status FROM bootstrap_state WHERE id = 1')).toEqual([
+      { status: 'empty' },
+    ]);
+
     expect(await workspaces.claimBootstrap(email)).toBe(true);
     const claims = await Promise.all([
       workspaces.claimBootstrap(email),
@@ -57,5 +73,7 @@ export function bootstrapCases(fixture: () => Fixture) {
     expect(await query('SELECT id FROM notepads')).toHaveLength(1);
     expect(await workspaces.completeBootstrap(email, foreign)).toBeNull();
     expect(await workspaces.claimBootstrap(email)).toBe(false);
+    expect(await workspaces.resetBootstrapClaim?.()).toBe(false);
+    expect(await workspaces.releaseBootstrap?.(email)).toBe(false);
   });
 }

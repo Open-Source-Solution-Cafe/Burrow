@@ -35,7 +35,8 @@
     "db:generate:postgres": "drizzle-kit generate --config drizzle.postgres.config.ts",
     "inventory:storage": "tsx scripts/inventory-storage.mjs",
     "test": "vitest run",
-    "logs": "wrangler tail",
+    "logs": "wrangler tail --config wrangler.local.jsonc",
+    "logs:staging": "wrangler tail --config wrangler.staging.local.jsonc",
     "format": "prettier --write ."
   },
   "dependencies": {

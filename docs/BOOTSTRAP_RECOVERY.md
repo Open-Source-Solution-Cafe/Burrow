@@ -28,11 +28,20 @@ shared command history.
 
 If signup failed before an account was created, retry signup using the **same
 email** and bootstrap token. A reservation does not expire automatically. If
-the reserved email was mistyped or its account cannot be authenticated, there is
-currently no supported automatic reassignment or claim-reset command. Keep the
-service in maintenance, preserve a backup, and investigate with the deployment
-operator; do not edit or delete the reservation or create an owner by hand. A
-stale in-flight signup could otherwise finish against a changed claim.
+the reserved email was mistyped or its original account cannot be authenticated
+while zero workspaces exist (`workspaces` count is `0`), an operator holding the
+`BOOTSTRAP_TOKEN` can safely clear the stale `claimed` reservation:
+
+```bash
+curl -X POST https://your-burrow-domain.example/api/auth/bootstrap/recover \
+  -H "Content-Type: application/json" \
+  -d '{"bootstrapToken":"<BOOTSTRAP_TOKEN>","resetClaim":true}'
+```
+
+The server verifies `BOOTSTRAP_TOKEN` in constant time and resets `bootstrap_state`
+back to `'empty'` only when `status = 'claimed'` and zero workspaces exist (`409`
+if initialization is already complete). Do not edit `bootstrap_state` or create
+an owner row directly via SQL while requests are in flight.
 
 ## Check an existing database before migration
 

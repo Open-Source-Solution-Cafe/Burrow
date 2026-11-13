@@ -991,5 +991,43 @@ describe('Security Contract Suite', () => {
       );
       expect(res.status).toBe(400);
     });
+
+    it('rejects bootstrap claim reset when token is invalid or bootstrap is already complete (#012)', async () => {
+      const badToken = await app.request(
+        'http://localhost/api/auth/bootstrap/recover',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bootstrapToken: 'wrong-token-value', resetClaim: true }),
+        },
+        env,
+      );
+      expect(badToken.status).toBe(403);
+
+      const alreadyComplete = await app.request(
+        'http://localhost/api/auth/bootstrap/recover',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bootstrapToken, resetClaim: true }),
+        },
+        env,
+      );
+      expect(alreadyComplete.status).toBe(409);
+    });
+
+    it('rate limits repeated GET /api/invites/info/:token probes (#015)', async () => {
+      let lastStatus = 0;
+      for (let i = 0; i < 35; i++) {
+        const res = await app.request(
+          'http://localhost/api/invites/info/nonexistent-probe-token',
+          {},
+          env,
+        );
+        lastStatus = res.status;
+        if (lastStatus === 429) break;
+      }
+      expect(lastStatus).toBe(429);
+    });
   });
 });

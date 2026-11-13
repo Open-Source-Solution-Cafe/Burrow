@@ -77,6 +77,7 @@ export interface IWorkspaceRepository {
   isInstanceOwner?(userId: string): Promise<boolean>;
   count(): Promise<number>;
   releaseBootstrap?(email: string): Promise<boolean>;
+  resetBootstrapClaim?(): Promise<boolean>;
 }
 
 export interface WorkspaceMembership {

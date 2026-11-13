@@ -16,7 +16,7 @@ console.log('check: decoupling');
 run('node', ['./scripts/check-decoupling.mjs']);
 
 console.log('check: lint');
-run(bin('eslint'), ['.']);
+run(bin('eslint'), ['--max-warnings=0', '.']);
 
 console.log('check: tests');
 run(bin('vitest'), ['run']);

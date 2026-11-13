@@ -167,15 +167,17 @@ Before every `pnpm run deploy`, Burrow records the current D1 Time Travel bookma
 Inspect current Time Travel bookmarks or export a full SQL snapshot:
 
 ```bash
-pnpm exec wrangler d1 time-travel info burrow --remote
-pnpm exec wrangler d1 export burrow --remote --output backup-$(date +%F).sql
+pnpm exec wrangler d1 time-travel info burrow --config wrangler.local.jsonc --remote
+pnpm exec wrangler d1 export burrow --config wrangler.local.jsonc --remote --output backup-$(date +%F).sql
 ```
 
 Restore D1 to a recorded bookmark or timestamp:
 
 ```bash
-pnpm exec wrangler d1 time-travel restore burrow --bookmark="<BOOKMARK_ID>" --remote
+pnpm exec wrangler d1 time-travel restore burrow --config wrangler.local.jsonc --bookmark="<BOOKMARK_ID>" --remote
 ```
+
+For staging resources, pass `--config wrangler.staging.local.jsonc` and database `burrow-staging`.
 
 > Note: Restoring a schema backward requires also redeploying the matching previous Worker commit so queries match the restored schema.
 

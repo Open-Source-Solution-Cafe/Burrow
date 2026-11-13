@@ -224,7 +224,7 @@ VALUES
 async function main() {
   loadEnv();
   const isInteractive = Boolean(process.stdin.isTTY);
-  const { target, isRemote, profile, demoEmail, demoPassword } = resolveDemoResetContext({
+  const { target, isRemote, profile, demoEmail, demoPassword, cleanR2 } = resolveDemoResetContext({
     args: process.argv.slice(2),
     env: process.env,
     isInteractive,

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { compareStorageInventory } from '../../src/core/adapters/storage/inventory';
+// @ts-expect-error untyped local .mjs script
+import { resolveInventoryD1Execution } from '../../scripts/inventory-storage.mjs';
 
 describe('compareStorageInventory', () => {
   it('excludes only scoped internal policy objects', () => {
@@ -31,5 +33,37 @@ describe('compareStorageInventory', () => {
       missingObjects: [],
       unregisteredObjects: [],
     });
+  });
+});
+
+describe('resolveInventoryD1Execution (#011)', () => {
+  it('selects burrow-staging and staging config when --remote --staging are passed', () => {
+    const execution = resolveInventoryD1Execution({
+      args: ['--remote', '--staging'],
+      env: {},
+      getConfigArgs: ({ profile }: { profile: { localConfigFilename: string } }) => [
+        '--config',
+        profile.localConfigFilename,
+      ],
+    });
+    expect(execution.target.kind).toBe('remote');
+    expect(execution.profile?.isStaging).toBe(true);
+    expect(execution.databaseName).toBe('burrow-staging');
+    expect(execution.d1Args).toEqual(['--config', 'wrangler.staging.local.jsonc', '--remote']);
+  });
+
+  it('selects production burrow database and wrangler.local.jsonc for --remote without --staging', () => {
+    const execution = resolveInventoryD1Execution({
+      args: ['--remote'],
+      env: {},
+      getConfigArgs: ({ profile }: { profile: { localConfigFilename: string } }) => [
+        '--config',
+        profile.localConfigFilename,
+      ],
+    });
+    expect(execution.target.kind).toBe('remote');
+    expect(execution.profile?.isStaging).toBe(false);
+    expect(execution.databaseName).toBe('burrow');
+    expect(execution.d1Args).toEqual(['--config', 'wrangler.local.jsonc', '--remote']);
   });
 });

@@ -120,7 +120,7 @@ async function main() {
   if (tt.status === 0) {
     const info = parseFirstJson(tt.stdout) ?? {};
     const bookmark = info.bookmark ?? info;
-    const line = `${new Date().toISOString()}  ${JSON.stringify(bookmark)}`;
+    const line = `${new Date().toISOString()}  [${profile.envName}:${dbName}]  ${JSON.stringify(bookmark)}`;
     const logDir = path.join(root, '.deploy-log');
     fs.mkdirSync(logDir, { recursive: true });
     fs.appendFileSync(path.join(logDir, 'rollbacks.log'), line + '\n');

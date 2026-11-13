@@ -60,6 +60,7 @@ export interface RateLimiterOptions {
   maxRequests: number;
   windowMs: number;
   prefix: string;
+  env?: Record<string, unknown>;
 }
 
 /**
@@ -77,7 +78,7 @@ export function rateLimiter(options: RateLimiterOptions) {
       }
     }
 
-    const ip = resolveClientIp(c);
+    const ip = resolveClientIp(c, { env: options.env });
     const key = `${prefix}:${ip}`;
     const existing = buckets.get(key);
 

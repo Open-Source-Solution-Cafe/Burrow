@@ -73,10 +73,26 @@ export function createNotepadRepository(db: DB): INotepadRepository {
   );
   return {
     async listByProject(scope: ProjectScope): Promise<Notepad[]> {
-      // Tree metadata only: live `notepad`-kind rows. Soft-deleted rows are
-      // served by listDeletedByProject; card bodies never appear in the tree.
+      // Tree metadata only: live `notepad`-kind rows (excludes cards, deleted, and heavy content JSON).
       const rows = await db
-        .select()
+        .select({
+          id: t.notepads.id,
+          workspaceId: t.notepads.workspaceId,
+          projectId: t.notepads.projectId,
+          parentId: t.notepads.parentId,
+          kind: t.notepads.kind,
+          title: t.notepads.title,
+          icon: t.notepads.icon,
+          coverKey: t.notepads.coverKey,
+          version: t.notepads.version,
+          position: t.notepads.position,
+          isFavorite: t.notepads.isFavorite,
+          deletedAt: t.notepads.deletedAt,
+          deletionOperationId: t.notepads.deletionOperationId,
+          createdBy: t.notepads.createdBy,
+          createdAt: t.notepads.createdAt,
+          updatedAt: t.notepads.updatedAt,
+        })
         .from(t.notepads)
         .where(
           and(
@@ -88,7 +104,12 @@ export function createNotepadRepository(db: DB): INotepadRepository {
           ),
         )
         .orderBy(asc(t.notepads.position));
-      return rows.map(mapNotepad);
+      return rows.map((row) =>
+        mapNotepad({
+          ...row,
+          content: '[]',
+        }),
+      );
     },
 
     async findByIdInScope(scope: ProjectScope, id: string): Promise<Notepad | null> {

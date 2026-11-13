@@ -54,9 +54,26 @@ export class PostgresNotepadRepository implements INotepadRepository {
   }
 
   async listByProject(scope: ProjectScope): Promise<Notepad[]> {
-    // Tree metadata only: live `notepad`-kind rows (excludes cards and deleted).
-    return this.db
-      .select()
+    // Tree metadata only: live `notepad`-kind rows (excludes cards, deleted, and heavy content JSON).
+    const rows = await this.db
+      .select({
+        id: notepads.id,
+        workspaceId: notepads.workspaceId,
+        projectId: notepads.projectId,
+        parentId: notepads.parentId,
+        kind: notepads.kind,
+        title: notepads.title,
+        icon: notepads.icon,
+        coverKey: notepads.coverKey,
+        version: notepads.version,
+        position: notepads.position,
+        isFavorite: notepads.isFavorite,
+        deletedAt: notepads.deletedAt,
+        deletionOperationId: notepads.deletionOperationId,
+        createdBy: notepads.createdBy,
+        createdAt: notepads.createdAt,
+        updatedAt: notepads.updatedAt,
+      })
       .from(notepads)
       .where(
         and(
@@ -68,6 +85,7 @@ export class PostgresNotepadRepository implements INotepadRepository {
         ),
       )
       .orderBy(notepads.position);
+    return rows.map((row) => ({ ...row, content: '[]' }));
   }
 
   async findByIdInScope(scope: ProjectScope, id: string): Promise<Notepad | null> {
