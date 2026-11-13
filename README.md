@@ -1,439 +1,163 @@
 # Burrow
 
-> _Dig in. Nest your notes._
+**Fast, self-hostable shared team workspace for rich notepads, Kanban boards, and file storage — engineered for Cloudflare Workers + D1 + R2 and Docker + PostgreSQL.**
 
-[![Hono](https://img.shields.io/badge/Hono-4.x-E36002?logo=hono&logoColor=white)](https://hono.dev/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-6.0-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
-[![Cloudflare D1](<https://img.shields.io/badge/Cloudflare-D1_(SQLite)-F38020?logo=sqlite&logoColor=white>)](https://developers.cloudflare.com/d1/)
-[![Cloudflare R2](https://img.shields.io/badge/Cloudflare-R2-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/r2/)
-[![BlockNote](https://img.shields.io/badge/Editor-BlockNote-7C3AED)](https://www.blocknotejs.org/)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
-
-A lightweight Notion-style workspace with **project separation**, **Kanban boards**, and **notepads** for taking and organising notes, plus a **slash-command menu (`/`)** and **mentions (`@`)** everywhere you type.
-
-Built with **Hono** as the core web framework. Currently optimized to run serverless on Cloudflare Workers, Cloudflare D1 (SQLite), Cloudflare R2, and React SPA, with an adapter-driven foundation already laid for standalone Node.js and PostgreSQL self-hosting.
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg)](https://vite.dev/)
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers_D1_R2-F38020.svg)](https://workers.cloudflare.com/)
+[![Docker and PostgreSQL](https://img.shields.io/badge/Docker-PostgreSQL_17-2496ED.svg)](compose.yaml)
 
 ---
 
-## Live Demo
-
-A public interactive demo instance is hosted at **[burrow.osscafe.com](https://burrow.osscafe.com)**:
-
-- **Demo URL:** [https://burrow.osscafe.com](https://burrow.osscafe.com)
-- **Demo Account:** `demo@osscafe.com`
-- **Demo Password:** `demopassword123`
-- **Automated Reset:** The demo instance automatically wipes and re-seeds back to a clean interactive state **every 2 hours**.
+![Burrow Kanban board in Modern Dark theme showing sprint columns, card priorities, subtasks, and resizable sidebar](docs/assets/screenshots/kanban-board.png)
 
 ---
 
-## Features
+## Try the Live Demo
 
-- **Multi-Workspace Isolation**: Accounts can create, own, and join multiple workspaces (`/w/:workspaceId/...`). Switch workspaces instantly from the top header switcher, rename workspaces, and invite members via email or shareable links.
-- **Role-Based Access Control**: Workspaces define distinct member permissions (`owner`, `editor`, and `viewer`). Mutating actions are restricted to editors and owners, with atomic safeguards preventing the sole owner from leaving without succession.
-- **Scoped Projects Hierarchy**: Workspaces contain separate projects (`/w/:workspaceId/p/:projectId`), with dedicated notepads, kanban boards, tags, project files, and full-text search strictly isolated to each project boundary.
-- **Dedicated Project Media Library**: Upload and manage project-scoped images (PNG, JPEG, WebP, GIF, SVG) with direct editor insertion, preview, and byte-deduplicating reuse, alongside safe YouTube embeds with interactive width sliders.
-- **Nested Notepads**: Block-based rich text editor powered by BlockNote, with emoji icons, covers, drag-and-drop tree reordering, and single-flight autosave with optimistic concurrency.
-- **Subtree Trashing & Grouped Restore**: Atomic notepad soft-delete and permanent delete across whole subtrees. Restoration uses deletion-operation IDs to ensure child notes deleted independently are never accidentally resurrected.
-- **Soft Edit Locks**: 60-second rolling locks with heartbeats on focus to prevent concurrent edit collisions, displaying read-only banners when occupied.
-- **Kanban Boards**: Drag-and-drop columns and cards, priority tags, assignees, natural language due dates (`chrono-node`), and card bodies that are notepads.
-- **Unified `/` Slash Menu**: Keyboard-driven slash menu available across notepads, card notes, and the Kanban smart quick-add input.
-- **Mentions (`@`) & Tags (`#`)**: Inline mention chips for workspace members, notepads, cards, and natural dates, with automatic in-app notifications and backlinks indexing.
-- **Smart Quick-Add**: Add cards with structured chips (`/notepad`, `/due`, `/priority`, `@assignee`, `#tag`) created atomically in single batch transactions.
-- **Workspace-Wide Aggregation**: FTS5 full-text search with highlight snippets, Command Palette (`Cmd/Ctrl+K`), My Tasks, and Notifications aggregate across all projects within the active workspace while clearly denoting their project context.
-- **Adapter-Driven Architecture**: Decoupled core business logic from platform runtimes. Pluggable adapters handle storage (R2/S3/local disk), search (SQLite FTS5/PostgreSQL tsvector), locks, and transactional email.
+Explore a live instance hosted on Cloudflare Workers, D1, and R2 (reset automatically every 2 hours):
+
+- **URL:** <https://burrow.osscafe.com>
+- **Email:** `demo@osscafe.com`
+- **Password:** `demopassword123`
+
+> Prefer to jump straight to installation? See [Quick Start](#quick-start) or the full [Deployment & Upgrades Guide](docs/DEPLOYMENT_AND_UPGRADES.md).
 
 ---
 
-## Architecture & Portability
+## Core Features & Benefits
 
-Burrow follows an adapter-driven (hexagonal) architecture where core business logic interacts strictly through unified interfaces:
+- **Workspaces & Scoped Projects**: Organize teams, notes, boards, and media cleanly inside isolated workspaces and projects (`owner`, `editor`, `viewer` roles).
+- **Rich Block Notepads & Nested Pages**: Slash commands, checklists, code blocks, callouts, embedded media, document outlines, and hierarchical sub-pages. Uses lease-based document edit locking so team members take turns editing a notepad safely without conflicting overwrites (rather than simultaneous real-time co-editing).
+- **Kanban, List & Calendar Views**: Drag-and-drop cards across columns with WIP limits, priorities, due dates, subtasks, tags, comments, and quick-add shortcuts.
+- **Instant Full-Text Search (`Cmd+K` / `Ctrl+K`)**: Command palette backed by SQLite FTS5 or PostgreSQL `tsvector` indexes across notepads and board cards.
+- **Integrated File & Media Library**: Upload images, videos, and project attachments to **Cloudflare R2**, **S3-compatible storage**, or **local disk** with automatic quota and type validation.
+- **Multilingual & Themeable UI**: Instant client-side switching across **English**, **Spanish**, and **French**, plus three curated built-in themes (`Modern Dark`, `Basalt Dark`, `Basalt Light`).
 
-- **Cloudflare (Current Primary Target):** Production builds run natively on Cloudflare Workers, D1 (distributed SQLite), R2 (object storage), and Worker static assets for SPA delivery.
-- **Node.js & PostgreSQL (Groundwork Laid):** Concrete adapter implementations for PostgreSQL (`src/core/adapters/db/postgres/`) and filesystem/S3 storage already exist. The app factory (`createCoreApp`) compiles identically for Node (`src/server/index.ts`), paving the way for containerized Docker deployments.
-- **Pluggable Transactional Email:** Email sending is completely abstract (`IEmailProvider` in `src/core/adapters/email.ts`). It is wired for **Resend** by default (with a zero-config local console fallback), but swapping to Postmark, Amazon SES, SendGrid, or custom SMTP only requires writing a single adapter file—zero core app or route changes needed.
+<details open>
+<summary><strong>Screenshots: Workspace Dashboard & Nested Document Editor</strong></summary>
 
-### Workspace & Project Scoping Model
+![Burrow project dashboard overview in Modern Dark theme with Notepads, Kanban Boards, and customizable sidebar width](docs/assets/screenshots/dashboard-modern.png)
 
-Burrow organizes all application data into a strict hierarchy:
-`Account -> Workspace Membership -> Project -> Resources (Notepads, Boards, Cards, Files, Tags)`
+![Burrow rich block document editor showing Engineering Architecture document and nested sub-page tree in the sidebar](docs/assets/screenshots/editor-nested.png)
 
-1. **Account Identity vs. Workspace Membership:** User accounts exist independently from individual workspaces. A user can own or join multiple workspaces with different roles (`owner`, `editor`, `viewer`). Zero-membership accounts can still join via invite or provision a new starter workspace.
-2. **Project Scoping:** Projects inherit their workspace's membership list. Within each project, notepads, kanban boards, tags, project media files, backlinks, and content references remain strictly isolated.
-3. **Cross-Project Views:** High-level overview tools (the global Command Palette `Cmd/Ctrl+K`, My Tasks, and Notifications) aggregate across all projects within the active workspace, with each result clearly badged with its target project name.
-4. **Project Media Library:** File uploads are tied to their parent project and persisted via Cloudflare R2 or local disk storage. The project library enables notepads and cards to reuse existing project assets without duplicating storage bytes.
+</details>
 
 ---
 
-## Getting Started
+## Quick Start
 
 ### Prerequisites
 
-- Node.js 20+
-- `pnpm`
-- Cloudflare Wrangler CLI logged into your account (`pnpm exec wrangler login`)
+- **Node.js `^20.19.0` or `>=22.12.0`** (required by Vite 8) and **pnpm 10+** (or **Docker** for container self-hosting)
+- A **Cloudflare account** (for edge deployment with [R2 Object Storage activated](docs/DEPLOYMENT_AND_UPGRADES.md#prerequisites))
 
-### Local Development (Unified Node & Worker Runtimes)
-
-Burrow unifies local development on a single SQLite database (`./data/burrow.db`) and local uploads directory (`./data/uploads`), while also supporting Miniflare under `./data`:
-
-1. **Install dependencies:**
-
-   ```bash
-   pnpm install
-   ```
-
-2. **Run local dev environment (`pnpm dev`):**
-
-   ```bash
-   pnpm dev
-   ```
-
-   `pnpm dev` runs the Node server alongside Vite:
-   - Starts Node backend server (Hono + better-sqlite3 + local disk storage) on `http://127.0.0.1:8787`.
-   - Starts Vite frontend dev server (with HMR) on `http://localhost:3005`, proxying `/api` requests to `:8787`.
-   - Uses `./data/burrow.db` for SQLite data and `./data/uploads` for uploaded files.
-   - Automatically creates parent directories and applies all unapplied `migrations/*.sql` on startup.
-   - Prints active URLs and `BOOTSTRAP_TOKEN` to the terminal for owner signup.
-
-3. **Run Cloudflare Worker runtime locally (`pnpm run dev:worker`):**
-
-   ```bash
-   pnpm run dev:worker
-   ```
-
-   Runs `wrangler dev --persist-to ./data` on `:8787` alongside Vite on `:3005`. Miniflare D1 and R2 state persists under `./data`. Automatically ensures D1 migrations are applied before launching.
-
-4. **Run compiled production server (`pnpm start`):**
-
-   ```bash
-   pnpm start
-   ```
-
-   Runs `dist/server.mjs` on `http://localhost:3005`, serving both API endpoints and production SPA assets from `dist/web` backed by `./data/burrow.db` and `./data/uploads`. (Run `pnpm run build` first if not already compiled).
-
-5. **Reset local database & uploads (`pnpm run reset`):**
-
-   ```bash
-   pnpm run reset
-   ```
-
-   Wipes `./data/burrow.db`, clears `./data/uploads`, reapplies all migrations cleanly from scratch, and rebuilds the project bundles (`pnpm run build`).
-
-6. **Tear down local development state (`pnpm run teardown`):**
-   ```bash
-   pnpm run teardown
-   ```
-   Completely removes `./data` (SQLite database, Miniflare state, and uploads) and `./dist` only.
-
-> [!NOTE]
-> The database starts completely clean (0 users, 0 workspaces). Sign up via `http://localhost:3005` using the `BOOTSTRAP_TOKEN` printed in your console. If you want demo mock data for testing, run `pnpm seed`. To wipe test data and return to a clean state at any time, run `pnpm run reset`.
->
-> **D1 Limits & Restore Idempotency**: Cloudflare D1 enforces a limit of 100 bound parameters per SQL statement. All bulk queries and mutations are chunked via parameter budgeting to guarantee safety. Restore operations on large boards and notepad trees are designed to be completely idempotent: if an operation is ever interrupted midway, re-running restore on the item safely finishes restoring remaining cards, notepads, and FTS search indexes without duplicate entries or errors.
-
----
-
-## Self-Hosting with PostgreSQL
-
-Burrow supports running as a standalone Node.js server backed by PostgreSQL and local disk or S3 object storage.
-
-### 1. One-Command Turnkey Deployment (Docker Compose)
-
-The fastest way to self-host Burrow is with Docker Compose, which boots Burrow and a dedicated PostgreSQL database with persistent storage volumes:
+### Deploy to Cloudflare in 4 Commands
 
 ```bash
-docker compose up -d
-```
-
-This starts:
-
-- **Burrow application**: Listening on `http://localhost:3005` (or your configured `$PORT`).
-- **PostgreSQL 16**: Connected on the private internal Docker network.
-- **Persistent storage**: Named volumes `postgres_data` (database records) and `burrow_uploads` (uploaded images and attachments).
-
-To customize secrets for your instance, provide a `.env` file or export environment variables:
-
-```bash
-# Public URL where Burrow is accessed
-BETTER_AUTH_URL=https://notes.example.com
-
-# Secure 32+ character auth encryption secret
-BETTER_AUTH_SECRET=a-secure-random-string-at-least-32-chars-long
-
-# One-time bootstrap token (16+ chars) for initial owner workspace creation
-BOOTSTRAP_TOKEN=a-secure-random-bootstrap-token-16-chars-min
-```
-
-Open your configured URL and create the initial owner account using the `BOOTSTRAP_TOKEN`.
-
-### 2. Running Standalone on PostgreSQL (Direct Node.js)
-
-To run Burrow directly on a host or VM connected to an existing PostgreSQL database:
-
-1. **Configure Environment Variables (`.env` or process environment):**
-
-   ```bash
-   # Database connection (postgres:// or postgresql://)
-   DATABASE_URL=postgres://burrow:password@localhost:5432/burrow
-
-   # Server and auth settings
-   PORT=3005
-   BETTER_AUTH_URL=https://notes.example.com
-   BETTER_AUTH_SECRET=a-secure-random-string-at-least-32-chars-long
-   BOOTSTRAP_TOKEN=a-secure-random-bootstrap-token-16-chars-min
-
-   # Persistent storage directory for uploads
-   LOCAL_STORAGE_PATH=./data/uploads
-
-   # Optional: disable auto-migration if handled in a separate pipeline
-   DATABASE_MIGRATE=true
-   ```
-
-2. **Database Migrations:**
-   By default, Burrow automatically applies all unapplied PostgreSQL migrations on startup from `migrations/postgres/`.
-
-   To execute database migrations in an isolated pre-flight or release step without starting the HTTP web listener:
-
-   ```bash
-   node dist/server.mjs --migrate
-   ```
-
-   The migration command connects, applies pending migrations atomically, and exits with code `0` on success or code `1` on failure.
-
-3. **Build & Start Server:**
-   ```bash
-   # Build web SPA and bundle Node server
-   pnpm run build
-
-   # Start production Node server
-   pnpm start
-   ```
-
----
-
-## Deployment & Cloudflare Setup
-
-Burrow deploys entirely on Cloudflare Workers, Cloudflare D1 (SQLite), and Cloudflare R2 using the Wrangler CLI. All scripts auto-discover remote resources and output generated credentials directly to the console—no `.env` files are written or required.
-
-> [!NOTE]
-> **Use `pnpm run` for scripts**: `setup` and `deploy` are reserved built-in commands in the `pnpm` CLI (`pnpm setup` installs PATH binaries and `pnpm deploy` deploys monorepo workspaces). To run the project's scripts, always invoke them as **`pnpm run setup`** and **`pnpm run deploy`**.
-
-### 1. Cloudflare Login & `workers.dev` Subdomain Setup
-
-Before deploying to Cloudflare Workers for the first time, your Cloudflare account must have a registered `*.workers.dev` subdomain:
-
-1. **Log in to Cloudflare Wrangler** (or let `pnpm run setup` prompt you automatically):
-   ```bash
-   pnpm exec wrangler login
-   ```
-2. **Register your `workers.dev` subdomain**:
-   - Navigate to the [Cloudflare Dashboard](https://dash.cloudflare.com/).
-   - Go to **Compute** > **Workers & Pages**.
-   - On the right-hand panel under **Account details**, locate **Subdomain** (or click **Create application** > **Create Worker** to trigger the subdomain setup prompt).
-   - Enter your preferred subdomain (e.g., `yourname.workers.dev`) and click **Save**.
-
-### 2. One-Command Provisioning & Deployment (`pnpm run setup -r`)
-
-To automatically provision or discover your remote Cloudflare D1 database and R2 bucket, apply remote migrations, build, deploy the Worker, upload secrets, and run a live health check in a single command:
-
-```bash
+git clone https://github.com/Open-Source-Solution-Cafe/Burrow.git
+cd Burrow
+pnpm install
 pnpm run setup -r
 ```
 
-Flags available:
+The interactive 10-stage setup verifies your environment, authenticates Wrangler, provisions D1 and R2 if missing, applies SQL migrations safely, deploys the Worker + SPA, configures Worker secrets, verifies live health/auth endpoints, and displays your **Production URL** alongside a one-time **`BOOTSTRAP_TOKEN`** printed only on initial setup so you can register the first Owner account (`BETTER_AUTH_SECRET` is never printed to logs or stdout).
 
-- `-r`, `--remote`: Target remote Cloudflare production (required to provision remote infrastructure).
-- `--dry-run`: Print every command without executing it.
-- `--domain <domain>`: Deploy to a custom domain already configured on Cloudflare DNS.
-- `--name <worker-name>`: Deploy under a custom Worker name.
-
-Upon completion, `pnpm run setup` outputs all URLs, resource IDs, and generated secrets directly to the console (nothing is written to `.env`):
-
-```text
-======================================================
-Setup complete! (All values output to console only)
-  Production URL:     https://burrow.<your-subdomain>.workers.dev
-  D1 Database:        burrow (<database-uuid>)
-  R2 Bucket:          burrow-files
-  BETTER_AUTH_URL:    https://burrow.<your-subdomain>.workers.dev
-  BETTER_AUTH_SECRET: <generated-secret>
-  BOOTSTRAP_TOKEN:    <one-time-token>
-======================================================
-```
-
-Open the Production URL and register your initial Owner account using the `BOOTSTRAP_TOKEN` printed in the console.
-
-For interrupted owner signup and bootstrap migration checks, see the
-[bootstrap recovery guide](docs/BOOTSTRAP_RECOVERY.md).
-
-### 3. Subsequent Deployments (`pnpm run deploy`)
-
-For all future releases and updates, run:
+### Try Locally in Development
 
 ```bash
-pnpm run deploy
+pnpm run setup
+pnpm dev
 ```
 
-This release pipeline automatically:
-
-1. Executes the verification gate (`typecheck`, `check-basalt`, `eslint`, and all unit/API test suites).
-2. Builds the production SPA bundle (`vite build`).
-3. Captures a Cloudflare D1 Time Travel snapshot bookmark to `.deploy-log/rollbacks.log` as a safe rollback point.
-4. Applies any pending remote D1 migrations (`migrations/`).
-5. Deploys updated code and assets with `wrangler deploy`.
-6. Executes a live `/api/health` smoke test.
-
-### 4. Transactional Email Setup (Resend & Pluggable Providers)
-
-Burrow features a provider-agnostic email adapter architecture (`src/core/adapters/email.ts`). While wired for **Resend** by default (with native `fetch` and zero SDK bloat), swapping or adding new providers (such as Postmark, Amazon SES, SendGrid, or custom SMTP) only requires implementing `IEmailProvider` and registering it in the factory—no route handlers or business logic ever touch provider-specific code:
-
-- **Zero-config fallback:** If `RESEND_API_KEY` is not set, invites log to the terminal console (`[email:console]`) and remain instantly shareable via the 1-click **Copy Link** button in the UI.
-- **Production delivery:** Emails are sent asynchronously via Resend with responsive HTML buttons, copyable link fallbacks, and plain-text multipart alternatives.
-
-To enable live email delivery on your production deployment:
-
-1. **Upload your Resend API key to Cloudflare Secrets:**
-   Obtain an API key from [resend.com/api-keys](https://resend.com/api-keys) (starts with `re_`), then run:
-
-   ```bash
-   pnpm exec wrangler secret put RESEND_API_KEY
-   ```
-
-   Paste your API key when prompted:
-
-   ```text
-   ✔ Enter a secret value: re_123456789_abcdefghijklmnopqrstuvwxyz
-   ✨ Success! Created secret RESEND_API_KEY
-   ```
-
-2. **Configure your verified sender address:**
-   Run:
-
-   ```bash
-   pnpm exec wrangler secret put EMAIL_FROM
-   ```
-
-   Paste your sender address when prompted:
-
-   ```text
-   ✔ Enter a secret value: Burrow <notify@yourverifieddomain.com>
-   ✨ Success! Created secret EMAIL_FROM
-   ```
-
-3. **Verify domain DNS:** Ensure your sending domain has active SPF and DKIM records verified at [resend.com/domains](https://resend.com/domains). _(For initial testing before domain verification, you can set `EMAIL_FROM=Burrow <onboarding@resend.dev>`, which delivers to your Resend account email)._
-
-### 5. Rollback Procedure
-
-> [!IMPORTANT]
-> **D1 Time Travel Backup Note**: Cloudflare D1's SQL dump export (`wrangler d1 export`) does not support databases containing SQLite FTS5 virtual tables (`notepads_fts`). Burrow relies on Cloudflare D1 **Time Travel** for continuous point-in-time recovery.
-
-Every execution of `pnpm run deploy` records the active D1 Time Travel bookmark in `.deploy-log/rollbacks.log`. If a deployment introduces a regression:
-
-1. Redeploy the previous Git release with `pnpm run deploy`.
-2. Restore the remote D1 database to the recorded bookmark:
-   ```bash
-   wrangler d1 time-travel restore <db-name> --bookmark=<BOOKMARK_FROM_DEPLOY_LOG>
-   ```
-   _(Replace `<db-name>` with your database name, defaulting to `burrow` or whatever `--name` was configured)._
-
-### 6. Troubleshooting & Common Deployment Errors
-
-#### `Authentication error [code: 10000]` on D1 API endpoints
-
-- **Symptom:** When running `pnpm run deploy` or remote migrations, Wrangler outputs:
-  ```
-  X [ERROR] A request to the Cloudflare API (/accounts/.../d1/database/burrow) failed.
-    Authentication error [code: 10000]
-  ```
-- **Cause:** Cloudflare D1 requires a 36-character database UUID for remote API calls. If the database has not been created yet or Wrangler is not logged into the owning Cloudflare account, auto-discovery cannot resolve the UUID.
-- **Solution:**
-  1. Run `pnpm run setup` to automatically provision or discover the D1 database and generate the git-ignored `wrangler.local.jsonc` binding.
-  2. Or verify your database list with `pnpm exec wrangler d1 list`.
-
-#### Expired Wrangler OAuth Token
-
-- **Symptom:** API requests return authentication or authorization errors even with correct IDs.
-- **Solution:** Refresh your OAuth session by running:
-  ```bash
-  pnpm exec wrangler login
-  ```
-  and verify the active account with `pnpm exec wrangler whoami`.
+Runs the API + React app locally using SQLite (`./data/burrow.db`) and local file storage (`./data/uploads`) with zero cloud dependencies.
 
 ---
 
-## Scripts & Environment Targeting
+## Deployment Options
 
-All environment-aware scripts follow a **safe-by-default (local)** convention:
+### Option A: Cloudflare Edge (Workers + D1 + R2)
 
-- **Default (no flag)**: Targets **local** Miniflare SQLite / localhost. Safe to run at any time.
-- **`-r` or `--remote`**: Targets **remote** Cloudflare production.
+Best for zero-maintenance hosting inside Cloudflare's free-tier limits.
 
-Every command prints a prominent startup banner confirming its target:
+- **First-time install or safe retry**: `pnpm run setup -r`
+- **Custom domain** (on Cloudflare DNS): `pnpm run setup -r -- --domain notes.example.com`
+- **Dry-run preview** (prints all 10 stages cleanly): `pnpm run setup -r -- --dry-run`
+- **Safe upgrades**: `git pull && pnpm install && pnpm run deploy` (records a D1 Time Travel bookmark before running migrations, preserves all Worker secrets, and verifies `/api/health`, `/api/auth/config`, `/api/system/version`, and `/` post-deploy).
+
+> Curious about Cloudflare's native one-click deploy button? Read our engineering assessment in [Native Deploy Button Feasibility](docs/CLOUDFLARE_DEPLOY_BUTTON.md).
+
+### Option B: Docker & PostgreSQL
+
+Best for self-hosted servers, VPS environments, and Docker Compose stacks.
+
+```bash
+cp .env.example .env
+# Set a unique BETTER_AUTH_SECRET (32+ bytes) and BOOTSTRAP_TOKEN in .env
+docker compose up -d --build
+```
+
+Includes **PostgreSQL 17**, automatic schema migrations on boot, full-text search via PostgreSQL `tsvector`, and optional S3-compatible object storage. See [Deployment & Upgrades](docs/DEPLOYMENT_AND_UPGRADES.md#option-2-docker--postgresql-self-hosting) for reverse-proxy, environment, and upgrade steps.
+
+---
+
+## Internationalization & Themes
+
+- **Languages**: Built-in **English (`EN`)**, **Español (`ES`)**, and **Français (`FR`)** with one-click switching in the sidebar footer and login screen.
+- **Themes**:
+  - **Modern Dark** *(Default)* — Sleek dark workspace with a drag- and keyboard-resizable navigation sidebar (`200px`–`480px`).
+  - **Basalt Dark** — Industrial two-tier dark rail and compact workspace density.
+  - **Basalt Light** — High-contrast warm paper & ink light theme.
+- **Responsive Mobile Layout**: Collapsible navigation drawer and mobile-adapted board/editor controls.
+
+<details>
+<summary><strong>Screenshots: Basalt Dark, Basalt Light & Mobile Responsive Layout</strong></summary>
+
+![Burrow Kanban board in Basalt Dark theme featuring the two-tier navigation rail](docs/assets/screenshots/theme-basalt-dark.png)
+
+![Burrow Kanban board in Basalt Light theme with warm paper canvas and dark ink text](docs/assets/screenshots/theme-basalt-light.png)
+
+![Burrow mobile responsive board layout at 390x844 viewport with collapsible drawer trigger and search shortcut](docs/assets/screenshots/mobile-layout.png)
+
+</details>
+
+---
+
+## Architecture Overview
+
+Burrow is structured as a hexagonal core decoupled from runtime storage and transport:
 
 ```text
-======================================================
-ACTION: RESET DATABASE
-TARGET: 💻 LOCAL (Miniflare SQLite)
-======================================================
+src/
+├── core/        # Domain services, Hono routes, repositories & infrastructure contracts
+├── worker/      # Cloudflare Workers entrypoint + D1 / R2 adapters
+├── server/      # Node.js / Docker server + SQLite / PostgreSQL + S3 / local disk adapters
+└── web/         # React 19 + TanStack Router + BlockNote + Tailwind CSS SPA
 ```
 
-| Script                | Local Default (`pnpm run <cmd>`)                                                                   | Remote Production (`-r` or `--remote`)                              |
-| :-------------------- | :------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------ |
-| `pnpm dev`            | Starts Node server (`:8787`) alongside Vite (`:3005`) with SQLite (`./data/burrow.db`)             | _(Local only)_                                                      |
-| `pnpm run dev:worker` | Starts Cloudflare Worker (`:8787`) alongside Vite (`:3005`) via `wrangler dev --persist-to ./data` | _(Local only)_                                                      |
-| `pnpm start`          | Runs compiled production Node server (`dist/server.mjs`) on `:3005`                                | —                                                                   |
-| `pnpm run reset`      | Resets `./data/burrow.db`, clears `./data/uploads`, applies migrations, rebuilds                   | Prompts `"RESET-PRODUCTION"`, then wipes remote D1                  |
-| `pnpm run demo:reset` | Resets & seeds local SQLite with demo user, boards, cards & notepads                               | Prompts `"RESET-DEMO"`, then wipes and seeds remote D1              |
-| `pnpm run teardown`   | Removes `./data` and `./dist` only                                                                 | Prompts `"TEARDOWN"`, then deletes Worker, D1, and R2               |
-| `pnpm run setup`      | Installs deps, migrates the configured local SQLite database, prints dev URLs & token              | Provisions remote D1/R2, deploys Worker, uploads secrets            |
-| `pnpm run deploy`     | —                                                                                                  | Checks, builds, records D1 Time Travel snapshot, migrates & deploys |
-| `pnpm check:data`     | Verifies the data invariants against the configured local SQLite database                          | Verifies the data invariants against remote Cloudflare D1           |
-| `pnpm seed`           | Seeds the configured local SQLite database with demo workspace & cards                             | _(Local only to protect production)_                                |
-| `pnpm check`          | Full local CI gate: `tsc -b`, Basalt design guard, ESLint, and Vitest                              | —                                                                   |
-| `pnpm test`           | Runs all Vitest test suites (supports `pnpm test <path>`)                                          | —                                                                   |
-| `pnpm build`          | Production bundles (Vite to `dist/web` & Node server to `dist/server.mjs`)                         | —                                                                   |
-| `pnpm logs`           | Streams live Worker logs via `wrangler tail`                                                       | _(Remote only)_                                                     |
-| `pnpm format`         | Formats all code with Prettier                                                                     | —                                                                   |
-
-> **Basalt Design Guard (`check-basalt`)**: A fast repository linter (`scripts/check-basalt.mjs`) included in `pnpm check` that enforces design system integrity by prohibiting raw arbitrary Tailwind utility values and ensuring only curated Basalt semantic tokens are used.
-
-Local database commands use `SQLITE_PATH` and `LOCAL_STORAGE_PATH`, defaulting to
-`./data/burrow.db` and `./data/uploads`. Pass `--worker` to setup, seed, reset or
-check:data to select the local Worker persistence used by `pnpm dev:worker`.
-SQLite-only commands reject a configured `DATABASE_URL` instead of modifying a
-different database silently.
-
-The full test gate runs real D1, Node/SQLite and PostgreSQL persistence contracts.
-Have Docker running, or set `BURROW_TEST_POSTGRES_URL` to a test PostgreSQL server
-whose account can create databases. Tests create and remove an isolated database;
-the supplied database is never used as fixture data. Docker-managed containers
-bind only to loopback and are removed after the run. Pure unit tests do not start
-database containers. No browser tests are included in `pnpm check`.
-
-Multi-workspace implementation decisions, verified progress and remaining
-isolation work are tracked in [the durable checklist](docs/MULTI_WORKSPACE_PROGRESS.md).
+This separation lets you run the exact same application locally on SQLite, on Cloudflare's edge with D1 + R2, or in Docker with PostgreSQL — with schema parity tests enforcing behavioral consistency across runtimes.
 
 ---
 
-## Security Model
+## Security & Privacy
 
-- Multi-tenant workspace and project scoping enforced at all repository and routing boundaries.
-- Session middleware automatically extracts user identity, resolves active workspace membership, and verifies roles (`owner`, `editor`, `viewer`).
-- All data mutations strictly require `editor` or `owner` roles; viewers receive 403 on all mutating operations.
-- Owner departures require atomic succession (an owner cannot leave without promoting another owner).
-- Cross-project isolation: content references, embeds, backlinks, tags, and media are strictly locked to their parent project.
-- Invite tokens are stored only as SHA-256 hashes and expire after 7 days.
-- Content size is strictly validated and capped (1.5 MB limit per notepad, 5 MB per image), and D1 bound parameters are chunked under the 100-parameter threshold.
+- **Zero-Trust First-Boot Claim**: Initial Owner registration requires `BOOTSTRAP_TOKEN` paired with an atomic email reservation in `bootstrap_state`, preventing drive-by account takeovers on newly deployed public instances. Subsequent users require explicit workspace invitations.
+- **Strict Workspace & Project Isolation**: Every resource endpoint enforces workspace membership and role checks before returning data or generating media URLs.
+- **Hardened HTTP & Auth Defaults**: Powered by [Better Auth](https://www.better-auth.com/) with CSRF origin checks, security headers, body size bounds, safe upload validation, and optional Magic Link (`RESEND_API_KEY`) or Google/GitHub OAuth (completely hidden when unconfigured).
+- **Minimal Terminal Secret Exposure & Zero Telemetry**: Cryptographically random `BETTER_AUTH_SECRET` signing keys are uploaded directly to encrypted Cloudflare Worker secrets and never printed. The one-time `BOOTSTRAP_TOKEN` is shown once in the interactive initial-setup summary (preserved without reprinting on upgrades unless `--rotate-bootstrap-token` is passed) and redacted by the server in production logs. No analytics or telemetry leave your instance.
 
 ---
 
-## License & Commercial Use
+## Documentation, Contributing & License
 
-Burrow is open-source software licensed under the **[GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE)**.
+| Guide | Description |
+| :--- | :--- |
+| [Deployment, Configuration & Upgrades](docs/DEPLOYMENT_AND_UPGRADES.md) | Complete Cloudflare Workers and Docker/PostgreSQL setup, env reference, Time Travel backups, and troubleshooting |
+| [Bootstrap Recovery & Migration Checks](docs/BOOTSTRAP_RECOVERY.md) | Recovering interrupted owner setup, preflight data checks, and storage inventory |
+| [Cloudflare Deploy Button Assessment](docs/CLOUDFLARE_DEPLOY_BUTTON.md) | Technical evaluation of one-click Cloudflare provisioning requirements |
+| [Contributing Guide](CONTRIBUTING.md) | Architecture walkthrough, local dev commands, `pnpm run check:sqlite`, and screenshot automation |
+| [Changelog](CHANGELOG.md) | Version history and unreleased improvements |
 
-- **Open-Source & Self-Hosting**: You are free to inspect, modify, and self-host Burrow for personal, non-profit, or internal organizational use under the terms of the AGPL-3.0.
-- **Network Copyleft Requirement**: In accordance with Section 13 of the AGPL-3.0, if you modify Burrow and run it as a network service or SaaS, you must make the complete source code of your modified version available to all network users under the AGPL-3.0.
-- **Commercial Cloud / SaaS**: A hosted cloud service is provided by the project authors. If you require a commercial license without AGPL-3.0 copyleft obligations, please contact the maintainers.
-- **Third-Party Libraries**: Core editor capabilities are powered by [BlockNote](https://www.blocknotejs.org/), licensed under the Mozilla Public License 2.0 (MPL-2.0).
+Licensed under the [AGPL-3.0-or-later](LICENSE) license. See [CLA.md](CLA.md) for contributor licensing details.
