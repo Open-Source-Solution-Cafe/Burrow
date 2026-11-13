@@ -1,11 +1,20 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import Database from 'better-sqlite3';
+import postgres from 'postgres';
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyPostgresMigrations } from '../../src/core/adapters/db/postgres/index';
 import { openSqliteDatabase } from '../../src/server/sqlite';
 import { splitSqlStatements } from '../../src/server/sql-statements';
+
+const exec = promisify(execFile);
+const docker = async (...args: string[]) =>
+  (await exec('docker', args, { windowsHide: true, timeout: 120_000 })).stdout.trim();
 
 const directories: string[] = [];
 const root = path.resolve('.');
@@ -130,4 +139,305 @@ describe('local database CLI integration', () => {
     expect(command('check-data.mjs', filename).status).not.toBe(0);
     expect(fs.existsSync(filename)).toBe(false);
   });
+});
+
+describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => {
+  it('preserves existing workspace data, roles, content, and invariants across a forward SQLite upgrade', () => {
+    const { migrations, filename } = temporaryDatabase();
+    for (const file of fs
+      .readdirSync(path.join(root, 'migrations'))
+      .filter((name) => name.endsWith('.sql'))
+      .sort()) {
+      fs.copyFileSync(path.join(root, 'migrations', file), path.join(migrations, file));
+    }
+
+    const now = Date.now();
+    const sqliteInitial = openSqliteDatabase(filename, migrations);
+    try {
+      sqliteInitial.exec(`
+        INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES
+          ('usr_owner', 'Owner User', 'owner@upgrade.test', 1, ${now}, ${now}),
+          ('usr_editor', 'Editor User', 'editor@upgrade.test', 1, ${now}, ${now}),
+          ('usr_viewer', 'Viewer User', 'viewer@upgrade.test', 1, ${now}, ${now});
+
+        INSERT INTO workspaces (id, name, created_by, created_at)
+        VALUES ('ws_upgrade', 'Upgrade Test Workspace', 'usr_owner', ${now});
+
+        INSERT OR REPLACE INTO bootstrap_state (id, status, claim_email, user_id, workspace_id)
+        VALUES (1, 'complete', 'owner@upgrade.test', 'usr_owner', 'ws_upgrade');
+
+        INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES
+          ('ws_upgrade', 'usr_owner', 'owner', ${now}),
+          ('ws_upgrade', 'usr_editor', 'editor', ${now}),
+          ('ws_upgrade', 'usr_viewer', 'viewer', ${now});
+
+        INSERT INTO projects (id, workspace_id, name, icon, color, position, created_at, updated_at)
+        VALUES ('proj_1', 'ws_upgrade', 'Core Upgrade Project', '🚀', '#8b5cf6', 'a0', ${now}, ${now});
+
+        INSERT INTO tags (id, project_id, name, color)
+        VALUES ('tag_1', 'proj_1', 'release', '#3b82f6');
+
+        INSERT INTO notepads (id, workspace_id, project_id, parent_id, kind, title, icon, content, version, position, is_favorite, created_by, created_at, updated_at)
+        VALUES ('np_1', 'ws_upgrade', 'proj_1', NULL, 'notepad', 'Upgrade Safety Note', '📝', '[{"type":"paragraph","content":[{"type":"text","text":"Critical pre-upgrade workspace content."}]}]', 2, 'a0', 1, 'usr_owner', ${now}, ${now});
+
+        INSERT INTO notepads_fts (notepad_id, project_id, title, body)
+        VALUES ('np_1', 'proj_1', 'Upgrade Safety Note', 'Critical pre-upgrade workspace content.');
+
+        INSERT INTO notepad_tags (notepad_id, tag_id) VALUES ('np_1', 'tag_1');
+
+        INSERT INTO boards (id, workspace_id, project_id, name, icon, position, created_at, updated_at)
+        VALUES ('board_1', 'ws_upgrade', 'proj_1', 'Upgrade Board', '📋', 'a0', ${now}, ${now});
+
+        INSERT INTO board_columns (id, board_id, name, position)
+        VALUES ('col_1', 'board_1', 'In progress', 'a0');
+
+        INSERT INTO notepads (id, workspace_id, project_id, parent_id, kind, title, icon, content, version, position, is_favorite, created_by, created_at, updated_at)
+        VALUES ('np_card_1', 'ws_upgrade', 'proj_1', NULL, 'card', 'Upgrade Card Task', '🔖', '[{"type":"paragraph","content":[{"type":"text","text":"Verify task survives schema upgrade."}]}]', 1, 'a0', 0, 'usr_editor', ${now}, ${now});
+
+        INSERT INTO notepads_fts (notepad_id, project_id, title, body)
+        VALUES ('np_card_1', 'proj_1', 'Upgrade Card Task', 'Verify task survives schema upgrade.');
+
+        INSERT INTO cards (id, board_id, column_id, notepad_id, position, priority, created_at)
+        VALUES ('card_1', 'board_1', 'col_1', 'np_card_1', 'a0', 'high', ${now});
+
+        INSERT INTO card_assignees (card_id, user_id) VALUES ('card_1', 'usr_editor');
+        INSERT INTO card_subtasks (id, card_id, title, completed, position, created_at)
+        VALUES ('sub_1', 'card_1', 'Verify permissions intact', 1, 'a0', ${now});
+        INSERT INTO notepad_links (source_id, target_type, target_id)
+        VALUES ('np_card_1', 'notepad', 'np_1');
+      `);
+    } finally {
+      sqliteInitial.close();
+    }
+
+    // Add a non-destructive forward upgrade migration
+    fs.writeFileSync(
+      path.join(migrations, '0001_add_project_archived_note.sql'),
+      `ALTER TABLE projects ADD COLUMN upgrade_marker TEXT;
+       UPDATE projects SET upgrade_marker = 'v2-migrated' WHERE id = 'proj_1';`,
+    );
+
+    const sqliteUpgraded = openSqliteDatabase(filename, migrations);
+    try {
+      const ledger = sqliteUpgraded
+        .prepare('SELECT filename FROM _migrations ORDER BY filename')
+        .all() as { filename: string }[];
+      expect(ledger.map((r) => r.filename)).toEqual([
+        '0000_baseline.sql',
+        '0001_add_project_archived_note.sql',
+      ]);
+
+      const roles = sqliteUpgraded
+        .prepare('SELECT user_id, role FROM members WHERE workspace_id = ? ORDER BY user_id')
+        .all('ws_upgrade');
+      expect(roles).toEqual([
+        { user_id: 'usr_editor', role: 'editor' },
+        { user_id: 'usr_owner', role: 'owner' },
+        { user_id: 'usr_viewer', role: 'viewer' },
+      ]);
+
+      const project = sqliteUpgraded
+        .prepare('SELECT name, upgrade_marker FROM projects WHERE id = ?')
+        .get('proj_1');
+      expect(project).toEqual({ name: 'Core Upgrade Project', upgrade_marker: 'v2-migrated' });
+
+      expect(
+        sqliteUpgraded.prepare('SELECT title, version FROM notepads WHERE id = ?').get('np_1'),
+      ).toEqual({ title: 'Upgrade Safety Note', version: 2 });
+      expect(
+        sqliteUpgraded
+          .prepare('SELECT notepad_id FROM notepads_fts WHERE notepads_fts MATCH ?')
+          .all('"pre-upgrade"'),
+      ).toEqual([{ notepad_id: 'np_1' }]);
+      expect(sqliteUpgraded.prepare('SELECT priority FROM cards WHERE id = ?').get('card_1')).toEqual({
+        priority: 'high',
+      });
+      expect(
+        sqliteUpgraded.prepare('SELECT user_id FROM card_assignees WHERE card_id = ?').all('card_1'),
+      ).toEqual([{ user_id: 'usr_editor' }]);
+      expect(
+        sqliteUpgraded.prepare('SELECT title, completed FROM card_subtasks WHERE id = ?').get('sub_1'),
+      ).toEqual({ title: 'Verify permissions intact', completed: 1 });
+      expect(
+        sqliteUpgraded
+          .prepare('SELECT target_type, target_id FROM notepad_links WHERE source_id = ?')
+          .all('np_card_1'),
+      ).toEqual([{ target_type: 'notepad', target_id: 'np_1' }]);
+
+      const invariantSql = fs.readFileSync(path.join(root, 'scripts/check-invariants.sql'), 'utf8');
+      const offenders = splitSqlStatements(invariantSql).flatMap((stmt) =>
+        sqliteUpgraded.prepare(stmt).all(),
+      );
+      expect(offenders).toEqual([]);
+    } finally {
+      sqliteUpgraded.close();
+    }
+  });
+
+  it.skipIf(process.env.BURROW_TEST_SQLITE_ONLY === '1')(
+    'preserves existing workspace data, roles, content, and invariants across a forward PostgreSQL upgrade',
+    async () => {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-pg-upgrade-'));
+      directories.push(directory);
+      const pgMigrations = path.join(directory, 'postgres');
+      fs.mkdirSync(pgMigrations);
+      for (const file of fs
+        .readdirSync(path.join(root, 'migrations/postgres'))
+        .filter((name) => name.endsWith('.sql'))
+        .sort()) {
+        fs.copyFileSync(path.join(root, 'migrations/postgres', file), path.join(pgMigrations, file));
+      }
+
+      let container: string | undefined;
+      let adminUrl = process.env.BURROW_TEST_POSTGRES_URL;
+      let admin: postgres.Sql | undefined;
+      let client: postgres.Sql | undefined;
+      const testDb = `upgrade_test_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+      try {
+        if (!adminUrl) {
+          const candidateContainer = `burrow-test-upgrade-${randomUUID()}`;
+          await docker(
+            'run',
+            '--detach',
+            '--rm',
+            '--name',
+            candidateContainer,
+            '--publish',
+            '127.0.0.1::5432',
+            '--env',
+            'POSTGRES_USER=burrow_test',
+            '--env',
+            'POSTGRES_PASSWORD=burrow_test',
+            '--env',
+            'POSTGRES_DB=postgres',
+            'postgres:17',
+          );
+          container = candidateContainer;
+          const address = await docker('port', container, '5432/tcp');
+          const port = /^127\.0\.0\.1:(\d+)$/.exec(address)?.[1];
+          if (!port) throw new Error('Disposable PostgreSQL did not publish a loopback port');
+          adminUrl = `postgres://burrow_test:burrow_test@127.0.0.1:${port}/postgres`;
+        }
+
+        admin = postgres(adminUrl, { max: 1, onnotice: () => {}, connect_timeout: 2 });
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await admin`SELECT 1`;
+            break;
+          } catch (error) {
+            if (attempt === 39) throw error;
+            await setTimeout(250);
+          }
+        }
+        await admin.unsafe(`CREATE DATABASE "${testDb}"`);
+
+        const dbUrl = new URL(adminUrl);
+        dbUrl.pathname = `/${testDb}`;
+        client = postgres(dbUrl.toString(), { max: 2, onnotice: () => {} });
+
+        await applyPostgresMigrations(client, pgMigrations);
+
+        const nowMs = Date.now();
+        await client.unsafe(`
+          INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at) VALUES
+            ('usr_owner', 'Owner User', 'owner@upgrade.test', true, now(), now()),
+            ('usr_editor', 'Editor User', 'editor@upgrade.test', true, now(), now()),
+            ('usr_viewer', 'Viewer User', 'viewer@upgrade.test', true, now(), now());
+
+          INSERT INTO workspaces (id, name, created_by, created_at)
+          VALUES ('ws_upgrade', 'Upgrade Test Workspace', 'usr_owner', ${nowMs});
+
+          UPDATE bootstrap_state
+          SET status = 'complete', claim_email = 'owner@upgrade.test', user_id = 'usr_owner', workspace_id = 'ws_upgrade'
+          WHERE id = 1;
+
+          INSERT INTO members (workspace_id, user_id, role, joined_at) VALUES
+            ('ws_upgrade', 'usr_owner', 'owner', ${nowMs}),
+            ('ws_upgrade', 'usr_editor', 'editor', ${nowMs}),
+            ('ws_upgrade', 'usr_viewer', 'viewer', ${nowMs});
+
+          INSERT INTO projects (id, workspace_id, name, icon, color, position, created_at, updated_at)
+          VALUES ('proj_1', 'ws_upgrade', 'Core Upgrade Project', '🚀', '#8b5cf6', 'a0', ${nowMs}, ${nowMs});
+
+          INSERT INTO tags (id, project_id, name, color)
+          VALUES ('tag_1', 'proj_1', 'release', '#3b82f6');
+
+          INSERT INTO notepads (id, workspace_id, project_id, parent_id, kind, title, icon, content, version, position, is_favorite, created_by, created_at, updated_at)
+          VALUES ('np_1', 'ws_upgrade', 'proj_1', NULL, 'notepad', 'Upgrade Safety Note', '📝', '[{"type":"paragraph","content":[{"type":"text","text":"Critical pre-upgrade workspace content."}]}]', 2, 'a0', true, 'usr_owner', ${nowMs}, ${nowMs});
+
+          INSERT INTO notepad_tags (notepad_id, tag_id) VALUES ('np_1', 'tag_1');
+
+          INSERT INTO boards (id, workspace_id, project_id, name, icon, position, created_at, updated_at)
+          VALUES ('board_1', 'ws_upgrade', 'proj_1', 'Upgrade Board', '📋', 'a0', ${nowMs}, ${nowMs});
+
+          INSERT INTO board_columns (id, board_id, name, position)
+          VALUES ('col_1', 'board_1', 'In progress', 'a0');
+
+          INSERT INTO notepads (id, workspace_id, project_id, parent_id, kind, title, icon, content, version, position, is_favorite, created_by, created_at, updated_at)
+          VALUES ('np_card_1', 'ws_upgrade', 'proj_1', NULL, 'card', 'Upgrade Card Task', '🔖', '[{"type":"paragraph","content":[{"type":"text","text":"Verify task survives schema upgrade."}]}]', 1, 'a0', false, 'usr_editor', ${nowMs}, ${nowMs});
+
+          INSERT INTO cards (id, board_id, column_id, notepad_id, position, priority, created_at)
+          VALUES ('card_1', 'board_1', 'col_1', 'np_card_1', 'a0', 'high', ${nowMs});
+
+          INSERT INTO card_assignees (card_id, user_id) VALUES ('card_1', 'usr_editor');
+          INSERT INTO card_subtasks (id, card_id, title, completed, position, created_at)
+          VALUES ('sub_1', 'card_1', 'Verify permissions intact', true, 'a0', ${nowMs});
+          INSERT INTO notepad_links (source_id, target_type, target_id, target_notepad_id)
+          VALUES ('np_card_1', 'notepad', 'np_1', 'np_1');
+        `);
+
+        fs.writeFileSync(
+          path.join(pgMigrations, '0001_add_project_archived_note.sql'),
+          `ALTER TABLE projects ADD COLUMN upgrade_marker TEXT;
+           UPDATE projects SET upgrade_marker = 'v2-migrated' WHERE id = 'proj_1';`,
+        );
+
+        await applyPostgresMigrations(client, pgMigrations);
+
+        const ledger = await client<{ filename: string }[]>`
+          SELECT filename FROM _migrations ORDER BY filename
+        `;
+        expect(ledger.map((r) => r.filename)).toEqual([
+          '0000_baseline.sql',
+          '0001_add_project_archived_note.sql',
+        ]);
+
+        const roles = await client<{ user_id: string; role: string }[]>`
+          SELECT user_id, role::text FROM members WHERE workspace_id = 'ws_upgrade' ORDER BY user_id
+        `;
+        expect(roles).toEqual([
+          { user_id: 'usr_editor', role: 'editor' },
+          { user_id: 'usr_owner', role: 'owner' },
+          { user_id: 'usr_viewer', role: 'viewer' },
+        ]);
+
+        const project = await client<{ name: string; upgrade_marker: string }[]>`
+          SELECT name, upgrade_marker FROM projects WHERE id = 'proj_1'
+        `;
+        expect(project).toEqual([{ name: 'Core Upgrade Project', upgrade_marker: 'v2-migrated' }]);
+
+        const pgInvariants = fs.readFileSync(
+          path.join(root, 'scripts/check-invariants.postgres.sql'),
+          'utf8',
+        );
+        for (const stmt of splitSqlStatements(pgInvariants)) {
+          expect(await client.unsafe(stmt)).toEqual([]);
+        }
+      } finally {
+        if (client) await client.end();
+        if (admin) {
+          try {
+            await admin.unsafe(`DROP DATABASE IF EXISTS "${testDb}" WITH (FORCE)`);
+          } finally {
+            await admin.end();
+          }
+        }
+        if (container) {
+          await docker('rm', '--force', container);
+        }
+      }
+    },
+    120_000,
+  );
 });

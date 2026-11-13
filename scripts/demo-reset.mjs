@@ -25,7 +25,9 @@ import {
   hasFlag,
   getDatabaseTarget,
   migrateDatabase,
+  parseJsonc,
   printTargetBanner,
+  resolveRemoteProfile,
   root,
   run,
   step,
@@ -36,6 +38,8 @@ import {
 const target = getDatabaseTarget();
 const isRemote = target.kind === 'remote';
 const force = hasFlag('--force') || Boolean(process.env.CI);
+const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
+const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
 const demoEmail = argValue('--email') || process.env.DEMO_EMAIL || 'demo@osscafe.com';
 const demoPassword = argValue('--password') || process.env.DEMO_PASSWORD || 'demopassword123';
 
@@ -182,22 +186,23 @@ VALUES
 }
 
 async function main() {
-  printTargetBanner('Demo Reset & Seed', target);
+  printTargetBanner('Demo Reset & Seed', target, { profile });
 
   if (isRemote && !force) {
+    const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-DEMO';
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(
-      'Type "RESET-DEMO" to confirm resetting and seeding remote production: ',
+      `Type "${expectedPhrase}" to confirm resetting and seeding remote ${profile.envName}: `,
     );
     rl.close();
-    if (answer.trim() !== 'RESET-DEMO') {
+    if (answer.trim() !== expectedPhrase) {
       console.log('Reset cancelled.');
       process.exit(0);
     }
   }
 
   const configArgs = isRemote
-    ? getWranglerConfigArgs({ required: true, purpose: 'remote demo reset' })
+    ? getWranglerConfigArgs({ required: true, purpose: 'remote demo reset', profile })
     : [];
 
   // 1. Wipe existing state
@@ -232,15 +237,19 @@ async function main() {
       fs.rmSync(workerDir, { recursive: true, force: true });
     }
     step('Applying migrations');
-    await migrateDatabase(target);
+    await migrateDatabase(target, { allowPreBaselineReset: true });
   } else {
-    step('Ensuring migrations are applied on Remote D1');
-    await migrateDatabase(target, { configArgs });
+    step(`Ensuring migrations are applied on Remote D1 (${profile.dbName})`);
+    await migrateDatabase(target, {
+      configArgs,
+      databaseName: profile.dbName,
+      allowPreBaselineReset: true,
+    });
 
-    step('Cleaning all records from Remote D1');
+    step(`Cleaning all records from Remote D1 (${profile.dbName})`);
     run(
       bin('wrangler'),
-      [...configArgs, 'd1', 'execute', 'burrow', '--remote', `--command=${cleanSql}`],
+      [...configArgs, 'd1', 'execute', profile.dbName, '--remote', `--command=${cleanSql}`],
       { allowFail: false },
     );
   }
@@ -258,7 +267,7 @@ async function main() {
     if (isRemote) {
       run(
         bin('wrangler'),
-        [...configArgs, 'd1', 'execute', 'burrow', '--remote', '--file', tempSeedFile],
+        [...configArgs, 'd1', 'execute', profile.dbName, '--remote', '--file', tempSeedFile],
         { allowFail: false },
       );
     } else {
@@ -271,7 +280,11 @@ async function main() {
   // 4. Verify invariants
   step('Verifying database invariants');
   const invariantFile = path.join(root, 'scripts', 'check-invariants.sql');
-  const resultSets = await executeDatabaseFile(target, invariantFile, { readOnly: true });
+  const resultSets = await executeDatabaseFile(target, invariantFile, {
+    readOnly: true,
+    databaseName: profile?.dbName,
+    configArgs: isRemote ? [...configArgs, '--remote'] : undefined,
+  });
   const offenders = [];
   for (const rs of resultSets) {
     const rows = rs?.results ?? rs?.rows ?? [];

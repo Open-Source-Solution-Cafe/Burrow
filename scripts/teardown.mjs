@@ -7,24 +7,31 @@
  *   --remote, --r, -r      Remote Cloudflare teardown (permanently deletes Worker, D1, R2 on Cloudflare)
  *
  * Flags:
- *   --force                Bypass interactive confirmation on remote
+ *   --staging                        Target isolated staging resources (burrow-staging)
+ *   --force                          Bypass interactive confirmation on staging (blocked on production unless confirmed)
+ *   --confirm-production-teardown    Must equal DELETE-PRODUCTION-BURROW when tearing down production with --force
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import {
+  argValue,
   bin,
   hasFlag,
   isRemoteTarget,
+  loadEnv,
   parseJsonc,
   printTargetBanner,
+  resolveRemoteProfile,
   root,
   run,
   step,
+  upsertEnvVar,
 } from './lib.mjs';
 
 const isRemote = isRemoteTarget();
 const force = hasFlag('--force');
+const confirmProdFlag = argValue('--confirm-production-teardown');
 
 function readWranglerConfig() {
   const configPath = path.join(root, 'wrangler.jsonc');
@@ -37,7 +44,9 @@ function readWranglerConfig() {
 }
 
 async function main() {
-  printTargetBanner('Teardown', isRemote);
+  loadEnv();
+  const profile = isRemote ? resolveRemoteProfile(readWranglerConfig()) : null;
+  printTargetBanner('Teardown', isRemote, { profile });
 
   if (!isRemote) {
     step('Cleaning local development state (removing ./data and ./dist only)');
@@ -64,56 +73,105 @@ async function main() {
     return;
   }
 
-  const cfg = readWranglerConfig();
-  const bucketName = cfg.r2_buckets?.[0]?.bucket_name || 'burrow-files';
+  const workerName = profile.workerName;
+  const dbName = profile.dbName;
+  const bucketName = profile.bucketName;
 
   // --- Remote Cloudflare Teardown ---
   console.log('======================================================');
-  console.log('⚠️  DANGER: CLOUDFLARE PRODUCTION RESOURCE TEARDOWN');
+  console.log(
+    profile.isStaging
+      ? '⚠️  WARNING: CLOUDFLARE STAGING RESOURCE TEARDOWN'
+      : '🚨 DANGER: CLOUDFLARE PRODUCTION RESOURCE TEARDOWN',
+  );
   console.log('======================================================');
-  console.log('This will PERMANENTLY delete the following remote resources:');
-  console.log('  1. Cloudflare Worker: "burrow"');
-  console.log('  2. Cloudflare D1 Database: "burrow" (and all data)');
-  console.log(`  3. Cloudflare R2 Bucket: "${bucketName}" (and all files)`);
+  console.log(
+    `This will PERMANENTLY delete the following ${profile.isStaging ? 'STAGING' : 'PRODUCTION'} resources:`,
+  );
+  console.log(`  1. Cloudflare Worker: "${workerName}"`);
+  console.log(`  2. Cloudflare D1 Database: "${dbName}" (and all data)`);
+  if (bucketName) {
+    console.log(`  3. Cloudflare R2 Bucket: "${bucketName}" (and all files)`);
+  }
   console.log('======================================================\n');
 
-  if (!force) {
+  if (!profile.isStaging) {
+    if (force) {
+      if (confirmProdFlag !== 'DELETE-PRODUCTION-BURROW') {
+        console.error(
+          `❌ Refusing --force teardown on PRODUCTION ("${workerName}"). Destructive test teardowns must target staging (--staging). To force-delete production non-interactively, pass --confirm-production-teardown=DELETE-PRODUCTION-BURROW.`,
+        );
+        process.exit(1);
+      }
+    } else {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const confirmPhrase = await rl.question(
+        'Type "TEARDOWN-PRODUCTION" to confirm deleting production resources: ',
+      );
+      if (confirmPhrase.trim() !== 'TEARDOWN-PRODUCTION') {
+        rl.close();
+        console.log('Teardown cancelled. No resources were modified.');
+        process.exit(0);
+      }
+      const confirmName = await rl.question(
+        `Type the exact Worker name ("${workerName}") to permanently delete it: `,
+      );
+      rl.close();
+      if (confirmName.trim() !== workerName) {
+        console.log('Worker name mismatch. Teardown cancelled. No resources were modified.');
+        process.exit(0);
+      }
+    }
+  } else if (!force) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(
-      'Type "TEARDOWN" to confirm and permanently delete these resources: ',
+      'Type "TEARDOWN-STAGING" to confirm deleting staging resources: ',
     );
     rl.close();
 
-    if (answer.trim() !== 'TEARDOWN') {
+    if (answer.trim() !== 'TEARDOWN-STAGING') {
       console.log('Teardown cancelled. No resources were modified.');
       process.exit(0);
     }
   }
 
   // 1. Delete Cloudflare Worker
-  step('Deleting Cloudflare Worker ("burrow")');
-  run(bin('wrangler'), ['delete', 'burrow', '--force'], { allowFail: true });
+  step(`Deleting Cloudflare Worker ("${workerName}")`);
+  run(bin('wrangler'), ['delete', workerName, '--force'], { allowFail: true });
 
   // 2. Delete Cloudflare D1 Database
-  step('Deleting Cloudflare D1 Database ("burrow")');
-  run(bin('wrangler'), ['d1', 'delete', 'burrow', '--skip-confirmation'], { allowFail: true });
+  step(`Deleting Cloudflare D1 Database ("${dbName}")`);
+  run(bin('wrangler'), ['d1', 'delete', dbName, '--skip-confirmation'], { allowFail: true });
 
   // 3. Delete Cloudflare R2 Bucket
-  step(`Deleting Cloudflare R2 Bucket ("${bucketName}")`);
-  run(bin('wrangler'), ['r2', 'bucket', 'delete', bucketName], { allowFail: true });
+  if (bucketName) {
+    step(`Deleting Cloudflare R2 Bucket ("${bucketName}")`);
+    run(bin('wrangler'), ['r2', 'bucket', 'delete', bucketName], { allowFail: true });
+  }
 
-  // Clean local build artifacts and data
+  // Clean local ephemeral Wrangler config and D1 UUID
+  const localWranglerPath = path.join(root, profile.localConfigFilename);
+  if (fs.existsSync(localWranglerPath)) {
+    fs.rmSync(localWranglerPath, { force: true });
+    console.log(`  Removed ephemeral ${profile.localConfigFilename}`);
+  }
+  const envPath = path.join(root, '.env');
+  if (upsertEnvVar(envPath, profile.d1EnvKey, '')) {
+    console.log(`  Cleared ${profile.d1EnvKey} in .env`);
+  }
   const distDir = path.join(root, 'dist');
   if (fs.existsSync(distDir)) {
     fs.rmSync(distDir, { recursive: true, force: true });
   }
-  const dataDir = path.join(root, 'data');
-  if (fs.existsSync(dataDir)) {
-    fs.rmSync(dataDir, { recursive: true, force: true });
+  if (!profile.isStaging) {
+    const dataDir = path.join(root, 'data');
+    if (fs.existsSync(dataDir)) {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
   }
 
   console.log('\n======================================================');
-  console.log('✅ Remote teardown complete. All Cloudflare resources deleted.');
+  console.log(`✅ Remote ${profile.envName} teardown complete.`);
   console.log('======================================================\n');
 }
 

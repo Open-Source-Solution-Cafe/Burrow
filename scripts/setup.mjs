@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * One-command setup. Idempotent. Run with `pnpm run setup`.
+ * One-command setup. Idempotent and retry-safe. Run with `pnpm run setup`.
  *
  * Targets:
  *   (default)              Local setup (installs deps, migrates Node SQLite, prints dev URLs & token)
@@ -8,51 +8,68 @@
  *   --remote, --r, -r      Remote setup (provisions Cloudflare D1/R2, migrates, builds, deploys, sets secrets)
  *
  * Flags:
- *   --dry-run              print every command without running it
- *   --domain <domain>      attach a custom domain (remote only; must be on Cloudflare DNS in this account)
- *   --name <worker-name>   deploy under a different worker name (remote only)
+ *   --staging                Target isolated staging resources (burrow-staging)
+ *   --dry-run                Print every stage and command without running mutations
+ *   --domain <domain>        Attach a custom domain (remote only; must be on Cloudflare DNS in this account)
+ *   --name <worker-name>     Deploy under a different worker name (remote only)
+ *   --rotate-bootstrap-token Generate/apply a new BOOTSTRAP_TOKEN even if one already exists on the Worker
  */
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import {
-  argValue,
   bin,
+  buildSecretPlan,
+  collectAccounts,
   getBootstrapToken,
-  hasFlag,
   getDatabaseTarget,
+  getWranglerConfigArgs,
+  hasFlag,
+  loadEnv,
   migrateDatabase,
+  parseFirstJson,
+  parseJsonc,
   printTargetBanner,
+  resolveCloudflareAccount,
+  resolveRemoteProfile,
   root,
   run,
-  smoke,
   step,
-  parseFirstJson,
-  loadEnv,
-  getWranglerConfigArgs,
-  parseJsonc,
-  normalizeDomain,
+  upsertEnvVar,
+  validateEnvironmentPreflight,
+  validateWranglerResourceConfig,
+  verifyDeployment,
 } from './lib.mjs';
 
 const dryRun = hasFlag('--dry-run');
+const rotateBootstrapToken = hasFlag('--rotate-bootstrap-token');
 const target = getDatabaseTarget();
 const isRemote = target.kind === 'remote';
-const domain = normalizeDomain(argValue('--domain'));
-const workerName = argValue('--name');
-const WRANGLER_ARGS = workerName ? ['--name', workerName] : [];
+const configPath = path.join(root, 'wrangler.jsonc');
+const baseCfg = parseJsonc(fs.readFileSync(configPath, 'utf8'));
+const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
+const domain = profile?.domain;
+const WRANGLER_ARGS = profile && (profile.isStaging || hasFlag('--name')) ? ['--name', profile.workerName] : [];
+
+function stageHeader(num, label) {
+  step(`Stage ${num}/10 — ${label}`);
+}
 
 async function main() {
-  printTargetBanner('Setup', target);
+  printTargetBanner('Setup', target, { profile });
 
-  step('Preflight');
-  const nodeMajor = Number(process.versions.node.split('.')[0]);
-  if (nodeMajor < 20) {
-    console.error(`Node 20+ required, found ${process.version}`);
+  stageHeader(1, 'Checking environment');
+  loadEnv();
+  const preflight = validateEnvironmentPreflight({ checkPnpm: !dryRun });
+  if (!preflight.ok) {
+    for (const err of preflight.errors) {
+      console.error(`  ❌ ${err}`);
+    }
     process.exit(1);
   }
-  console.log(`node ${process.version}, dry-run: ${dryRun}`);
-  loadEnv();
+  console.log(
+    `  node ${process.version}${preflight.details.pnpmVersion ? `, pnpm ${preflight.details.pnpmVersion}` : ''}, dry-run: ${dryRun}`,
+  );
   run('pnpm', ['install'], { dryRun });
 
   if (!isRemote) {
@@ -76,52 +93,142 @@ async function main() {
     return;
   }
 
-  // --- Remote Cloudflare Setup ---
-  step('Cloudflare login');
-  const whoami = run(bin('wrangler'), ['whoami', '--json'], {
+  // --- Remote Cloudflare Setup (10 stages) ---
+  stageHeader(2, 'Authenticating with Cloudflare');
+  let whoami = run(bin('wrangler'), ['whoami', '--json'], {
     dryRun,
     capture: true,
     allowFail: true,
     quiet: true,
   });
   if (!dryRun && whoami.status !== 0) {
-    console.log('not logged in — running `wrangler login` (opens your browser)');
+    console.log('  not logged in — running `wrangler login` (opens your browser)');
     run(bin('wrangler'), ['login'], { dryRun });
+    whoami = run(bin('wrangler'), ['whoami', '--json'], {
+      capture: true,
+      allowFail: true,
+      quiet: true,
+    });
+    if (whoami.status !== 0) {
+      console.error('  ❌ Cloudflare login did not complete. Verify with `pnpm exec wrangler whoami`.');
+      process.exit(1);
+    }
   } else {
-    console.log('wrangler: logged in');
+    console.log(dryRun ? '  [dry-run] Verify Cloudflare authentication (`wrangler whoami --json`)' : '  wrangler: authenticated');
   }
 
-  if (!process.env.CLOUDFLARE_ACCOUNT_ID && !dryRun) {
+  stageHeader(3, 'Selecting Cloudflare account');
+  if (!dryRun) {
     const info = parseFirstJson(whoami.stdout ?? '');
     const accounts = collectAccounts(info);
-    if (accounts.length > 1) {
-      console.log('Multiple Cloudflare accounts found:');
-      accounts.forEach((a, i) => console.log(`  [${i}] ${a.name ?? '(no name)'}  ${a.id}`));
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const answer = await rl.question('Which account id should be used: ');
-      rl.close();
-      const chosen = accounts.find((a) => a.id === answer.trim()) ?? accounts[Number(answer)];
-      if (!chosen) {
-        console.error('no matching account selected');
-        process.exit(1);
-      }
-      process.env.CLOUDFLARE_ACCOUNT_ID = chosen.id;
-      console.log(`using account ${chosen.id}`);
+    const accountSelection = await resolveCloudflareAccount({
+      accounts,
+      envAccountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      isInteractive: Boolean(process.stdin.isTTY),
+      promptFn: async (available) => {
+        console.log('  Multiple Cloudflare accounts found:');
+        available.forEach((a, i) => console.log(`    [${i}] ${a.name ?? '(no name)'}  ${a.id}`));
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        try {
+          return await rl.question('  Select account index or id: ');
+        } finally {
+          rl.close();
+        }
+      },
+    });
+    if (!accountSelection.ok) {
+      console.error(`  ❌ ${accountSelection.error}`);
+      process.exit(1);
     }
+    if (accountSelection.accountId) {
+      process.env.CLOUDFLARE_ACCOUNT_ID = accountSelection.accountId;
+      console.log(
+        `  using account ${accountSelection.accountName ?? '(unnamed)'} (${accountSelection.accountId}) [${accountSelection.selectedBy}]`,
+      );
+    } else {
+      console.log('  using default Wrangler session account');
+    }
+  } else {
+    console.log('  [dry-run] Resolve CLOUDFLARE_ACCOUNT_ID / active Wrangler account');
   }
 
-  step('Provision or discover Cloudflare D1 database & R2 bucket');
-  const { d1Id, dbName, bucketName } = ensureCloudflareResources(dryRun);
-  const configArgs = dryRun ? [] : getWranglerConfigArgs({ d1IdOverride: d1Id });
+  stageHeader(4, 'Validating resource configuration');
+  let remoteDbs = [];
+  let remoteDbsLoaded = false;
+  if (!dryRun) {
+    const list = run(bin('wrangler'), ['d1', 'list', '--json'], {
+      capture: true,
+      allowFail: true,
+      quiet: true,
+    });
+    if (list.status === 0) {
+      remoteDbs = parseFirstJson(list.stdout) ?? [];
+      remoteDbsLoaded = true;
+    }
+  }
+  const resourceValidation = validateWranglerResourceConfig(profile.effectiveConfig, {
+    envD1Id: profile.envD1Id,
+    remoteDbs,
+    remoteDbsLoaded,
+  });
+  if (!resourceValidation.ok) {
+    for (const err of resourceValidation.errors) console.error(`  ❌ ${err}`);
+    process.exit(1);
+  }
+  for (const warn of resourceValidation.warnings) console.warn(`  ⚠️  ${warn}`);
+  console.log(
+    `  installation mode: ${resourceValidation.mode === 'existing' ? 'Existing installation (safe upgrade / retry)' : 'Fresh installation'}`,
+  );
+  console.log(
+    `  configured env="${profile.envName}", worker="${profile.workerName}", d1="${resourceValidation.dbName}"${resourceValidation.bucketName ? `, r2="${resourceValidation.bucketName}"` : ''}`,
+  );
 
-  step('Apply migrations to remote D1');
-  await migrateDatabase(target, { dryRun, configArgs, databaseName: dbName });
+  stageHeader(5, 'Provisioning missing resources');
+  const { d1Id, dbName, bucketName } = ensureCloudflareResources(
+    dryRun,
+    resourceValidation,
+  );
+  if (!dryRun && d1Id) {
+    upsertEnvVar(path.join(root, '.env'), profile.d1EnvKey, d1Id);
+  }
+  const configArgs = dryRun ? [] : getWranglerConfigArgs({ d1IdOverride: d1Id, profile });
 
-  step('Typecheck + build');
+  stageHeader(6, 'Running database migrations');
+  await migrateDatabase(target, {
+    dryRun,
+    configArgs,
+    databaseName: dbName,
+    allowPreBaselineReset: false,
+  });
+
+  stageHeader(7, 'Configuring secrets');
+  let existingSecrets = [];
+  let workerExists = false;
+  if (!dryRun) {
+    const secretListRes = run(
+      bin('wrangler'),
+      [...configArgs, 'secret', 'list', '--format', 'json', ...WRANGLER_ARGS],
+      {
+        capture: true,
+        allowFail: true,
+        quiet: true,
+      },
+    );
+    if (secretListRes.status === 0) {
+      workerExists = true;
+      existingSecrets = parseFirstJson(secretListRes.stdout ?? '[]') ?? [];
+      console.log(`  detected ${existingSecrets.length} existing secret(s) on Worker (preserving values)`);
+    } else {
+      console.log('  Worker does not exist yet; secrets will be uploaded right after initial deploy');
+    }
+  } else {
+    console.log('  [dry-run] Inspect existing Worker secrets via `wrangler secret list --format json`');
+    console.log('  [dry-run] Preserve existing secrets; upload only missing secrets via `wrangler secret bulk`');
+  }
+
+  stageHeader(8, 'Deploying application');
   run(bin('typescript', 'tsc'), ['-b'], { dryRun });
   run(bin('vite'), ['build'], { dryRun });
-
-  step('Deploy Worker & static assets');
   const deployArgs = [...configArgs, 'deploy', ...WRANGLER_ARGS];
   if (domain) deployArgs.push('--domains', domain);
   const deploy = run(bin('wrangler'), deployArgs, { dryRun, capture: true });
@@ -129,102 +236,112 @@ async function main() {
     ? `https://${domain}`
     : (deploy.stdout.match(/https:\/\/[^\s]*workers\.dev[^\s]*/)?.[0] ?? null);
   if (!dryRun && !url) {
-    console.error('could not determine the deployed URL from wrangler output');
+    console.error('  ❌ Could not determine the deployed URL from wrangler output.');
     process.exit(1);
   }
-  const origin = url ?? 'https://<deployed-url>';
-  console.log(`deployed: ${origin}`);
+  const origin = url ?? (domain ? `https://${domain}` : 'https://<deployed-url>');
+  console.log(`  deployed Worker assets & script to: ${origin}`);
 
-  step('Provision Worker secrets');
   const originForAuth = domain ? `https://${domain}` : origin;
-  const generated = {};
-  const activeBootstrapToken = getBootstrapToken();
+  const secretPlan = buildSecretPlan({
+    existingSecrets,
+    env: process.env,
+    originForAuth,
+    updateAuthUrl: Boolean(domain),
+    rotateBootstrapToken,
+  });
 
   if (!dryRun) {
-    const existing = new Set(
-      (
-        parseFirstJson(
-          run(bin('wrangler'), [...configArgs, 'secret', 'list', '--format', 'json'], {
-            capture: true,
-            allowFail: true,
-            quiet: true,
-          }).stdout ?? '[]',
-        ) ?? []
-      ).map((s) => s.name),
-    );
-    if (!existing.has('BETTER_AUTH_SECRET')) {
-      generated.BETTER_AUTH_SECRET = crypto.randomBytes(32).toString('base64url');
-    }
-    generated.BOOTSTRAP_TOKEN = activeBootstrapToken;
-    generated.BETTER_AUTH_URL = originForAuth;
-
-    if (process.env.RESEND_API_KEY) {
-      generated.RESEND_API_KEY = process.env.RESEND_API_KEY;
-    }
-    if (process.env.EMAIL_FROM) {
-      generated.EMAIL_FROM = process.env.EMAIL_FROM;
-    }
-
-    const tmp = path.join(root, '.secrets.tmp.json');
-    process.once('exit', () => fs.rmSync(tmp, { force: true }));
-    fs.writeFileSync(tmp, JSON.stringify(generated, null, 2));
-    try {
-      const res = run(bin('wrangler'), [...configArgs, 'secret', 'bulk', tmp], {
-        dryRun,
-        allowFail: true,
-      });
-      if (res.status !== 0) {
+    const keysToUpload = Object.keys(secretPlan.toUpload);
+    if (keysToUpload.length === 0) {
+      console.log(
+        `  all required secrets already configured on Worker (preserved: ${secretPlan.preserved.join(', ')})`,
+      );
+    } else {
+      const tmp = path.join(root, '.secrets.tmp.json');
+      process.once('exit', () => fs.rmSync(tmp, { force: true }));
+      fs.writeFileSync(tmp, JSON.stringify(secretPlan.toUpload, null, 2), { mode: 0o600 });
+      try {
+        console.log(`  uploading ${keysToUpload.length} missing/updated secret(s): ${keysToUpload.join(', ')}`);
+        if (secretPlan.preserved.length > 0) {
+          console.log(`  preserving existing secret(s): ${secretPlan.preserved.join(', ')}`);
+        }
+        const res = run(bin('wrangler'), [...configArgs, 'secret', 'bulk', tmp, ...WRANGLER_ARGS], {
+          dryRun,
+          allowFail: true,
+        });
+        if (res.status !== 0) {
+          process.exit(1);
+        }
+      } finally {
         fs.rmSync(tmp, { force: true });
-        process.exit(1);
       }
-    } finally {
-      fs.rmSync(tmp, { force: true });
     }
   } else {
-    generated.BETTER_AUTH_SECRET = '<generated-32-byte-base64url>';
-    generated.BOOTSTRAP_TOKEN = activeBootstrapToken;
-    generated.BETTER_AUTH_URL = originForAuth;
-    run(bin('wrangler'), ['secret', 'bulk', '.secrets.tmp.json'], { dryRun });
+    run(bin('wrangler'), ['secret', 'bulk', '.secrets.tmp.json', ...WRANGLER_ARGS], { dryRun });
   }
 
-  step('Smoke test');
+  stageHeader(9, 'Verifying deployment');
   if (dryRun) {
     console.log(`  [dry-run] GET ${origin}/api/health`);
+    console.log(`  [dry-run] GET ${origin}/api/auth/config`);
+    console.log(`  [dry-run] GET ${origin}/api/system/version`);
+    console.log(`  [dry-run] GET ${origin}/ (SPA HTML check)`);
   } else {
-    const ok = await smoke(origin);
-    if (!ok) process.exit(1);
+    const verification = await verifyDeployment(origin, { attempts: 10, delayMs: 3000 });
+    if (!verification.ok) {
+      console.error(
+        '  ❌ Worker deployment uploaded, but post-deploy application verification failed.',
+      );
+      if (secretPlan.generatedBootstrapToken) {
+        console.error(
+          `  ℹ️  Your generated BOOTSTRAP_TOKEN was uploaded to the Worker: ${secretPlan.generatedBootstrapToken}`,
+        );
+      }
+      process.exit(1);
+    }
   }
 
+  stageHeader(10, 'Displaying application URL and next steps');
   console.log('\n======================================================');
-  console.log('✅ Remote Cloudflare Setup complete!');
-  console.log(`  Production URL:     ${origin}`);
+  console.log(
+    profile.isStaging
+      ? '✅ Remote Cloudflare Staging Setup complete!'
+      : '✅ Remote Cloudflare Setup complete!',
+  );
+  console.log(
+    `  Mode:               ${resourceValidation.mode === 'existing' || workerExists ? 'Existing installation (upgrade / retry)' : 'Fresh installation'}`,
+  );
+  console.log(
+    `  ${profile.isStaging ? 'Staging URL:       ' : 'Production URL:    '} ${origin}`,
+  );
   console.log(`  D1 Database:        ${dbName} (${d1Id})`);
   if (bucketName) {
     console.log(`  R2 Bucket:          ${bucketName}`);
   }
   console.log(`  BETTER_AUTH_URL:    ${originForAuth}`);
-  if (generated.BETTER_AUTH_SECRET) {
-    console.log('  BETTER_AUTH_SECRET: [configured]');
-  } else {
-    console.log('  BETTER_AUTH_SECRET: (preserved existing secret on Worker)');
-  }
-  console.log(`  BOOTSTRAP_TOKEN:    ${generated.BOOTSTRAP_TOKEN}`);
-  console.log('======================================================\n');
   console.log(
-    'Open the Production URL above and register the initial Owner account with BOOTSTRAP_TOKEN.',
+    `  BETTER_AUTH_SECRET: ${secretPlan.toUpload.BETTER_AUTH_SECRET ? '[configured]' : '[preserved existing secret on Worker]'}`,
   );
+  if (secretPlan.generatedBootstrapToken) {
+    console.log(`  BOOTSTRAP_TOKEN:    ${secretPlan.generatedBootstrapToken}`);
+  } else {
+    console.log(
+      '  BOOTSTRAP_TOKEN:    [preserved existing secret on Worker — pass --rotate-bootstrap-token to rotate]',
+    );
+  }
+  console.log('======================================================\n');
+  if (secretPlan.generatedBootstrapToken) {
+    console.log(
+      'Next step: Open the Production URL above and register the initial Owner account with BOOTSTRAP_TOKEN.',
+    );
+  } else {
+    console.log('Next step: Open the Production URL above to verify your upgraded instance.');
+  }
 }
 
-function ensureCloudflareResources(dryRun) {
-  const configPath = path.join(root, 'wrangler.jsonc');
-  const cfg = parseJsonc(fs.readFileSync(configPath, 'utf8'));
-  const d1 = cfg.d1_databases?.[0];
-  if (!d1) {
-    console.error('wrangler.jsonc has no d1_databases entry');
-    process.exit(1);
-  }
-  const dbName = d1.database_name;
-  const bucketName = cfg.r2_buckets?.[0]?.bucket_name ?? null;
+function ensureCloudflareResources(dryRun, validation) {
+  const { dbName, bucketName, d1Id: discoveredId } = validation;
 
   if (bucketName) {
     if (dryRun) {
@@ -238,7 +355,7 @@ function ensureCloudflareResources(dryRun) {
       const bucketExists =
         r2List.status === 0 && new RegExp(`\\b${bucketName}\\b`).test(r2List.stdout ?? '');
       if (bucketExists) {
-        console.log(`  R2 bucket "${bucketName}" already exists`);
+        console.log(`  R2 bucket "${bucketName}" already exists (reusing)`);
       } else {
         const created = run(bin('wrangler'), ['r2', 'bucket', 'create', bucketName], {
           capture: true,
@@ -251,9 +368,10 @@ function ensureCloudflareResources(dryRun) {
         ) {
           console.log(`  R2 bucket "${bucketName}" ready`);
         } else {
-          console.warn(
-            `  Warning: could not verify R2 bucket "${bucketName}": ${created.stderr || created.stdout}`,
+          console.error(
+            `  ❌ Failed to create R2 bucket "${bucketName}": ${created.stderr || created.stdout}`,
           );
+          process.exit(1);
         }
       }
     }
@@ -264,19 +382,9 @@ function ensureCloudflareResources(dryRun) {
     return { d1Id: 'pending-d1-uuid', dbName, bucketName };
   }
 
-  const list = run(bin('wrangler'), ['d1', 'list', '--json'], {
-    capture: true,
-    allowFail: true,
-    quiet: true,
-  });
-  if (list.status === 0) {
-    const dbs = parseFirstJson(list.stdout) ?? [];
-    const found = dbs.find((d) => d.database_name === dbName || d.name === dbName);
-    if (found) {
-      const existingId = found.uuid ?? found.database_id;
-      console.log(`  D1 database "${dbName}" found on Cloudflare: ${existingId}`);
-      return { d1Id: existingId, dbName, bucketName };
-    }
+  if (discoveredId) {
+    console.log(`  D1 database "${dbName}" found on Cloudflare: ${discoveredId} (reusing)`);
+    return { d1Id: discoveredId, dbName, bucketName };
   }
 
   const out = run(bin('wrangler'), ['d1', 'create', dbName], {
@@ -293,7 +401,7 @@ function ensureCloudflareResources(dryRun) {
     const dbs = parseFirstJson(retryList.stdout) ?? [];
     const found = dbs.find((d) => d.database_name === dbName || d.name === dbName);
     if (!found) {
-      console.error('could not create or locate the D1 database');
+      console.error('  ❌ Could not create or locate the D1 database.');
       if (out.stderr) console.error(out.stderr);
       process.exit(1);
     }
@@ -303,23 +411,7 @@ function ensureCloudflareResources(dryRun) {
   return { d1Id: resolvedId, dbName, bucketName };
 }
 
-function collectAccounts(node) {
-  const found = new Map();
-  const visit = (n) => {
-    if (!n) return;
-    if (Array.isArray(n)) return n.forEach(visit);
-    if (typeof n === 'object') {
-      if (typeof n.id === 'string' && /^[0-9a-f]{32}$/.test(n.id)) {
-        found.set(n.id, { id: n.id, name: n.name });
-      }
-      for (const v of Object.values(n)) visit(v);
-    }
-  };
-  visit(node);
-  return [...found.values()];
-}
-
 main().catch((err) => {
-  console.error(err);
+  console.error('\n❌ Setup failed:', err instanceof Error ? err.message : err);
   process.exit(1);
 });

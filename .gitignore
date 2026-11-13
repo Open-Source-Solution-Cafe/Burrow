@@ -4,6 +4,7 @@ dist/
 .dev.vars
 .env
 wrangler.local.jsonc
+*.local.jsonc
 *.local
 test-results/
 playwright-report/

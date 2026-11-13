@@ -8,18 +8,23 @@
  *   --remote, --r, -r      Remote Cloudflare D1 database (requires confirmation phrase)
  *
  * Flags:
- *   --force                Bypass interactive confirmation on remote
+ *   --staging                  Target isolated staging resources (burrow-staging)
+ *   --force                    Bypass interactive confirmation on staging (requires --confirm-production-reset on production)
+ *   --confirm-production-reset Must equal RESET-PRODUCTION-BURROW when resetting production with --force
  */
 import readline from 'node:readline/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { assertResetDirectory } from '../src/server/database-target.ts';
 import {
+  argValue,
   bin,
   hasFlag,
   getDatabaseTarget,
   migrateDatabase,
+  parseJsonc,
   printTargetBanner,
+  resolveRemoteProfile,
   root,
   run,
   step,
@@ -29,6 +34,9 @@ import {
 const target = getDatabaseTarget();
 const isRemote = target.kind === 'remote';
 const force = hasFlag('--force');
+const confirmProdReset = argValue('--confirm-production-reset');
+const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
+const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
 
 const cleanSql = [
   "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
@@ -58,7 +66,7 @@ const cleanSql = [
 ].join(' ');
 
 async function main() {
-  printTargetBanner('Reset Database', target);
+  printTargetBanner('Reset Database', target, { profile });
 
   if (!isRemote) {
     if (target.kind === 'node') {
@@ -77,7 +85,7 @@ async function main() {
       fs.rmSync(workerDir, { recursive: true, force: true });
     }
     step('Applying migrations to the selected local database');
-    await migrateDatabase(target);
+    await migrateDatabase(target, { allowPreBaselineReset: true });
 
     step('Rebuilding server and web bundle (pnpm run build)');
     run('pnpm', ['run', 'build'], { allowFail: false });
@@ -91,39 +99,57 @@ async function main() {
   }
 
   // --- Remote Cloudflare D1 Reset ---
-  const targetName = 'REMOTE Cloudflare Production';
+  const targetName = profile.isStaging
+    ? `REMOTE Cloudflare Staging (${profile.dbName})`
+    : `REMOTE Cloudflare Production (${profile.dbName})`;
+
+  if (!profile.isStaging && force && confirmProdReset !== 'RESET-PRODUCTION-BURROW') {
+    console.error(
+      `❌ Refusing --force reset on PRODUCTION ("${profile.dbName}"). Destructive test resets must target staging (--staging). To force-reset production non-interactively, pass --confirm-production-reset=RESET-PRODUCTION-BURROW.`,
+    );
+    process.exit(1);
+  }
 
   if (!force) {
     console.log('======================================================');
-    console.log(`⚠️  DANGER: RESET REMOTE PRODUCTION DATABASE (${targetName})`);
+    console.log(`⚠️  DANGER: RESET ${targetName} DATABASE`);
     console.log('======================================================');
-    console.log('This will WIPE ALL DATA from your remote Cloudflare D1 database:');
+    console.log(`This will WIPE ALL DATA from remote Cloudflare D1 database "${profile.dbName}":`);
     console.log('  - All users, accounts, sessions, and workspaces');
     console.log('  - All projects, boards, cards, and notepads');
-    console.log('  - Returns the production database to a completely clean, initial slate.');
+    console.log('  - Returns the database to a completely clean, initial slate.');
     console.log('======================================================\n');
 
+    const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-PRODUCTION';
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(
-      'Type "RESET-PRODUCTION" to confirm resetting remote production: ',
+      `Type "${expectedPhrase}" to confirm resetting ${profile.envName}: `,
     );
     rl.close();
 
-    if (answer.trim() !== 'RESET-PRODUCTION') {
+    if (answer.trim() !== expectedPhrase) {
       console.log('Reset cancelled. No data was modified.');
       process.exit(0);
     }
   }
 
-  const configArgs = getWranglerConfigArgs({ required: true, purpose: 'remote database reset' });
+  const configArgs = getWranglerConfigArgs({
+    required: true,
+    purpose: 'remote database reset',
+    profile,
+  });
 
   step(`Ensuring migrations are applied on ${targetName} D1 database`);
-  await migrateDatabase(target, { configArgs });
+  await migrateDatabase(target, {
+    configArgs,
+    databaseName: profile.dbName,
+    allowPreBaselineReset: true,
+  });
 
   step(`Cleaning all records from ${targetName} D1 database`);
   run(
     bin('wrangler'),
-    [...configArgs, 'd1', 'execute', 'burrow', '--remote', `--command=${cleanSql}`],
+    [...configArgs, 'd1', 'execute', profile.dbName, '--remote', `--command=${cleanSql}`],
     { allowFail: false },
   );
 
@@ -134,7 +160,7 @@ async function main() {
       ...configArgs,
       'd1',
       'execute',
-      'burrow',
+      profile.dbName,
       '--remote',
       '--command=SELECT count(*) AS user_count FROM user; SELECT count(*) AS workspace_count FROM workspaces;',
     ],
