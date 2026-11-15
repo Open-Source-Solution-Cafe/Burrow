@@ -8,66 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Automated Documentation Screenshot Pipeline (`scripts/capture-screenshots.mjs`)**: Added a Playwright script that spins up an isolated temporary Node SQLite server with deterministic demo data to capture compact desktop, theme (`modern`, `basalt`, `light`), and mobile (`390x844`) PNG screenshots into `docs/assets/screenshots/`.
-- **Dedicated Deployment, Recovery & Feasibility Documentation**: Added `docs/DEPLOYMENT_AND_UPGRADES.md` (Cloudflare and Docker/PostgreSQL setup, environment secrets reference, upgrades, D1 Time Travel / `pg_dump` backups, and troubleshooting), `docs/CLOUDFLARE_DEPLOY_BUTTON.md` (technical feasibility assessment for one-click Cloudflare provisioning), and `CONTRIBUTING.md`.
-- **Cloudflare Preflight, Verification, Staging Isolation & Upgrade Tests (`tests/unit/cloudflare-deploy.test.ts`, `tests/unit/sqlite-migrations.test.ts`)**: Added automated unit/CLI contract coverage for Node/pnpm/Wrangler preflight checks, multi-account resolution, `D1_DATABASE_ID` collision detection, secret preservation across upgrades/retries, error classification, multi-endpoint `verifyDeployment`, data-preservation guards, `setup.mjs -r --dry-run` (production and `--staging`), `resolveRemoteProfile` isolation, production `--force` teardown/reset guards, and forward upgrade migration preservation across SQLite and PostgreSQL.
-- **Isolated Cloudflare Staging Profile & Production Safeguards (`scripts/lib.mjs`, `scripts/setup.mjs`, `scripts/deploy.mjs`, `scripts/reset.mjs`, `scripts/demo-reset.mjs`, `scripts/teardown.mjs`, `package.json`)**: Added `--staging` / `pnpm run setup:staging`, `deploy:staging`, `reset:staging`, and `teardown:staging` targeting `burrow-staging` Worker, `burrow-staging` D1, `burrow-staging-files` R2, `wrangler.staging.local.jsonc`, and `STAGING_D1_DATABASE_ID` while blocking production domain attachment (`CLOUDFLARE_DOMAIN`). Protected production `teardown -r` and `reset -r` against accidental non-interactive `--force` destruction unless explicit confirmation flags (`--confirm-production-teardown=DELETE-PRODUCTION-BURROW` / `--confirm-production-reset=RESET-PRODUCTION-BURROW`) are provided.
-- **Sole Owner User Deletion Guards**: Added `user.deleteUser.beforeDelete` Better Auth lifecycle hook and database `BEFORE DELETE` trigger `trg_prevent_sole_owner_user_delete` preventing user deletion if the user is the sole owner of any workspace.
-- **Line Ending Normalization**: Added `.gitattributes` enforcing consistent LF line endings across all files (`* text=auto eol=lf`).
-- **Database Baseline Migration Squashing & Inline Integrity**: Squashed historical migration steps into a unified, zero-overhead baseline migration (`migrations/0000_baseline.sql` for SQLite/D1 and `migrations/postgres/0000_baseline.sql` for PostgreSQL) with all referential integrity constraints defined directly inline:
-  - Composite unique constraint `projects (id, workspace_id)` and composite foreign keys on `notepads` and `boards` referencing `(project_id, workspace_id)`.
-  - Composite foreign keys on `cards (column_id, board_id) REFERENCES board_columns(id, board_id)` and `(notepad_id, project_id, kind) REFERENCES notepads(id, project_id, kind)`.
-  - Real foreign keys on user references: `members.user_id`, `card_assignees.user_id`, `edit_locks.user_id`, and `notifications.user_id` with `ON DELETE CASCADE`; `workspaces.created_by`, `notepads.created_by`, `project_files.created_by`, `invites.invited_by`, and `notifications.actor_id` with `ON DELETE SET NULL`.
-  - Automatic cleanup triggers on `notepads`, `cards`, `boards`, and `"user"` deleting orphaned polymorphic target references in `notepad_links`.
-- **Database Schema Parity Suite**: Added automated integration test (`tests/unit/schema-parity.test.ts`) validating that database schemas generated from migrations from scratch strictly match Drizzle schema definitions across tables, columns, nullability, primary keys, composite foreign keys, unique constraints, and triggers for both SQLite/D1 and PostgreSQL runtimes.
-- **Application-wide Multilingual Support (i18n)**: Expanded translations across all user interfaces, including navigation rails, sidebars, project home, my tasks, trash, workspace and project settings, member management, invite redemption, boards (kanban, list, calendar views, card detail panels, comments), notepads tree, command palette, media library, and rich document editors.
-- **GitHub Actions CI Workflow (`.github/workflows/ci.yml`)**: Added continuous integration running `check-decoupling.mjs`, `check-licenses.mjs`, `pnpm run check:sqlite`, and Worker integration tests (`vitest run --project worker`) on pushes and pull requests.
-- **Project File Deletion Endpoint (`DELETE /api/workspaces/:wid/projects/:pid/files/:key`) & Unregister Support**: Added explicit `editor`-gated file removal with active cover protection (`409 file_in_use`), deleting storage objects before unregistering DB metadata so transient storage failures remain safely retryable.
-- **Bootstrap Claim Reset & Dual-Runtime HTTP Smoke Tests**: Added `resetBootstrapClaim` across D1/SQLite and PostgreSQL repositories (`releaseBootstrap` parity added on PostgreSQL), `{ bootstrapToken, resetClaim: true }` support on `POST /api/auth/bootstrap/recover` when zero workspaces exist, documented the procedure in `docs/BOOTSTRAP_RECOVERY.md`, and added `tests/adapters/http-smoke-node.test.ts` testing full HTTP middleware and routes on both SQLite and PostgreSQL.
-- **Basalt Left Rail Language Switcher & Panel Controls**: Added a dedicated `LanguageToggle` button directly on the primary left icon rail right next to the theme toggle for instant one-click language cycling (EN, ES, FR), an embedded `LanguageSelector` in the sidebar panel footer, and full localization across all sidebar contextual panels.
-- **Reactive Translation Hook & Parity Testing**: Integrated `useTranslation` with `Intl` date formatting and synchronous external store updates, accompanied by automated dictionary key parity validation across English, Spanish, and French.
 
 ### Changed
-- **GitHub README Restructuring**: Reorganized `README.md` with accurate stack badges (`Vite 8.3`, `React 19`, `Docker / PostgreSQL 17`), real product screenshots across workflows/themes/mobile, verified live demo info, concise quick-start instructions, i18n/theme documentation, and direct links to dedicated operational guides.
-- **10-Stage Cloudflare Setup UX & Safe Upgrade Hardening (`scripts/setup.mjs`, `scripts/deploy.mjs`, `scripts/lib.mjs`)**:
-  - Upgraded `pnpm run setup -r` to clear numbered stages (`Stage 1/10` through `Stage 10/10`) with Vite 8 Node.js (`^20.19.0 || >=22.12.0`), `pnpm`, and Wrangler preflight validation, non-single-account prompt/env selection, and `D1_DATABASE_ID` collision detection distinguishing fresh installs from existing upgrades/retries.
-  - Preserved existing `BETTER_AUTH_SECRET`, `BOOTSTRAP_TOKEN`, and `BETTER_AUTH_URL` secrets on the Worker during repeat runs unless `--rotate-bootstrap-token` or `--domain` is explicitly passed.
-  - Expanded post-deployment verification (`verifyDeployment`) to verify `/api/health`, `/api/auth/config`, `/api/system/version`, and SPA HTML asset delivery (`/`).
-  - Restricted destructive pre-baseline table reset in `migrateDatabase` behind explicit `allowPreBaselineReset: true` (enabled only for `reset.mjs` / `demo-reset.mjs`) so `setup.mjs` and `deploy.mjs` never auto-delete tables during recovery.
-- **Kanban Card Left Stripe Removed**: Removed the left-edge priority/status border stripe from Kanban cards in `KanbanView.tsx` so card borders stay uniform and clean around rounded and focused states.
-- **Default Theme & Resizable Modern Sidebar**: Made `Modern Dark` (`modern`) the default theme when no theme preference is stored, and added a persisted drag/keyboard-resizable right border (`200px`–`480px`, default `232px`, double-click to reset) to the `Modern Dark` desktop sidebar via a shared `useResizableWidth` hook.
-- **Decoupling Scanner Hardening**: Extended `scripts/check-decoupling.mjs` to detect `cloud_` prefixed identifiers and schema-qualified `cloud.` references across all schemas, migrations, and source files.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
-- **My Tasks Mobile Card Layout (`src/web/pages/MyTasksView.tsx`, `src/web/i18n/*`)**: Stacked task rows vertically on narrow viewports with top-aligned completion checkboxes, full-width title and project/board metadata (hiding desktop-only `·` dividers on wrapped mobile lines and lifting narrow `max-w-[140px]` clamps), grouped tags cleanly, and moved priority badges, due dates, and a labeled Snooze action into a structured mobile footer bar while preserving the compact single-row layout on `sm+` viewports.
-- **Remote Secret & Stale D1 Configuration Handling (`scripts/lib.mjs`, `scripts/setup.mjs`, `scripts/teardown.mjs`)**: Rejected short (<32-character) and local placeholder `BETTER_AUTH_SECRET` values from `.env` during remote provisioning so fresh deployments receive a strong production secret; cleared `wrangler.local.jsonc` and `.env` `D1_DATABASE_ID` on remote teardown, synchronized `.env` `D1_DATABASE_ID` on setup, tolerated stale `D1_DATABASE_ID` values targeting deleted databases, increased post-deploy verification retries, and ensured generated initial bootstrap tokens remain visible if verification fails.
-- **Remote D1 Baseline Migration & Demo Reset Hardening**: Added automatic legacy pre-baseline schema reset detection in `scripts/lib.mjs` (`migrateDatabase`) and delegated remote D1 migrations from `scripts/deploy.mjs` so upgrading from pre-squashed D1 schemas cleanly applies `0000_baseline.sql`. Updated `scripts/demo-reset.mjs` and `scripts/reset.mjs` cleanup/seed ordering for `bootstrap_state` and `edit_locks` foreign keys, and skipped the Docker PostgreSQL parity test in `tests/unit/schema-parity.test.ts` when `BURROW_TEST_SQLITE_ONLY=1` is set.
-- **Cross-package Error Handling**: Hardened `isHttpError` in `core/services/errors.ts` to identify status and error codes duck-typed across dual-bundle and package boundaries, preventing unhandled 500 errors.
-- **Zero-Warning Lint Enforcement, Worker Bindings, Storage Inventory & Operational Docs**: Resolved remaining `no-console` lint warnings in `src/server/index.ts`, enforced `--max-warnings=0` in `scripts/check.mjs`, forwarded `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SELF_UPDATE_WEBHOOK_URL`, `TRUST_PROXY`, and `TRUSTED_PROXIES` in `src/worker/index.ts` and `scripts/lib.mjs`, fixed `scripts/inventory-storage.mjs` to respect `--staging` (`burrow-staging`), tagged `.deploy-log/rollbacks.log` entries with `[env:database]`, updated `wrangler.local.jsonc` flags in `package.json` and `docs/DEPLOYMENT_AND_UPGRADES.md`, isolated Vitest Worker test bindings in `vitest.config.ts`, upgraded Docker PostgreSQL to `postgres:17-alpine`, and slimmed `notepad.listByProject()` tree queries by omitting heavy document `content` columns.
-- **Orphaned Storage Cleanup & Remote Reset Safeguards**: Added single-retry storage cleanup (`src/core/shared/storage-cleanup.ts`) for unregistered cover keys in `NotepadService.permanentDeleteNotepad` and `ProjectService.permanentDeleteProject`, and added R2 reference warnings (`--clean-r2` cleanup support in `scripts/demo-reset.mjs`) before wiping remote D1 tables in `scripts/reset.mjs` and `scripts/demo-reset.mjs`.
-- **Auth Endpoint Rejection Handling**: Wrapped Better Auth route handler in `core/adapters/auth.ts` to cleanly catch and map lifecycle hook rejections to HTTP error responses.
-- **Cascade Scope Delete Guard**: Updated PostgreSQL cascade delete triggers on `notepads` and `boards` to recognize when the parent project is being atomically deleted in the same cascade, preventing false-positive `scope_cascade_conflict` rejections during full project deletions.
-- **Complete UI Translation Coverage**: Localized previously hardcoded English strings in `WorkspaceSwitcher` (workspaces header, creation modal, settings links), `ProjectSwitcher` (creation modal, dropdown options), member role tags (`OWNER`, `EDITOR`, `VIEWER`), keyboard shortcuts modal, filter controls, command palette footer, board column action buttons (`Add Column`, WIP limit menu), and card quick-add menus/toasts across English, Spanish, and French.
 
 ### Security
-- **Audit Security Hardening (Deployment Guards, Docker Secrets, Instance Admin Auth, Rate Limiting & Streaming Limits)**:
-  - Unified CLI target parsing and fail-closed production/demo guards (`assertProductionOperationAllowed`, `assertDemoResetAllowed`, `assertEnvironmentTargetIsolation`) across `scripts/demo-reset.mjs`, `scripts/reset.mjs`, `scripts/teardown.mjs`, and `scripts/lib.mjs`; rejected `--staging` combined with production Worker/DB names, `CI=true`/`--force` production bypasses, and unknown/malformed CLI flags; parameterized/escaped SQL literals in `buildDemoSeedSql`.
-  - Removed publicly known fallback secrets from `docker-compose.yml` and added them to the placeholder denylist; introduced `ALLOW_LOCAL_DOCKER_EVAL=true` for out-of-the-box localhost Docker quick-start evaluation with ephemeral per-boot secrets while preserving strict non-localhost production requirements.
-  - Restricted `POST /api/system/update` strictly to the bootstrap instance administrator (`workspaces.isInstanceOwner`) instead of any workspace/project user.
-  - Fixed authentication and invite rate limiting (`rateLimiter`, trusted-proxy `resolveClientIp`, database-backed `createVerificationRateLimitStorage`, and `x-burrow-client-ip` forwarding) to eliminate global shared lockouts and prevent client IP spoofing when `TRUST_PROXY` is disabled; added per-IP rate limiting on `/api/invites/info/:token` and `/api/invites/accept`.
-  - Replaced header-only `bodyLimit` with a streaming `TransformStream` byte counter returning `413 payload_too_large` even on chunked or spoofed `Content-Length` requests, and capped Worker uploads at `WORKER_MAX_UPLOAD_BYTES` (25 MB) to protect against 128 MB isolate memory exhaustion.
-- **Relational Integrity Tightening (`notifications`, `notepad_links`, `bootstrap_state`)**:
-  - Added declarative `FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE` on `notifications` across SQLite/D1 and PostgreSQL.
-  - Updated `notifications.actor_id` to nullable `REFERENCES user(id) ON DELETE SET NULL` (with matching SQLite `user_delete_cascades` trigger and `leftJoin` notification queries) so recipient notifications survive actor deletion.
-  - Added typed `target_user_id`, `target_notepad_id`, `target_card_id`, and `target_board_id` foreign key columns (`ON DELETE CASCADE`, `GENERATED ALWAYS ... STORED` on SQLite/D1 and `enforce_scope_write()` trigger-populated on PostgreSQL) plus `notepad_links_single_target_chk` `CHECK` constraint on `notepad_links`.
-  - Added `FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE SET NULL` and `FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE SET NULL` on `bootstrap_state`, and reordered D1 `completeBootstrap` workspace provisioning before marking `bootstrap_state` complete.
-- **Better Auth Dependency Upgrade, Production Dependency Advisory Fixes & Worker Rejection Fix**:
-  - Upgraded `better-auth` from `^1.7.5` to `^1.7.25` (resolving `GHSA-965c-763c-88jm` and `GHSA-r4xp-prcw-77qf`), `zod` to `^4.6.7`, and `vite` to `^8.3.8`, plus transitive overrides for `seroval` (`^1.8.1`) and `source-map-js` (`^1.2.2`), bringing `pnpm audit --prod --audit-level=high` to 0 critical/high vulnerabilities.
-  - Added a constant-time `/sign-in/email` credential verification `hooks.before` middleware in `src/core/adapters/auth.ts` returning HTTP 401 directly instead of throwing `APIError` inside `workerd` `AsyncLocalStorage` context, eliminating all 9 unhandled promise rejections in `tests/api/rate-limit-worker.test.ts`.
+
+## [0.2.0] - 2026-11-15
+
+### Added
+- **Multilingual Interface (i18n)**: Full English, Spanish, and French localization across navigation, boards, notepads, settings, and sidebar language controls.
+- **Deployment & Recovery Guides**: Added deployment, upgrade, and bootstrap recovery documentation alongside isolated Cloudflare staging profile support (`--staging`).
+- **Project File Deletion**: Added project file deletion with active cover-image protection and retryable storage cleanup.
+- **Bootstrap Recovery & CI**: Added self-service bootstrap claim reset support and automated GitHub Actions CI verification.
+
+### Changed
+- **Default Theme & Resizable Sidebar**: Set `Modern Dark` as the default theme and added a persisted resizable sidebar width.
+- **Onboarding & Upgrade UX**: Improved the Cloudflare setup/upgrade workflow, README documentation, and `PostgreSQL 17` Docker Compose configuration.
+- **Query & Theme Refinements**: Slimmed sidebar notepad list queries and refined Kanban card styling.
+
+### Fixed
+- **Mobile Task View & Translations**: Improved responsive layout on `My Tasks` and completed missing UI translations.
+- **Storage & Cascade Handling**: Cleaned up orphaned media objects on permanent deletions and fixed project cascade delete edge cases.
+- **Error Handling & Lint Compliance**: Improved cross-package HTTP error normalization, resolved lint warnings, and added missing Worker OAuth/webhook bindings.
+
+### Security
+- **Deployment & Docker Hardening**: Added strict staging/production environment isolation, confirmation guards on destructive CLI operations, and removed static fallback secrets in favor of ephemeral localhost evaluation tokens.
+- **Authentication, Rate Limiting & Upload Protections**: Upgraded `better-auth` (`1.7.25`) and core dependencies, restricted instance updates to the instance owner, added persistent database-backed rate limiting with trusted-proxy IP resolution, and enforced streaming upload size limits.
+- **Database Integrity**: Added declarative foreign keys and referential integrity constraints across baseline and additive migrations.
+  - *Migration Note*: Additive migration `0001_rate_limits_and_cleanup.sql` (SQLite/D1 and PostgreSQL) creates new rate-limit and cleanup-queue tables safely without locking or modifying existing data.
 
 ## [0.1.0] - 2026-11-06
 
@@ -78,4 +52,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Optional Auth Providers**: Graceful integration for Magic Link (via `RESEND_API_KEY`) and Google OAuth (`GOOGLE_CLIENT_ID`), completely hidden in the UI when unconfigured.
 - **Internationalization (i18n)**: Multi-language support covering English, Spanish, and French.
 - **License & Decoupling Automated Guards**: Built-in CI scripts (`check-decoupling.mjs`, `check-licenses.mjs`, and `check.mjs`) to verify permissive dependency licensing and architectural purity.
-
