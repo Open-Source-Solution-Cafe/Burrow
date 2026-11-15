@@ -1,5 +1,22 @@
+import { getUploadFileType } from '../../shared/uploadPolicy';
+
 export type MediaUrl =
   { kind: 'youtube'; videoId: string; url: string } | { kind: 'link'; url: string };
+
+export type MediaBlockKind = 'image' | 'video' | 'audio' | 'file';
+
+/** Resolve the appropriate BlockNote media block type from MIME type or filename. */
+export function mediaKindFromFile(contentType?: string, filename?: string): MediaBlockKind {
+  const normalized = contentType?.trim().toLowerCase() ?? '';
+  const resolvedMime =
+    normalized && normalized !== 'application/octet-stream'
+      ? normalized
+      : (getUploadFileType({ name: filename ?? '', type: normalized })?.mimeType ?? '');
+  if (resolvedMime.startsWith('image/')) return 'image';
+  if (resolvedMime.startsWith('video/')) return 'video';
+  if (resolvedMime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
 
 export function isYoutubeVideoId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value);

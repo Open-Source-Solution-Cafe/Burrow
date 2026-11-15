@@ -6,8 +6,7 @@ import { MediaUploadControl } from '../components/media/ProjectMediaLibrary';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { schema } from './schema';
-import { parseMediaUrl } from './mediaUrl';
-import { getUploadFileType } from '../../shared/uploadPolicy';
+import { mediaKindFromFile, parseMediaUrl } from './mediaUrl';
 import { useTranslation } from '../lib/i18n';
 
 /** Empty attachments share the library's scoped upload, policy, and retry flow. */
@@ -22,9 +21,16 @@ export function EditorFilePanel({ blockId, workspaceId, projectId }: FilePanelPr
     if (!editor.isEditable || !block) {
       throw new Error(t('editor.attachmentCannotBeEdited'));
     }
-    const contentType = file.contentType ?? getUploadFileType({ name: new URL(file.url, window.location.origin).pathname, type: '' })?.mimeType;
-    const family = contentType?.split('/')[0];
-    const type = block.type === 'file' ? 'file' : family === 'image' || family === 'audio' || family === 'video' ? family : 'file';
+    const fallbackName = (() => {
+      if (file.name) return file.name;
+      try {
+        return new URL(file.url, window.location.origin).pathname;
+      } catch {
+        return file.url;
+      }
+    })();
+    const type =
+      block.type === 'file' ? 'file' : mediaKindFromFile(file.contentType, fallbackName);
     editor.updateBlock(blockId, { type, props: { url: file.url, name: file.name } });
     panel.closeMenu();
   };

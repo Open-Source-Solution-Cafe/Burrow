@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isYoutubeVideoId, parseMediaUrl } from './mediaUrl';
+import { isYoutubeVideoId, mediaKindFromFile, parseMediaUrl } from './mediaUrl';
 
 const id = 'dQw4w9WgXcQ';
 
@@ -56,4 +56,20 @@ describe('media URL parsing', () => {
       expect(isYoutubeVideoId(value)).toBe(false);
     },
   );
+});
+
+describe('mediaKindFromFile', () => {
+  it('maps image, video, audio, and generic file MIME types', () => {
+    expect(mediaKindFromFile('image/png', 'shot.png')).toBe('image');
+    expect(mediaKindFromFile('video/mp4', 'clip.mp4')).toBe('video');
+    expect(mediaKindFromFile('audio/mpeg', 'voice.mp3')).toBe('audio');
+    expect(mediaKindFromFile('application/pdf', 'spec.pdf')).toBe('file');
+  });
+
+  it('falls back to filename extension when MIME type is empty or generic', () => {
+    expect(mediaKindFromFile('', 'recording.mp4')).toBe('video');
+    expect(mediaKindFromFile('application/octet-stream', 'note.wav')).toBe('audio');
+    expect(mediaKindFromFile('', 'diagram.webp')).toBe('image');
+    expect(mediaKindFromFile('', 'archive.zip')).toBe('file');
+  });
 });

@@ -579,11 +579,202 @@ div[role='tooltip'],
     border-color: #ccc !important;
   }
 }
-/* Media chrome stays available to touch and keyboard users without occupying
-   document space. Hover-capable pointers reveal it only while working on media. */
+/* Document media blocks (images, videos, audio, and file attachments) */
+.bn-root [data-file-block] {
+  margin-block: 6px;
+}
+
+.bn-root [data-file-block] .bn-file-block-content-wrapper {
+  max-width: 100%;
+}
+
+.bn-root .bn-block-content[data-text-alignment='center'] {
+  justify-content: center !important;
+}
+
+.bn-root .bn-block-content[data-text-alignment='right'] {
+  justify-content: flex-end !important;
+}
+
+.bn-root .bn-block-content[data-text-alignment='left'] {
+  justify-content: flex-start !important;
+}
+
+.bn-root .bn-block-content[data-text-alignment='center'] > .bn-file-block-content-wrapper {
+  align-items: center;
+  margin-inline: auto;
+}
+
+.bn-root .bn-block-content[data-text-alignment='right'] > .bn-file-block-content-wrapper {
+  align-items: flex-end;
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.bn-root .bn-block-content[data-text-alignment='left'] > .bn-file-block-content-wrapper {
+  align-items: flex-start;
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.bn-root [data-file-block] .bn-add-file-button {
+  background-color: var(--surface2) !important;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md) !important;
+  color: var(--muted) !important;
+  padding: 12px 16px !important;
+  gap: 10px !important;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.bn-editor[contenteditable='true'] .bn-root [data-file-block] .bn-add-file-button:hover,
+.bn-root .bn-editor[contenteditable='true'] [data-file-block] .bn-add-file-button:hover {
+  background-color: var(--hi) !important;
+  border-color: var(--muted);
+  color: var(--text) !important;
+}
+
+.bn-root [data-file-block] .bn-file-name-with-icon {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 10px 14px !important;
+  background-color: var(--surface2) !important;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md) !important;
+  color: var(--text) !important;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.bn-root [data-file-block] .bn-file-name-with-icon:hover,
+.bn-root .ProseMirror-selectednode .bn-file-name-with-icon {
+  background-color: var(--hi) !important;
+  border-color: var(--muted);
+}
+
+.bn-root [data-file-block] .bn-file-icon {
+  width: 34px !important;
+  height: 34px !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--r-xs);
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.bn-root [data-file-block] .bn-file-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.bn-root [data-file-block] .bn-file-name {
+  margin: 0 !important;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bn-root [data-file-block] .bn-visual-media-wrapper {
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.bn-root [data-file-block] .bn-visual-media {
+  border-radius: var(--r-md) !important;
+  border: 1px solid var(--line);
+  background-color: var(--surface2);
+  max-height: 540px;
+  object-fit: contain;
+}
+
+.bn-root .bn-resize-handle {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 30px;
+  cursor: ew-resize;
+  z-index: 11;
+  background-color: var(--surface) !important;
+  border: 1.5px solid var(--accent) !important;
+  border-radius: 9999px !important;
+}
+
+.bn-root [data-file-block] .bn-audio {
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background-color: var(--surface2);
+  padding: 6px;
+}
+
+.bn-root [data-file-block] .bn-file-caption {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  padding-top: 6px;
+  padding-inline: 2px;
+}
+
+.bn-root [data-file-block] .bn-file-loading-preview {
+  padding: 12px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background-color: var(--surface2);
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+.bn-root .bn-file-block-content-wrapper {
+  position: relative;
+}
+
+.bn-root .burrow-media-menu-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 12;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line);
+  background-color: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--muted);
+  cursor: pointer;
+  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.bn-root .burrow-media-menu-btn:hover,
+.bn-root .burrow-media-menu-btn:focus-visible {
+  background-color: var(--surface);
+  border-color: var(--muted);
+  color: var(--text);
+  opacity: 1;
+}
+
 @media (hover: hover) and (pointer: fine) {
-  .media-block:not(:hover):not(:focus-within) .media-block-actions:not(.media-block-actions-open) {
+  .bn-root .bn-file-block-content-wrapper:not(:hover):not(:focus-within) .burrow-media-menu-btn {
     opacity: 0;
-    pointer-events: none;
+  }
+
+  .bn-root .ProseMirror-selectednode .burrow-media-menu-btn {
+    opacity: 0.9;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .bn-root .burrow-media-menu-btn {
+    width: 34px;
+    height: 34px;
+    opacity: 0.92;
   }
 }

@@ -70,13 +70,18 @@ export function createProjectFileRoutes(args: {
     const object = await storage.get(key);
     if (!object) throw httpError(404, 'not_found', 'File not found');
     const resolvedType = object.contentType || contentType || 'application/octet-stream';
+    const isInlineMedia = /^(image\/(?!svg\+xml)|audio\/|video\/)/.test(resolvedType);
     const headers = new Headers({
       'Content-Type': resolvedType,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "sandbox; default-src 'none'",
+      // Allow browser MediaDocument/ImageDocument playback for raster images, audio, and video
+      // while keeping all script/active content disabled.
+      'Content-Security-Policy': isInlineMedia
+        ? "default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'"
+        : "sandbox; default-src 'none'",
     });
-    if (!/^(image\/(?!svg\+xml)|audio\/|video\/)/.test(resolvedType)) {
+    if (!isInlineMedia) {
       headers.set('Content-Disposition', 'attachment');
     }
     return new Response(object.body as any, { headers });

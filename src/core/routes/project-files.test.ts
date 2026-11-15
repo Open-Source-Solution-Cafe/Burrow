@@ -154,4 +154,44 @@ describe('project file routes', () => {
     const ambiguous = await app.request(`/api/files/${encodeURIComponent(key)}`);
     expect(ambiguous.status).toBe(404);
   });
+
+  it('serves inline raster images, video, and audio without sandbox CSP so direct-tab playback works, while sandboxing SVG and documents', async () => {
+    const { app, files, storage } = createTestApp();
+    const cases: Array<{
+      storageKey: string;
+      contentType: string;
+      expectInline: boolean;
+    }> = [
+      { storageKey: 'workspace-a/project-a/photo.png', contentType: 'image/png', expectInline: true },
+      { storageKey: 'workspace-a/project-a/clip.mp4', contentType: 'video/mp4', expectInline: true },
+      { storageKey: 'workspace-a/project-a/song.mp3', contentType: 'audio/mpeg', expectInline: true },
+      { storageKey: 'workspace-a/project-a/vector.svg', contentType: 'image/svg+xml', expectInline: false },
+      { storageKey: 'workspace-a/project-a/doc.pdf', contentType: 'application/pdf', expectInline: false },
+    ];
+
+    for (const item of cases) {
+      await storage.put(item.storageKey, new Uint8Array([1, 2, 3, 4]), item.contentType);
+      files.findByProjectAndKey.mockResolvedValueOnce({
+        projectId: 'project-a',
+        storageKey: item.storageKey,
+        contentType: item.contentType,
+        createdBy: 'user-a',
+        createdAt: 1,
+      });
+
+      const res = await app.request(
+        `/api/workspaces/workspace-a/projects/project-a/files/${encodeURIComponent(item.storageKey)}`,
+      );
+      expect(res.status).toBe(200);
+      const csp = res.headers.get('content-security-policy');
+      const disposition = res.headers.get('content-disposition');
+      if (item.expectInline) {
+        expect(csp).toBe("default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'");
+        expect(disposition).toBeNull();
+      } else {
+        expect(csp).toBe("sandbox; default-src 'none'");
+        expect(disposition).toBe('attachment');
+      }
+    }
+  });
 });

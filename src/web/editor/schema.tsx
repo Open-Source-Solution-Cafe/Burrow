@@ -1,8 +1,9 @@
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
-import { createReactInlineContentSpec, createReactBlockSpec, ReactFileBlock, ReactImageBlock, ReactVideoBlock, ReactAudioBlock } from '@blocknote/react';
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultProps } from '@blocknote/core';
+import { createReactInlineContentSpec, createReactBlockSpec, ReactImageBlock, ReactVideoBlock, ReactAudioBlock } from '@blocknote/react';
 import { Calendar, FileText, Kanban, Layout, Tag } from 'lucide-react';
 import { referenceHref, type ContentReferenceKind } from '../../shared/references';
 import { useProjectReference } from './referenceScope';
+import { FileMedia } from './FileMedia';
 import { YoutubeMedia } from './YoutubeMedia';
 
 function getInitials(name?: string | null): string {
@@ -193,10 +194,32 @@ export const BoardLinkBlock = createReactBlockSpec(
   { render: ({ block }) => <ReferenceBlock kind="board" id={block.props.boardId} /> },
 );
 
+export const FileBlock = createReactBlockSpec(
+  {
+    type: 'file',
+    propSchema: {
+      textAlignment: defaultProps.textAlignment,
+      backgroundColor: { default: 'default' },
+      name: { default: '' },
+      url: { default: '' },
+      caption: { default: '' },
+      widthPercent: { default: 100 },
+    },
+    content: 'none',
+  },
+  {
+    render: ({ block, editor }) => <FileMedia block={block} editor={editor} />,
+  },
+);
+
 export const YoutubeBlock = createReactBlockSpec(
   {
     type: 'youtube',
-    propSchema: { videoId: { default: '' }, widthPercent: { default: 100 } },
+    propSchema: {
+      textAlignment: defaultProps.textAlignment,
+      videoId: { default: '' },
+      widthPercent: { default: 100 },
+    },
     content: 'none',
   },
   {
@@ -210,7 +233,7 @@ export const YoutubeBlock = createReactBlockSpec(
 export const schema = BlockNoteSchema.create({
   blockSpecs: {
     ...defaultBlockSpecs,
-    file: ReactFileBlock(),
+    file: FileBlock(),
     image: ReactImageBlock(),
     video: ReactVideoBlock(),
     audio: ReactAudioBlock(),

@@ -36,6 +36,7 @@ import { schema } from './schema';
 import { MediaPicker } from './MediaPicker';
 import { EditorFilePanel } from './EditorFilePanel';
 import { createMediaUploader } from './mediaUpload';
+import { MEDIA_BLOCK_TYPES, selectMediaBlock } from './mediaSelection';
 import {
   getAtMenuSuggestions,
   getCustomSlashItems,
@@ -1280,15 +1281,74 @@ function NotepadEditorInner({
     [data.workspaceId, data.projectId],
   );
 
+  useEffect(() => {
+    if (!editor || !isEditable) return;
+    const root = editor.prosemirrorView?.dom;
+    if (!root) return;
+
+    const attachMediaMenuTriggers = () => {
+      const wrappers = root.querySelectorAll<HTMLElement>('[data-file-block] .bn-file-block-content-wrapper');
+      wrappers.forEach((wrapper) => {
+        if (wrapper.querySelector('[data-burrow-media-menu="1"]')) return;
+        const outer = wrapper.closest<HTMLElement>('.bn-block-outer[data-id]');
+        const blockId = outer?.getAttribute('data-id');
+        if (!blockId) return;
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'burrow-media-menu-btn no-print';
+        btn.setAttribute('data-burrow-media-menu', '1');
+        btn.setAttribute('contenteditable', 'false');
+        btn.setAttribute('aria-label', 'Media options');
+        btn.setAttribute('title', 'Media options');
+        btn.innerHTML =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>';
+        btn.addEventListener('pointerdown', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        btn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          selectMediaBlock(editor, blockId);
+        });
+        wrapper.appendChild(btn);
+      });
+    };
+
+    attachMediaMenuTriggers();
+    const observer = new MutationObserver(() => attachMediaMenuTriggers());
+    observer.observe(root, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [editor, isEditable]);
+
+  const handleEditorContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      if (!editor || !isEditable) return;
+      const target = event.target as HTMLElement | null;
+      const outer = target?.closest<HTMLElement>('.bn-block-outer[data-id]');
+      const blockId = outer?.getAttribute('data-id');
+      if (!blockId) return;
+      const contentEl = outer?.querySelector<HTMLElement>('[data-content-type]');
+      const contentType = contentEl?.getAttribute('data-content-type') ?? '';
+      if (MEDIA_BLOCK_TYPES.has(contentType)) {
+        selectMediaBlock(editor, blockId);
+      }
+    },
+    [editor, isEditable],
+  );
+
   const blockNoteViewNode = editor && (
-    <BlockNoteView
-      editor={editor}
-      editable={isEditable}
-      slashMenu={false}
-      filePanel={false}
-      theme={isDark ? 'dark' : 'light'}
-      className={hideTitle ? 'w-full bn-embedded' : 'w-full'}
-    >
+    <div className="w-full" onContextMenu={handleEditorContextMenu}>
+      <BlockNoteView
+        editor={editor}
+        editable={isEditable}
+        slashMenu={false}
+        filePanel={false}
+        theme={isDark ? 'dark' : 'light'}
+        className={hideTitle ? 'w-full bn-embedded' : 'w-full'}
+      >
       <FilePanelController
         filePanel={renderFilePanel}
         portalElement={typeof document === 'undefined' ? undefined : document.body}
@@ -1352,7 +1412,8 @@ function NotepadEditorInner({
           );
         }}
       />
-    </BlockNoteView>
+      </BlockNoteView>
+    </div>
   );
 
   const backlinksNode = data.backlinks && data.backlinks.length > 0 && (
@@ -1700,7 +1761,7 @@ function NotepadEditorInner({
         </div>
 
         {/* Flat Obsidian Canvas */}
-        <div className="w-full max-w-[780px] pl-4 sm:pl-24 pr-4 sm:pr-6 pt-4 sm:pt-11 pb-20 flex flex-col gap-4 sm:gap-5">
+        <div className="w-full max-w-[1200px] mx-auto px-4 sm:px-12 pt-4 sm:pt-11 pb-20 flex flex-col gap-4 sm:gap-5">
           {bannersNode}
           {titleNode}
           <div className="w-full flex items-center gap-2 flex-wrap pt-0.5">{tagsNode}</div>

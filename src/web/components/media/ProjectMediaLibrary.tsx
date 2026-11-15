@@ -1,11 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Search, Upload } from 'lucide-react';
+import { FileText, Film, Music, Search, Trash2, Upload } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { Input } from '../ui/Input';
 import { useAccount } from '../../lib/queries';
-import { projectMediaKey, useProjectMedia, type ProjectMediaItem } from '../../lib/projectMedia';
+import {
+  projectMediaKey,
+  useDeleteProjectMedia,
+  useProjectMedia,
+  type ProjectMediaItem,
+} from '../../lib/projectMedia';
 import { createMediaUploader } from '../../editor/mediaUpload';
 import { useUploadPolicy } from '../../lib/uploadPolicy';
 import { DEFAULT_UPLOAD_POLICY, UPLOAD_FILE_TYPES, getUploadFileType } from '../../../shared/uploadPolicy';
@@ -114,8 +120,13 @@ export function ProjectMediaBrowser({
   onSelect?: (item: ProjectMediaItem) => void;
 }) {
   const { t } = useTranslation();
+  const { data: account } = useAccount();
+  const membership = account?.workspaces.find((workspace) => workspace.id === workspaceId);
+  const canDelete = Boolean(!onSelect && membership && membership.role !== 'viewer');
   const [search, setSearch] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<{ key: string; name: string } | null>(null);
   const library = useProjectMedia(workspaceId, projectId);
+  const deleteMedia = useDeleteProjectMedia(workspaceId, projectId);
   const images = library.data ?? [];
   const matches = images.filter((item) =>
     (item.filename || item.key).toLowerCase().includes(search.trim().toLowerCase()),
@@ -156,27 +167,68 @@ export function ProjectMediaBrowser({
       >
         {matches.map((item) => {
           const name = item.filename || item.key.split('/').pop() || t('media.projectImageDefault');
-          const content = (
-            <>
-              <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border border-[var(--line)] bg-[var(--surface2)] theme-radius-xs transition-colors group-hover:border-[var(--muted)]">
-                {item.contentType.startsWith('image/') ? <img
-                  src={item.url}
-                  alt={name}
-                  loading="lazy"
-                  className="h-full w-full object-contain p-2"
-                /> : <span className="px-4 text-sm text-[var(--muted)] truncate">{name}</span>}
-              </div>
-              <div className="mt-2 flex items-baseline justify-between gap-2">
-                <span className="truncate text-xs text-[var(--text)]" title={name}>
-                  {name}
+          const ext = name.split('.').pop()?.toUpperCase();
+          const preview = item.contentType.startsWith('image/') ? (
+            <img
+              src={item.url}
+              alt={name}
+              loading="lazy"
+              className="h-full w-full object-contain p-2"
+            />
+          ) : item.contentType.startsWith('video/') ? (
+            <div className="flex flex-col items-center gap-1.5 text-[var(--muted)]">
+              <Film className="h-7 w-7 text-[var(--accent)]" />
+              {ext && (
+                <span className="border border-[var(--line)] bg-[var(--surface)] px-1.5 py-0.5 text-[10px] font-semibold uppercase theme-radius-xs">
+                  {ext}
                 </span>
+              )}
+            </div>
+          ) : item.contentType.startsWith('audio/') ? (
+            <div className="flex flex-col items-center gap-1.5 text-[var(--muted)]">
+              <Music className="h-7 w-7 text-[var(--accent)]" />
+              {ext && (
+                <span className="border border-[var(--line)] bg-[var(--surface)] px-1.5 py-0.5 text-[10px] font-semibold uppercase theme-radius-xs">
+                  {ext}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-1.5 px-4 text-[var(--muted)]">
+              <FileText className="h-7 w-7 text-[var(--accent)]" />
+              <span className="max-w-full truncate text-xs">{name}</span>
+            </div>
+          );
+          const thumbnail = (
+            <div className="flex aspect-[4/3] items-center justify-center overflow-hidden border border-[var(--line)] bg-[var(--surface2)] theme-radius-xs transition-colors group-hover:border-[var(--muted)]">
+              {preview}
+            </div>
+          );
+          const metaRow = (
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="truncate text-xs text-[var(--text)]" title={name}>
+                {name}
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
                 {item.byteSize !== null && (
-                  <span className="shrink-0 text-[11px] text-[var(--muted)]">
+                  <span className="text-[11px] text-[var(--muted)]">
                     {Math.ceil(item.byteSize / 1024)} KB
                   </span>
                 )}
+                {canDelete && (
+                  <button
+                    type="button"
+                    aria-label={`Delete ${name}`}
+                    title={`Delete ${name}`}
+                    disabled={deleteMedia.isPending}
+                    onClick={() => setPendingDelete({ key: item.key, name })}
+                    className="inline-flex h-6 w-6 items-center justify-center text-[var(--muted)] hover:bg-[var(--hi)] hover:text-[var(--danger)] theme-radius-xs transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
-            </>
+            </div>
           );
           const className =
             'group block min-w-0 text-left focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)]';
@@ -187,22 +239,49 @@ export function ProjectMediaBrowser({
               className={className}
               onClick={() => onSelect(item)}
             >
-              {content}
+              {thumbnail}
+              {metaRow}
             </button>
           ) : (
-            <a
-              key={item.key}
-              className={className}
-              href={item.url}
-              aria-label={`Open ${name}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {content}
-            </a>
+            <div key={item.key} className="group min-w-0">
+              <a
+                className={className}
+                href={item.url}
+                aria-label={`Open ${name}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {thumbnail}
+              </a>
+              {metaRow}
+            </div>
           );
         })}
       </div>
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        title="Delete file"
+        message={
+          pendingDelete
+            ? `Delete "${pendingDelete.name}" from this project? Any documents referencing it will no longer be able to load it.`
+            : ''
+        }
+        confirmLabel={deleteMedia.isPending ? 'Deleting…' : t('common.delete')}
+        busy={deleteMedia.isPending}
+        onCancel={() => {
+          if (!deleteMedia.isPending) setPendingDelete(null);
+        }}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          try {
+            await deleteMedia.mutateAsync(pendingDelete.key);
+            toast.success('File deleted');
+            setPendingDelete(null);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Could not delete file');
+          }
+        }}
+      />
     </div>
   );
 }

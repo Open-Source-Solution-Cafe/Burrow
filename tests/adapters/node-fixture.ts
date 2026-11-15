@@ -94,7 +94,7 @@ export async function openPersistence(
       projects: createProjectRepository(db),
       projectFiles: createProjectFileRepository(db),
       storageDeletions: createStorageDeletionRepository(db),
-      rateLimitStore: new SqliteRateLimitStore(db),
+      rateLimitStore: new SqliteRateLimitStore(db, { pruneProbability: 0 }),
       async query(text, params = []) {
         const statement = sqlite.prepare(text);
         if (statement.reader) return statement.all(...params) as Record<string, unknown>[];
@@ -131,7 +131,7 @@ export async function openPersistence(
       projects: new PostgresProjectRepository(db),
       projectFiles: new PostgresProjectFileRepository(db),
       storageDeletions: new PostgresStorageDeletionRepository(db),
-      rateLimitStore: new PostgresRateLimitStore(db),
+      rateLimitStore: new PostgresRateLimitStore(db, { pruneProbability: 0 }),
       async query(text, params = []) {
         let index = 0;
         return Array.from(

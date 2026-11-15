@@ -29,10 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Default Theme & Resizable Sidebar**: Set `Modern Dark` as the default theme and added a persisted resizable sidebar width.
+- **Unified Media Frame & Notepad Layout**: Expanded the default notepad canvas (`max-w-[1200px]`), unified YouTube embeds and uploaded media/file blocks behind a reusable `<MediaBlockFrame>` container with side-drag resizing and Left/Center/Right alignment, and added type badges and delete controls in the Project Media Library.
 - **Onboarding & Upgrade UX**: Improved the Cloudflare setup/upgrade workflow, README documentation, and `PostgreSQL 17` Docker Compose configuration.
 - **Query & Theme Refinements**: Slimmed sidebar notepad list queries and refined Kanban card styling.
 
 ### Fixed
+- **CI Test Determinism**: Provided fallback test `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` bindings in `vitest.config.ts` for clean CI checkouts, aligned GitHub Actions Node.js to `22.22.0`, and disabled probabilistic opportunistic pruning in the rate-limit adapter test fixture.
+- **Document Media Playback & Selection**: Fixed media insertion to create inline `video` and `audio` blocks for uploaded/library media, added touch- and desktop-friendly media options triggers (`⋯`) and custom right-click handling on notepads, and updated file-serving CSP headers so raster images, audio, and video play inline when opened in a new tab.
 - **Mobile Task View & Translations**: Improved responsive layout on `My Tasks` and completed missing UI translations.
 - **Storage & Cascade Handling**: Cleaned up orphaned media objects on permanent deletions and fixed project cascade delete edge cases.
 - **Error Handling & Lint Compliance**: Improved cross-package HTTP error normalization, resolved lint warnings, and added missing Worker OAuth/webhook bindings.

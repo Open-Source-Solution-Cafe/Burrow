@@ -5,6 +5,8 @@
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev/)
+[![Hono](https://img.shields.io/badge/Hono-4.13-E36002.svg)](https://hono.dev/)
+[![BlockNote](https://img.shields.io/badge/BlockNote-0.55-111827.svg)](https://www.blocknotejs.org/)
 [![Vite](https://img.shields.io/badge/Vite-8.3-646CFF.svg)](https://vite.dev/)
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers_D1_R2-F38020.svg)](https://workers.cloudflare.com/)
 [![Docker and PostgreSQL](https://img.shields.io/badge/Docker-PostgreSQL_17-2496ED.svg)](./docker-compose.yml)

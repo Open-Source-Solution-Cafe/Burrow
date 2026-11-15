@@ -5,11 +5,11 @@ import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { MediaUploadControl, ProjectMediaBrowser } from '../components/media/ProjectMediaLibrary';
-import { parseMediaUrl } from './mediaUrl';
+import { mediaKindFromFile, parseMediaUrl, type MediaBlockKind } from './mediaUrl';
 import { useTranslation } from '../lib/i18n';
 
 export type MediaSelection =
-  { kind: 'image' | 'file'; url: string; name?: string } | NonNullable<ReturnType<typeof parseMediaUrl>>;
+  { kind: MediaBlockKind; url: string; name?: string } | NonNullable<ReturnType<typeof parseMediaUrl>>;
 
 export function MediaPicker({
   workspaceId,
@@ -62,7 +62,7 @@ export function MediaPicker({
             workspaceId={workspaceId}
             projectId={projectId}
             onBusyChange={setBusy}
-            onUploaded={(file) => select({ kind: file.contentType.startsWith('image/') ? 'image' : 'file', ...file })}
+            onUploaded={(file) => select({ kind: mediaKindFromFile(file.contentType, file.name), ...file })}
           />
         )}
         {tab === 'library' && (
@@ -70,7 +70,11 @@ export function MediaPicker({
             workspaceId={workspaceId}
             projectId={projectId}
             onSelect={(item) =>
-              select({ kind: item.contentType.startsWith('image/') ? 'image' : 'file', url: item.url, name: item.filename || undefined })
+              select({
+                kind: mediaKindFromFile(item.contentType, item.filename || item.key),
+                url: item.url,
+                name: item.filename || undefined,
+              })
             }
           />
         )}

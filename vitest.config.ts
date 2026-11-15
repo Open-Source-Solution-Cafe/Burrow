@@ -32,6 +32,8 @@ export default defineConfig({
             miniflare: {
               bindings: {
                 TEST_MIGRATIONS,
+                BETTER_AUTH_SECRET: 'test-better-auth-secret-32-bytes-minimum!!',
+                BETTER_AUTH_URL: 'http://localhost:8787',
                 RESEND_API_KEY: '',
                 EMAIL_FROM: 'Burrow Tests <noreply@burrow.test>',
                 BOOTSTRAP_TOKEN: 'test-bootstrap-token',
