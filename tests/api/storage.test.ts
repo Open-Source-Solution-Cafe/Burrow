@@ -1,7 +1,13 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { createD1Db } from '../../src/core/adapters/db/d1/client';
+import { createNotepadRepository } from '../../src/core/adapters/db/d1/repositories/notepad';
+import { createProjectRepository } from '../../src/core/adapters/db/d1/repositories/project';
 import { createProjectFileRepository } from '../../src/core/adapters/db/d1/repositories/project-file';
+import { createStorageDeletionRepository } from '../../src/core/adapters/db/d1/repositories/storage-deletions';
+import { R2StorageAdapter } from '../../src/core/adapters/storage/r2';
+import { StorageCleanupService } from '../../src/core/services/storage-cleanup';
+import { WORKER_MAX_UPLOAD_BYTES } from '../../src/shared/uploadPolicy';
 import { createWorkerApp } from '../../src/worker/index';
 import { expectInvariantsHold } from './helpers';
 import { getAccountWorkspaceScope } from './account-scope';
@@ -455,6 +461,144 @@ describe('project-scoped storage and uploads', () => {
     expect(deleteRes.status).toBe(200);
     expect(await env.FILES.get(key)).toBeNull();
     expect((await request(filePath(workspaceId, projectId, key), editorCookie)).status).toBe(404);
+    await expectInvariantsHold(env.DB);
+  });
+
+  it('reports worker upload cap and rejects chunked uploads with missing or falsified Content-Length', async () => {
+    const versionRes = await request('/api/system/version', ownerCookie);
+    expect(versionRes.status).toBe(200);
+    const version = (await versionRes.json()) as { runtime?: string; maxUploadBytes?: number };
+    expect(version.runtime).toBe('worker');
+    expect(version.maxUploadBytes).toBe(WORKER_MAX_UPLOAD_BYTES);
+
+    const makeOversizedStream = () => {
+      const boundary = '----burrowtestboundary';
+      const header = new TextEncoder().encode(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="oversized.png"\r\nContent-Type: image/png\r\n\r\n`,
+      );
+      const footer = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+      const chunk = new Uint8Array(1024 * 1024);
+      let step = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (step === 0) {
+            controller.enqueue(header);
+            step += 1;
+            return;
+          }
+          if (step <= 26) {
+            controller.enqueue(chunk);
+            step += 1;
+            return;
+          }
+          if (step === 27) {
+            controller.enqueue(footer);
+            step += 1;
+            return;
+          }
+          controller.close();
+        },
+      });
+    };
+
+    const missingLenRes = await request(`${projectPath(workspaceId, projectId)}/uploads`, editorCookie, {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=----burrowtestboundary' },
+      body: makeOversizedStream(),
+      duplex: 'half',
+    } as RequestInit);
+    expect(missingLenRes.status).toBe(413);
+    expect(await missingLenRes.json()).toMatchObject({ error: { code: 'payload_too_large' } });
+
+    const spoofedLenRes = await request(`${projectPath(workspaceId, projectId)}/uploads`, editorCookie, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'multipart/form-data; boundary=----burrowtestboundary',
+        'Content-Length': '16',
+      },
+      body: makeOversizedStream(),
+      duplex: 'half',
+    } as RequestInit);
+    expect(spoofedLenRes.status).toBe(413);
+    expect(await spoofedLenRes.json()).toMatchObject({ error: { code: 'payload_too_large' } });
+  });
+
+  it('preserves pending cleanup queue and retries R2 deletion cleanly after storage failure on project delete', async () => {
+    const tempProjectName = 'Flaky Delete Cleanup Project';
+    const createProjRes = await postJson(
+      `/api/workspaces/${workspaceId}/projects`,
+      { name: tempProjectName },
+      ownerCookie,
+    );
+    expect(createProjRes.status).toBe(201);
+    const { id: flakyProjectId } = (await createProjRes.json()) as { id: string };
+
+    const uploadRes = await upload(
+      workspaceId,
+      flakyProjectId,
+      ownerCookie,
+      'retry-cleanup.png',
+      new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+      'image/png',
+    );
+    expect(uploadRes.status).toBe(200);
+    const { key: fileKey } = (await uploadRes.json()) as { key: string };
+
+    let failedOnce = false;
+    const flakyBucket = new Proxy(env.FILES, {
+      get(target, prop, receiver) {
+        if (prop === 'delete') {
+          return async (keys: string | string[]) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            if (!failedOnce && list.includes(fileKey)) {
+              failedOnce = true;
+              throw new Error('simulated R2 delete failure');
+            }
+            return target.delete(keys);
+          };
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as R2Bucket;
+
+    const flakyApp = createWorkerApp({ ...env, FILES: flakyBucket });
+    const headers = new Headers({ Cookie: ownerCookie });
+    const delRes = await flakyApp.request(
+      `http://localhost/api/workspaces/${workspaceId}/projects/${flakyProjectId}?confirm=${encodeURIComponent(tempProjectName)}`,
+      { method: 'DELETE', headers },
+      { ...env, FILES: flakyBucket },
+    );
+    expect(delRes.status).toBe(200);
+    expect(failedOnce).toBe(true);
+
+    // R2 object still exists and pending queue retained its deletion record without FK reinsertion
+    expect(await env.FILES.get(fileKey)).not.toBeNull();
+    const db = createD1Db(env.DB);
+    const storageDeletions = createStorageDeletionRepository(db);
+    const pending = await storageDeletions.listAll();
+    const record = pending.find((entry) => entry.storageKey === fileKey);
+    expect(record).toBeDefined();
+    expect(record?.attempts).toBe(1);
+    expect(record?.lastError).toContain('simulated R2 delete failure');
+
+    // Retry cleanup past backoff cleans up R2 and clears pending queue
+    const cleanup = new StorageCleanupService(
+      {
+        projectFiles,
+        notepads: createNotepadRepository(db),
+        projects: createProjectRepository(db),
+        storageDeletions,
+      },
+      new R2StorageAdapter(env.FILES),
+    );
+    const retryResult = await cleanup.processPending({
+      now: (record?.nextRetryAt ?? Date.now()) + 100,
+    });
+    expect(retryResult.deleted).toBeGreaterThanOrEqual(1);
+    expect(await env.FILES.get(fileKey)).toBeNull();
+    expect((await storageDeletions.listAll()).some((entry) => entry.storageKey === fileKey)).toBe(
+      false,
+    );
     await expectInvariantsHold(env.DB);
   });
 });

@@ -5,18 +5,18 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - '${PORT:-3005}:3005'
+      - '${BIND_HOST:-127.0.0.1}:${PORT:-3005}:3005'
     environment:
       - NODE_ENV=production
       - PORT=3005
-      - DATABASE_URL=postgres://burrow:burrowpassword@postgres:5432/burrow
-      # Local quick-start evaluation mode (auto-generates ephemeral credentials if left unset on localhost).
-      # For internet-accessible production, set BETTER_AUTH_URL=https://notes.example.com,
-      # generate unique BETTER_AUTH_SECRET & BOOTSTRAP_TOKEN in .env, and set ALLOW_LOCAL_DOCKER_EVAL=false.
-      - ALLOW_LOCAL_DOCKER_EVAL=${ALLOW_LOCAL_DOCKER_EVAL:-true}
-      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3005}
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
-      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:-}
+      - BIND_HOST=${BIND_HOST:-127.0.0.1}
+      - DATABASE_URL=postgres://${POSTGRES_USER:-burrow}:${POSTGRES_PASSWORD:?Run pnpm run docker:init -- --local-eval (or set POSTGRES_PASSWORD in .env)}@postgres:5432/${POSTGRES_DB:-burrow}
+      # Disabled by default; explicitly opt in (ALLOW_LOCAL_DOCKER_EVAL=true) only for loopback http://localhost:3005 evaluation.
+      # For quick .env generation, run: pnpm run docker:init -- --local-eval (or --url https://notes.example.com).
+      - ALLOW_LOCAL_DOCKER_EVAL=${ALLOW_LOCAL_DOCKER_EVAL:-false}
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:?Run pnpm run docker:init or set BETTER_AUTH_URL in .env}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Run pnpm run docker:init or set BETTER_AUTH_SECRET in .env}
+      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:?Run pnpm run docker:init or set BOOTSTRAP_TOKEN in .env}
       # Persistent local storage for project files and attachments
       - LOCAL_STORAGE_PATH=/app/data/uploads
       # Automatically run migrations on container start
@@ -31,13 +31,13 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=burrow
-      - POSTGRES_PASSWORD=burrowpassword
-      - POSTGRES_DB=burrow
+      - POSTGRES_USER=${POSTGRES_USER:-burrow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Run pnpm run docker:init or set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=${POSTGRES_DB:-burrow}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U burrow -d burrow']
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-burrow} -d ${POSTGRES_DB:-burrow}']
       interval: 5s
       timeout: 5s
       retries: 5

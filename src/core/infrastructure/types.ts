@@ -2,8 +2,10 @@ import type { IStorageAdapter } from '../adapters/storage';
 import type { ISearchAdapter } from '../adapters/search';
 import type { ILockAdapter } from '../adapters/lock';
 import type { IEmailProvider } from '../adapters/email';
+import type { RateLimitStore } from '../adapters/rate-limit';
 import type { ExtractedLink } from '../../shared/extract';
 import type { ContentReferenceKind, ReferencePreview } from '../../shared/references';
+import type { BurrowRuntime } from '../../shared/uploadPolicy';
 
 /**
  * Minimal auth provider interface for the core app factory.
@@ -33,6 +35,7 @@ export interface RepositoryContainer {
   notifications: INotificationRepository;
   members: IMemberRepository;
   invites: IInviteRepository;
+  storageDeletions?: IStorageDeletionRepository;
 }
 
 /**
@@ -47,6 +50,8 @@ export interface Infrastructure {
   auth: AuthProvider;
   email: IEmailProvider;
   bootstrapToken: string;
+  rateLimitStore?: RateLimitStore;
+  runtime?: BurrowRuntime;
   appUrl?: string;
   env?: Record<string, any>;
 }
@@ -77,7 +82,7 @@ export interface IWorkspaceRepository {
   isInstanceOwner?(userId: string): Promise<boolean>;
   count(): Promise<number>;
   releaseBootstrap?(email: string): Promise<boolean>;
-  resetBootstrapClaim?(): Promise<boolean>;
+  resetBootstrapClaim?(confirmEmail?: string): Promise<boolean>;
 }
 
 export interface WorkspaceMembership {
@@ -127,6 +132,8 @@ export interface IProjectRepository {
     projectId: string,
     confirmName: string,
   ): Promise<string[] | null>;
+  /** Lists expected `.upload-policy.json` object keys for all live projects for safe orphan reconciliation. */
+  listAllPolicyKeys?(): Promise<string[]>;
 }
 
 export interface ProjectFile {
@@ -375,6 +382,8 @@ export interface INotepadRepository {
    * If excludeNotepadId is specified, excludes that notepad row from the count.
    */
   countByCoverKey(coverKey: string, excludeNotepadId?: string): Promise<number>;
+  /** Lists all distinct non-null cover keys across all notepads (including trashed) for safe orphan reconciliation. */
+  listAllCoverKeys?(): Promise<string[]>;
   // Tags
   /** Tag IDs associated with a note only when the note and tags are in the explicit project/workspace scope. */
   listTagIds(scope: ProjectScope, notepadId: string): Promise<string[]>;
@@ -952,4 +961,43 @@ export interface SaveContentBatchArgs {
   previousLinks: StoredLink[];
   now: number;
   lock?: { clientId: string; userId: string; expiresAt: number };
+}
+
+export type StorageDeletionReason = 'project_delete' | 'notepad_delete' | 'file_delete';
+
+export interface PendingStorageDeletion {
+  id: string;
+  storageKey: string;
+  projectId: string | null;
+  workspaceId: string | null;
+  reason: StorageDeletionReason;
+  attempts: number;
+  lastError: string | null;
+  createdAt: number;
+  nextRetryAt: number;
+}
+
+export interface EnqueueStorageDeletionInput {
+  id?: string;
+  storageKey: string;
+  projectId?: string | null;
+  workspaceId?: string | null;
+  reason: StorageDeletionReason;
+  createdAt?: number;
+  nextRetryAt?: number;
+}
+
+export interface IStorageDeletionRepository {
+  enqueue(items: EnqueueStorageDeletionInput[]): Promise<void>;
+  listDue(now: number, limit?: number): Promise<PendingStorageDeletion[]>;
+  listAll(limit?: number): Promise<PendingStorageDeletion[]>;
+  claimForProcessing(id: string, now: number, leaseUntil: number): Promise<boolean>;
+  markAttemptFailed(
+    id: string,
+    expectedAttempts: number,
+    lastError: string,
+    nextRetryAt: number,
+  ): Promise<boolean>;
+  complete(id: string): Promise<void>;
+  hasPendingForKey(storageKey: string): Promise<boolean>;
 }

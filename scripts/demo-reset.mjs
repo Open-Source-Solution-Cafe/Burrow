@@ -23,10 +23,12 @@ import { assertResetDirectory, selectDatabaseTarget } from '../src/server/databa
 import {
   assertDemoResetAllowed,
   bin,
+  collectAccounts,
   inspectOrCleanRemoteR2References,
   loadEnv,
   migrateDatabase,
   parseCliArgs,
+  parseFirstJson,
   parseJsonc,
   printTargetBanner,
   resolveRemoteProfile,
@@ -38,6 +40,8 @@ import {
 } from './lib.mjs';
 
 const EMAIL_REGEX = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const ACCOUNT_ID_REGEX = /^[a-f0-9]{32}$/i;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function validateDemoEmail(email) {
   const trimmed = String(email ?? '').trim();
@@ -51,6 +55,98 @@ function escapeSqlLiteral(value) {
   return String(value).replace(/'/g, "''");
 }
 
+function assertExpectedDemoTargetConfig(baseCfg, profile, env, rootDir) {
+  const demoSection = baseCfg?.env?.demo;
+  if (!demoSection || typeof demoSection !== 'object') {
+    throw new Error(
+      'Missing explicit env.demo deployment target in wrangler.jsonc. Ordinary production deployments cannot be reset by demo-reset.',
+    );
+  }
+  const sectionWorker = demoSection.name;
+  const sectionDb = demoSection.d1_databases?.[0]?.database_name;
+  const sectionBucket = demoSection.r2_buckets?.[0]?.bucket_name;
+  if (
+    !sectionWorker ||
+    sectionWorker === baseCfg?.name ||
+    !sectionDb ||
+    sectionDb === baseCfg?.d1_databases?.[0]?.database_name ||
+    !sectionBucket ||
+    sectionBucket === baseCfg?.r2_buckets?.[0]?.bucket_name
+  ) {
+    throw new Error(
+      'Invalid env.demo configuration in wrangler.jsonc: demo target resources must be distinct from production resources.',
+    );
+  }
+
+  const accountId = env.DEMO_CLOUDFLARE_ACCOUNT_ID?.trim() || '';
+  if (!ACCOUNT_ID_REGEX.test(accountId)) {
+    throw new Error(
+      'Missing or invalid DEMO_CLOUDFLARE_ACCOUNT_ID: remote demo reset requires a 32-character Cloudflare account ID.',
+    );
+  }
+  const ambientAccountId = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  if (ambientAccountId && ambientAccountId.toLowerCase() !== accountId.toLowerCase()) {
+    throw new Error(
+      `Account target mismatch: CLOUDFLARE_ACCOUNT_ID (${ambientAccountId}) does not match DEMO_CLOUDFLARE_ACCOUNT_ID (${accountId}).`,
+    );
+  }
+
+  const workerName = env.DEMO_WORKER_NAME?.trim() || '';
+  if (!workerName || workerName !== profile.workerName) {
+    throw new Error(
+      `Missing or mismatched DEMO_WORKER_NAME ("${workerName}"): expected "${profile.workerName}".`,
+    );
+  }
+
+  const databaseName = env.DEMO_D1_DATABASE_NAME?.trim() || '';
+  if (!databaseName || databaseName !== profile.dbName) {
+    throw new Error(
+      `Missing or mismatched DEMO_D1_DATABASE_NAME ("${databaseName}"): expected "${profile.dbName}".`,
+    );
+  }
+
+  const databaseId = env.DEMO_D1_DATABASE_ID?.trim() || '';
+  if (!UUID_REGEX.test(databaseId)) {
+    throw new Error(
+      'Missing or invalid DEMO_D1_DATABASE_ID: remote demo reset requires an explicit 36-character D1 database UUID.',
+    );
+  }
+
+  const bucketName = env.DEMO_R2_BUCKET_NAME?.trim() || '';
+  if (!bucketName || bucketName !== profile.bucketName) {
+    throw new Error(
+      `Missing or mismatched DEMO_R2_BUCKET_NAME ("${bucketName}"): expected "${profile.bucketName}".`,
+    );
+  }
+
+  const localDemoConfigPath = path.join(rootDir, profile.localConfigFilename);
+  if (fs.existsSync(localDemoConfigPath)) {
+    const localCfg = parseJsonc(fs.readFileSync(localDemoConfigPath, 'utf8'));
+    const localWorker = localCfg?.name;
+    const localDb = localCfg?.d1_databases?.[0]?.database_name;
+    const localDbId = localCfg?.d1_databases?.[0]?.database_id;
+    const localBucket = localCfg?.r2_buckets?.[0]?.bucket_name;
+    if (
+      (localWorker && localWorker !== workerName) ||
+      (localDb && localDb !== databaseName) ||
+      (localDbId && localDbId.toLowerCase() !== databaseId.toLowerCase()) ||
+      (localBucket && localBucket !== bucketName)
+    ) {
+      throw new Error(
+        `Existing ${profile.localConfigFilename} conflicts with explicit demo target configuration (worker=${localWorker}, db=${localDb}/${localDbId}, bucket=${localBucket}).`,
+      );
+    }
+  }
+
+  return {
+    accountId: accountId.toLowerCase(),
+    workerName,
+    databaseName,
+    databaseId: databaseId.toLowerCase(),
+    bucketName,
+  };
+}
+
 export function resolveDemoResetContext({
   args = process.argv.slice(2),
   env = process.env,
@@ -61,19 +157,157 @@ export function resolveDemoResetContext({
   const target = selectDatabaseTarget(args, env, rootDir);
   const isRemote = target.kind === 'remote';
   const baseCfg = parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
-  const profile = isRemote ? resolveRemoteProfile(baseCfg, { args, env }) : null;
-  if (isRemote && profile) {
+
+  let profile = null;
+  let expectedTarget = null;
+  if (isRemote) {
+    if (parsed.booleanFlags['--demo'] !== true && parsed.values['--env'] !== 'demo') {
+      throw new Error(
+        'Refusing remote demo reset without explicit --demo flag (--env=demo). Ordinary production deployments cannot be reset without targeting the explicit demo environment.',
+      );
+    }
+    profile = resolveRemoteProfile(baseCfg, { args, env });
     assertDemoResetAllowed({ profile, args, env, isInteractive });
+    expectedTarget = assertExpectedDemoTargetConfig(baseCfg, profile, env, rootDir);
   }
+
   const demoEmail = validateDemoEmail(parsed.values['--email'] || env.DEMO_EMAIL || 'demo@osscafe.com');
   const demoPassword = parsed.values['--password'] || env.DEMO_PASSWORD || 'demopassword123';
   return {
     target,
     isRemote,
     profile,
+    expectedTarget,
     demoEmail,
     demoPassword,
     cleanR2: parsed.booleanFlags['--clean-r2'] === true,
+  };
+}
+
+/**
+ * Verify exact remote Cloudflare account, D1 database, Worker script, and R2 bucket
+ * via Wrangler before executing any destructive remote operation.
+ */
+export function verifyRemoteDemoResources({
+  expectedTarget,
+  runFn = run,
+  wranglerBin = bin('wrangler'),
+}) {
+  if (!expectedTarget) {
+    throw new Error('Missing expected demo target metadata for remote resource validation.');
+  }
+  const scopedEnv = { CLOUDFLARE_ACCOUNT_ID: expectedTarget.accountId };
+
+  // 1. Validate Cloudflare account in active session
+  const whoamiRes = runFn(wranglerBin, ['whoami', '--json'], {
+    capture: true,
+    allowFail: true,
+    quiet: true,
+    env: scopedEnv,
+  });
+  if (whoamiRes.status !== 0) {
+    throw new Error(
+      `Failed to verify Cloudflare account via Wrangler whoami: ${whoamiRes.stderr || whoamiRes.stdout || 'unknown error'}`,
+    );
+  }
+  const whoamiJson = parseFirstJson(whoamiRes.stdout);
+  const accounts = collectAccounts(whoamiJson);
+  const accountMatch = accounts.find(
+    (a) => a.id.toLowerCase() === expectedTarget.accountId.toLowerCase(),
+  );
+  if (!accountMatch) {
+    throw new Error(
+      `Cloudflare account mismatch: expected DEMO_CLOUDFLARE_ACCOUNT_ID (${expectedTarget.accountId}) is not authorized in active Wrangler session.`,
+    );
+  }
+
+  // 2. Validate exact remote D1 database UUID & name on that account
+  const d1Res = runFn(wranglerBin, ['d1', 'list', '--json'], {
+    capture: true,
+    allowFail: true,
+    quiet: true,
+    env: scopedEnv,
+  });
+  if (d1Res.status !== 0) {
+    throw new Error(
+      `Failed to inspect remote D1 databases via Wrangler: ${d1Res.stderr || d1Res.stdout || 'unknown error'}`,
+    );
+  }
+  const dbs = parseFirstJson(d1Res.stdout);
+  if (!Array.isArray(dbs)) {
+    throw new Error('Invalid JSON response from `wrangler d1 list --json`.');
+  }
+  const byId = dbs.filter(
+    (d) => d && (d.uuid ?? d.database_id ?? '').toLowerCase() === expectedTarget.databaseId,
+  );
+  const byName = dbs.filter(
+    (d) => d && (d.name ?? d.database_name) === expectedTarget.databaseName,
+  );
+  if (byId.length !== 1 || byName.length !== 1) {
+    throw new Error(
+      `Remote D1 verification failed for "${expectedTarget.databaseName}" (${expectedTarget.databaseId}): found ${byId.length} match(es) by UUID and ${byName.length} match(es) by name.`,
+    );
+  }
+  const matchedDbName = byId[0].name ?? byId[0].database_name;
+  const matchedDbId = (byName[0].uuid ?? byName[0].database_id ?? '').toLowerCase();
+  if (matchedDbName !== expectedTarget.databaseName || matchedDbId !== expectedTarget.databaseId) {
+    throw new Error(
+      `Remote D1 mismatch: UUID ${expectedTarget.databaseId} belongs to "${matchedDbName}", while "${expectedTarget.databaseName}" has UUID ${matchedDbId}.`,
+    );
+  }
+
+  // 3. Validate exact remote Worker script exists on the verified account
+  const deployRes = runFn(
+    wranglerBin,
+    ['deployments', 'list', '--name', expectedTarget.workerName, '--json'],
+    {
+      capture: true,
+      allowFail: true,
+      quiet: true,
+      env: scopedEnv,
+    },
+  );
+  if (deployRes.status !== 0) {
+    throw new Error(
+      `Remote Worker "${expectedTarget.workerName}" verification failed: ${deployRes.stderr || deployRes.stdout || 'not found'}`,
+    );
+  }
+  const deployments = parseFirstJson(deployRes.stdout);
+  if (!Array.isArray(deployments) || deployments.length === 0) {
+    throw new Error(
+      `Remote Worker "${expectedTarget.workerName}" has no active deployments on account ${expectedTarget.accountId}.`,
+    );
+  }
+
+  // 4. Validate exact remote R2 bucket exists on the verified account
+  const r2Res = runFn(
+    wranglerBin,
+    ['r2', 'bucket', 'info', expectedTarget.bucketName, '--json'],
+    {
+      capture: true,
+      allowFail: true,
+      quiet: true,
+      env: scopedEnv,
+    },
+  );
+  if (r2Res.status !== 0) {
+    throw new Error(
+      `Remote R2 bucket "${expectedTarget.bucketName}" verification failed: ${r2Res.stderr || r2Res.stdout || 'not found'}`,
+    );
+  }
+  const bucketInfo = parseFirstJson(r2Res.stdout);
+  if (bucketInfo && typeof bucketInfo === 'object' && bucketInfo.name && bucketInfo.name !== expectedTarget.bucketName) {
+    throw new Error(
+      `Remote R2 bucket mismatch: expected "${expectedTarget.bucketName}", got "${bucketInfo.name}".`,
+    );
+  }
+
+  return {
+    accountId: accountMatch.id,
+    workerName: expectedTarget.workerName,
+    databaseName: expectedTarget.databaseName,
+    databaseId: expectedTarget.databaseId,
+    bucketName: expectedTarget.bucketName,
   };
 }
 
@@ -224,7 +458,7 @@ VALUES
 async function main() {
   loadEnv();
   const isInteractive = Boolean(process.stdin.isTTY);
-  const { target, isRemote, profile, demoEmail, demoPassword, cleanR2 } = resolveDemoResetContext({
+  const { target, isRemote, profile, expectedTarget, demoEmail, demoPassword, cleanR2 } = resolveDemoResetContext({
     args: process.argv.slice(2),
     env: process.env,
     isInteractive,
@@ -232,18 +466,18 @@ async function main() {
 
   printTargetBanner('Demo Reset & Seed', target, { profile });
 
-  if (isRemote && isInteractive && process.env.BURROW_DEMO_RESET_CONFIRM !== 'RESET-DEMO-BURROW') {
+  if (isRemote && isInteractive) {
     const auth = assertDemoResetAllowed({
       profile,
       args: process.argv.slice(2),
       env: process.env,
       isInteractive,
     });
-    if (auth.mode === 'staging-interactive' || auth.mode === 'interactive-demo') {
-      const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-DEMO-BURROW';
+    if (auth.mode === 'interactive-demo') {
+      const expectedPhrase = 'RESET-DEMO-BURROW';
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const answer = await rl.question(
-        `Type "${expectedPhrase}" to confirm resetting and seeding remote ${profile.envName}: `,
+        `Type "${expectedPhrase}" to confirm resetting and seeding remote demo (${profile.workerName} / ${profile.dbName}): `,
       );
       rl.close();
       if (answer.trim() !== expectedPhrase) {
@@ -253,9 +487,21 @@ async function main() {
     }
   }
 
-  const configArgs = isRemote
-    ? getWranglerConfigArgs({ required: true, purpose: 'remote demo reset', profile })
-    : [];
+  let configArgs = [];
+  if (isRemote) {
+    step('Verifying exact Cloudflare account, D1 database, Worker, and R2 bucket for demo reset');
+    const verified = verifyRemoteDemoResources({ expectedTarget });
+    process.env.CLOUDFLARE_ACCOUNT_ID = verified.accountId;
+    console.log(
+      `  ✓ Verified demo target: account=${verified.accountId}, worker=${verified.workerName}, d1=${verified.databaseName} (${verified.databaseId}), r2=${verified.bucketName}`,
+    );
+    configArgs = getWranglerConfigArgs({
+      d1IdOverride: verified.databaseId,
+      required: true,
+      purpose: 'remote demo reset',
+      profile,
+    });
+  }
 
   // 1. Wipe existing state
   if (!isRemote) {

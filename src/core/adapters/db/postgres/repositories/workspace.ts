@@ -56,17 +56,20 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
     return rows.length > 0;
   }
 
-  async resetBootstrapClaim(): Promise<boolean> {
+  async resetBootstrapClaim(confirmEmail?: string): Promise<boolean> {
+    const normalized = confirmEmail?.trim().toLowerCase();
+    const conditions = [
+      eq(bootstrapState.id, 1),
+      eq(bootstrapState.status, 'claimed'),
+      sql`NOT EXISTS (SELECT 1 FROM workspaces)`,
+    ];
+    if (normalized) {
+      conditions.push(eq(bootstrapState.claimEmail, normalized));
+    }
     const rows = await this.db
       .update(bootstrapState)
       .set({ status: 'empty', claimEmail: null })
-      .where(
-        and(
-          eq(bootstrapState.id, 1),
-          eq(bootstrapState.status, 'claimed'),
-          sql`NOT EXISTS (SELECT 1 FROM workspaces)`,
-        ),
-      )
+      .where(and(...conditions))
       .returning({ id: bootstrapState.id });
     return rows.length > 0;
   }

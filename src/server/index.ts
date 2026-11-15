@@ -84,8 +84,11 @@ async function buildInfrastructure(config: ServerConfig) {
     GITHUB_CLIENT_ID: config.GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET: config.GITHUB_CLIENT_SECRET,
     SELF_UPDATE_WEBHOOK_URL: config.SELF_UPDATE_WEBHOOK_URL,
+    TRUST_PROXY: config.TRUST_PROXY,
+    TRUSTED_PROXIES: config.TRUSTED_PROXIES,
+    NODE_ENV: process.env.NODE_ENV,
   } as any;
-  return createD1Infrastructure(d1Db as any, env);
+  return createD1Infrastructure(d1Db as any, env, { runtime: 'node-sqlite' });
 }
 
 const infrastructurePromise = buildInfrastructure(config);
@@ -104,27 +107,32 @@ if (fs.existsSync(webDistPath)) {
   });
 }
 
+const inContainer = process.env.BURROW_CONTAINER === 'true';
+const isLocalDockerEval = config.ALLOW_LOCAL_DOCKER_EVAL === 'true';
+// Inside Docker, container eth0 must accept Compose's 127.0.0.1 host port forwarding;
+// direct host execution binds explicitly to config.BIND_HOST (default 127.0.0.1).
+const listenHostname = inContainer ? '0.0.0.0' : config.BIND_HOST;
+
 const server = serve(
   {
-    fetch: (request) => app.fetch(request),
+    fetch: (request, env) => app.fetch(request, env),
     port: config.PORT,
+    hostname: listenHostname,
   },
   (info) => {
     const isProd = process.env.NODE_ENV === 'production';
-    const isLocalDockerEval =
-      process.env.ALLOW_LOCAL_DOCKER_EVAL === 'true' &&
-      (config.BETTER_AUTH_URL.includes('localhost') || config.BETTER_AUTH_URL.includes('127.0.0.1'));
-    const showBootstrapToken = !isProd || isLocalDockerEval;
+    // Never leak BOOTSTRAP_TOKEN into production-mode container logs (including Docker local eval).
+    const showBootstrapToken = !isProd;
     console.log('\n======================================================');
     console.log('Burrow Node Server');
-    console.log(`  Listening URL:      http://localhost:${info.port}`);
+    console.log(`  Listening URL:      http://${config.BIND_HOST === '::1' ? '[::1]' : config.BIND_HOST}:${info.port}`);
     if (isLocalDockerEval) {
       console.log(
-        '  Mode:               Local evaluation (localhost) — set BETTER_AUTH_URL & secrets for production',
+        '  Mode:               Local evaluation (loopback-only) — disable ALLOW_LOCAL_DOCKER_EVAL for public production',
       );
     }
     console.log(
-      `  BOOTSTRAP_TOKEN:    ${showBootstrapToken ? config.BOOTSTRAP_TOKEN : '[REDACTED in production]'}`,
+      `  BOOTSTRAP_TOKEN:    ${showBootstrapToken ? config.BOOTSTRAP_TOKEN : '[REDACTED in production — read from .env]'}`,
     );
     console.log(
       `  Email Delivery:     ${config.RESEND_API_KEY ? `Resend (${config.EMAIL_FROM || 'default'})` : 'Console log fallback'}`,

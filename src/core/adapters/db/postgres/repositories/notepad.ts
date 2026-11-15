@@ -12,7 +12,8 @@ import type {
   ProjectScope,
   NotepadMutationScope,
 } from '../../../../infrastructure/types';
-import { eq, ne, and, inArray, desc, sql, isNull, isNotNull, count, or, exists } from 'drizzle-orm';
+import { eq, ne, and, asc, inArray, desc, sql, isNull, isNotNull, count, or, exists } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 import type { PostgresDb } from '../index';
 import { withNotepadWrite } from '../notepad-transaction';
 import {
@@ -21,6 +22,7 @@ import {
   tags,
   notepadLinks,
   notifications,
+  pendingStorageDeletions,
   projects,
   cards,
   boards,
@@ -316,6 +318,29 @@ export class PostgresNotepadRepository implements INotepadRepository {
         .select({ id: notepads.id, coverKey: notepads.coverKey })
         .from(notepads)
         .where(inArray(notepads.id, ids));
+      const coverKeys = Array.from(
+        new Set(
+          result
+            .map((r) => r.coverKey)
+            .filter((k): k is string => typeof k === 'string' && k.length > 0),
+        ),
+      );
+      if (coverKeys.length > 0) {
+        const now = Date.now();
+        await tx.insert(pendingStorageDeletions).values(
+          coverKeys.map((storageKey) => ({
+            id: nanoid(),
+            storageKey,
+            projectId: scope.projectId,
+            workspaceId: scope.workspaceId,
+            reason: 'notepad_delete',
+            attempts: 0,
+            lastError: null,
+            createdAt: now,
+            nextRetryAt: now,
+          })),
+        );
+      }
       await tx.delete(notepads).where(eq(notepads.id, id));
       return result;
     });
@@ -331,6 +356,15 @@ export class PostgresNotepadRepository implements INotepadRepository {
       .from(notepads)
       .where(and(...conditions));
     return Number(row?.count ?? 0);
+  }
+
+  async listAllCoverKeys(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ coverKey: notepads.coverKey })
+      .from(notepads)
+      .where(and(isNotNull(notepads.coverKey), ne(notepads.coverKey, '')))
+      .orderBy(asc(notepads.coverKey));
+    return rows.map((row) => row.coverKey!).filter(Boolean);
   }
 
   // Content & versioning

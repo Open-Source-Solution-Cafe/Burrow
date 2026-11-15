@@ -3,6 +3,8 @@ import type {
   IMemberRepository,
   INotepadRepository,
   IProjectFileRepository,
+  IProjectRepository,
+  IStorageDeletionRepository,
   ITagRepository,
   Notepad,
   NotepadContent,
@@ -12,6 +14,7 @@ import type {
 } from '../infrastructure/types';
 import type { IStorageAdapter } from '../adapters/storage/types';
 import { deleteStorageObjectWithRetry } from '../shared/storage-cleanup';
+import { StorageCleanupService } from './storage-cleanup';
 import {
   notFound,
   forbidden,
@@ -115,6 +118,8 @@ export class NotepadService {
       tags: ITagRepository;
       members: IMemberRepository;
       projectFiles?: IProjectFileRepository;
+      projects?: IProjectRepository;
+      storageDeletions?: IStorageDeletionRepository;
     },
     private readonly locks: ILockAdapter,
     private readonly storage?: IStorageAdapter,
@@ -375,6 +380,19 @@ export class NotepadService {
       workspaceId: args.workspaceId, projectId: args.projectId, actorUserId: args.actorUserId, minimumRole: 'owner',
     });
     if (removed === null) throw forbidden('forbidden', 'Owner access changed while deleting the notepad');
+
+    if (this.storage && this.repos.projectFiles && this.repos.storageDeletions) {
+      await new StorageCleanupService(
+        {
+          projectFiles: this.repos.projectFiles,
+          notepads: this.repos.notepads,
+          projects: this.repos.projects,
+          storageDeletions: this.repos.storageDeletions,
+        },
+        this.storage,
+      ).processPending({ now: Date.now(), limit: 100 });
+      return;
+    }
 
     const coverKeys = Array.from(
       new Set(

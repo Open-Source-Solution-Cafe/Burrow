@@ -109,7 +109,22 @@ Existing Worker secrets (`BETTER_AUTH_SECRET`, `BOOTSTRAP_TOKEN`, `BETTER_AUTH_U
 
 ### Docker Compose Quick Start
 
-1. Copy and review `.env` from `.env.example` (generate a unique `BETTER_AUTH_SECRET` and `BOOTSTRAP_TOKEN`).
+1. Generate a unique, stable `.env` (never reuse placeholder secrets):
+
+   - **Localhost evaluation (`http://localhost:3005`, bound to `127.0.0.1`)**:
+
+     ```bash
+     pnpm run docker:init -- --local-eval
+     ```
+
+   - **Production deployment (behind Caddy, Nginx, or Traefik)**:
+
+     ```bash
+     pnpm run docker:init -- --url https://notes.example.com
+     ```
+
+   > `ALLOW_LOCAL_DOCKER_EVAL` is disabled (`false`) by default, host port `3005` binds to `127.0.0.1`, and `BOOTSTRAP_TOKEN` is never printed into `NODE_ENV=production` container logs.
+
 2. Start PostgreSQL + Burrow:
 
 ```bash
@@ -119,10 +134,10 @@ docker compose up -d --build
 3. Verify the running container:
 
 ```bash
-curl -fsS http://localhost:3005/api/health
+curl -fsS http://127.0.0.1:3005/api/health
 ```
 
-4. Register your initial workspace Owner account on `/login` using your `BOOTSTRAP_TOKEN`.
+4. Register your initial workspace Owner account on `/login` using the `BOOTSTRAP_TOKEN` saved in `.env`.
 
 When placing Burrow behind a reverse proxy (Caddy, Nginx, Traefik), set `BETTER_AUTH_URL` to your external HTTPS origin (`https://burrow.example.com`) and preserve `X-Forwarded-Host` / `X-Forwarded-Proto` headers.
 

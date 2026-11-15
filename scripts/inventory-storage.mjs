@@ -27,7 +27,7 @@ export function resolveInventoryTarget({
   const postgresUrl = env.DATABASE_URL;
   const isPostgres = /^postgres(ql)?:\/\//.test(postgresUrl ?? '');
   const explicitlySelectsD1 = args.some((arg) =>
-    ['--remote', '--r', '-r', '--worker', '--staging'].includes(arg),
+    ['--remote', '--r', '-r', '--worker', '--staging', '--demo'].includes(arg),
   );
   const target = explicitlySelectsD1
     ? selectDatabaseTarget(args, { ...env, DATABASE_URL: undefined }, rootDir)
@@ -152,7 +152,7 @@ async function main() {
         : target.kind === 'worker'
           ? `LOCAL Worker/D1 (${target.persistTo})`
           : target.kind === 'remote'
-            ? `REMOTE Cloudflare ${profile.isStaging ? 'Staging' : 'Production'} D1 (${profile.dbName})`
+            ? `REMOTE Cloudflare ${profile.isStaging ? 'Staging' : profile.isDemo ? 'Demo' : 'Production'} D1 (${profile.dbName})`
             : 'PostgreSQL DATABASE_URL'
     }`,
   );

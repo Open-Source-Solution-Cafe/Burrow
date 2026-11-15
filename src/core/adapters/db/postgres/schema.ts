@@ -484,6 +484,39 @@ export const editLocks = pgTable('edit_locks', {
 });
 
 // ---------------------------------------------------------------------------
+// Persistent rate limiting & durable storage deletion queue
+// ---------------------------------------------------------------------------
+
+export const rateLimits = pgTable(
+  'rate_limits',
+  {
+    key: text('key').primaryKey(),
+    count: integer('count').notNull().default(1),
+    resetAt: bigint('reset_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('rate_limits_reset_at_idx').on(t.resetAt)],
+);
+
+export const pendingStorageDeletions = pgTable(
+  'pending_storage_deletions',
+  {
+    id: text('id').primaryKey(),
+    storageKey: text('storage_key').notNull(),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id'),
+    reason: text('reason').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    nextRetryAt: bigint('next_retry_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('pending_storage_deletions_retry_idx').on(t.nextRetryAt, t.createdAt),
+    index('pending_storage_deletions_key_idx').on(t.storageKey),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Schema export for BetterAuth
 // ---------------------------------------------------------------------------
 
@@ -509,4 +542,6 @@ export const schema = {
   notepadLinks,
   notifications,
   editLocks,
+  rateLimits,
+  pendingStorageDeletions,
 };

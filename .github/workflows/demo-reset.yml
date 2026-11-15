@@ -21,7 +21,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.15.0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -34,10 +34,15 @@ jobs:
 
       - name: Reset and Seed Remote Demo
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DEMO_CLOUDFLARE_API_TOKEN }}
+          DEMO_CLOUDFLARE_ACCOUNT_ID: ${{ vars.DEMO_CLOUDFLARE_ACCOUNT_ID || secrets.DEMO_CLOUDFLARE_ACCOUNT_ID }}
+          DEMO_WORKER_NAME: ${{ vars.DEMO_WORKER_NAME || 'burrow-demo' }}
+          DEMO_D1_DATABASE_NAME: ${{ vars.DEMO_D1_DATABASE_NAME || 'burrow-demo' }}
+          DEMO_D1_DATABASE_ID: ${{ secrets.DEMO_D1_DATABASE_ID || vars.DEMO_D1_DATABASE_ID }}
+          DEMO_R2_BUCKET_NAME: ${{ vars.DEMO_R2_BUCKET_NAME || 'burrow-demo-files' }}
+          DEMO_CLOUDFLARE_DOMAIN: ${{ vars.DEMO_CLOUDFLARE_DOMAIN }}
           DEMO_EMAIL: ${{ vars.DEMO_EMAIL || 'demo@osscafe.com' }}
           DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD || 'demopassword123' }}
           BURROW_ALLOW_DEMO_RESET: 'true'
         run: |
-          node scripts/demo-reset.mjs --remote --confirm-demo-reset=RESET-DEMO-BURROW
+          node scripts/demo-reset.mjs --remote --demo --confirm-demo-reset=RESET-DEMO-BURROW

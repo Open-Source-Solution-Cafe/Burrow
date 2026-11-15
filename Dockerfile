@@ -39,6 +39,7 @@ RUN apk add --no-cache curl
 
 ENV NODE_ENV=production
 ENV PORT=3005
+ENV BURROW_CONTAINER=true
 
 # Copy package manifest, production node_modules, compiled assets, and migrations
 COPY --from=builder /app/package.json ./package.json

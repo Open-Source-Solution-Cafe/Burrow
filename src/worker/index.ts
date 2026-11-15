@@ -17,21 +17,25 @@ type ExportedHandler<Env> = {
  * Used by tests and the production fetch handler.
  */
 export function createWorkerApp(env: Env['Bindings']): Hono<any, any, any> {
-  const infra = createD1Infrastructure(createDb(env.DB), {
-    FILES: env.FILES,
-    BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
-    BETTER_AUTH_URL: env.BETTER_AUTH_URL,
-    BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN,
-    RESEND_API_KEY: env.RESEND_API_KEY,
-    EMAIL_FROM: env.EMAIL_FROM,
-    GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
-    GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
-    GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
-    GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
-    SELF_UPDATE_WEBHOOK_URL: env.SELF_UPDATE_WEBHOOK_URL,
-    TRUST_PROXY: env.TRUST_PROXY,
-    TRUSTED_PROXIES: env.TRUSTED_PROXIES,
-  });
+  const infra = createD1Infrastructure(
+    createDb(env.DB),
+    {
+      FILES: env.FILES,
+      BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
+      BETTER_AUTH_URL: env.BETTER_AUTH_URL,
+      BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN,
+      RESEND_API_KEY: env.RESEND_API_KEY,
+      EMAIL_FROM: env.EMAIL_FROM,
+      GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
+      GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
+      GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
+      SELF_UPDATE_WEBHOOK_URL: env.SELF_UPDATE_WEBHOOK_URL,
+      TRUST_PROXY: env.TRUST_PROXY,
+      TRUSTED_PROXIES: env.TRUSTED_PROXIES,
+    },
+    { runtime: 'worker' },
+  );
   return createCoreApp(infra);
 }
 

@@ -6,9 +6,19 @@ import type {
   ProjectPosition,
   ProjectMoveSnapshot,
 } from '../../../../infrastructure/types';
-import { eq, and, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
+import { uploadPolicyStorageKey } from '../../../../../shared/uploadPolicy';
 import type { PostgresDb } from '../index';
-import { members, notepadLinks, notepads, projectFiles, projects, workspaces } from '../schema';
+import {
+  members,
+  notepadLinks,
+  notepads,
+  pendingStorageDeletions,
+  projectFiles,
+  projects,
+  workspaces,
+} from '../schema';
 import { projectEditor, projectGap, projectOwner, projectTail } from '../../project-mutation';
 
 export class PostgresProjectRepository implements IProjectRepository {
@@ -167,6 +177,41 @@ export class PostgresProjectRepository implements IProjectRepository {
         .select({ storageKey: projectFiles.storageKey })
         .from(projectFiles)
         .where(eq(projectFiles.projectId, projectId));
+      const coverRows = await tx
+        .select({ coverKey: notepads.coverKey })
+        .from(notepads)
+        .where(
+          and(
+            eq(notepads.projectId, projectId),
+            eq(notepads.workspaceId, workspaceId),
+            isNotNull(notepads.coverKey),
+            ne(notepads.coverKey, ''),
+          ),
+        );
+      const candidateKeys = Array.from(
+        new Set([
+          ...registeredRows.map(({ storageKey }) => storageKey),
+          ...coverRows.map(({ coverKey }) => coverKey!),
+          uploadPolicyStorageKey(workspaceId, projectId),
+        ]),
+      );
+      if (candidateKeys.length > 0) {
+        const now = Date.now();
+        await tx.insert(pendingStorageDeletions).values(
+          candidateKeys.map((storageKey) => ({
+            id: nanoid(),
+            storageKey,
+            projectId,
+            workspaceId,
+            reason: 'project_delete',
+            attempts: 0,
+            lastError: null,
+            createdAt: now,
+            nextRetryAt: now,
+          })),
+        );
+      }
+
       const targetRows = tx
         .select({ id: notepads.id })
         .from(notepads)
@@ -193,5 +238,12 @@ export class PostgresProjectRepository implements IProjectRepository {
       if (deleted.length !== 1) return null;
       return Array.from(new Set(registeredRows.map(({ storageKey }) => storageKey)));
     });
+  }
+
+  async listAllPolicyKeys(): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: projects.id, workspaceId: projects.workspaceId })
+      .from(projects);
+    return rows.map((row) => uploadPolicyStorageKey(row.workspaceId, row.id)).sort();
   }
 }

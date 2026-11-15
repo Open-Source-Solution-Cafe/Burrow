@@ -333,9 +333,47 @@ export function createNotepadRepository(db: DB): INotepadRepository {
         allRows.push(...rows);
       }
 
-      const statements: BatchItem<'sqlite'>[] = [db.update(t.notepads).set({ updatedAt: t.notepads.updatedAt }).where(and(eq(t.notepads.id, id), eq(t.notepads.workspaceId, scope.workspaceId), eq(t.notepads.projectId, scope.projectId), isNotNull(t.notepads.deletedAt), writable(scope))).returning({ id: t.notepads.id })];
-      for (const chunk of chunkByParamBudget(allIds, 1, 10)) {
+      const now = Date.now();
+      const ownerCondition =
+        scope.minimumRole === 'owner' ? sql`m.role = 'owner'` : sql`m.role IN ('editor', 'owner')`;
+      const rootDeleteAllowed = sql`EXISTS (
+        SELECT 1 FROM notepads root
+        WHERE root.id = ${id}
+          AND root.workspace_id = ${scope.workspaceId}
+          AND root.project_id = ${scope.projectId}
+          AND root.deleted_at IS NOT NULL
+      ) AND EXISTS (
+        SELECT 1 FROM projects p JOIN members m ON m.workspace_id = p.workspace_id
+        WHERE p.id = ${scope.projectId} AND p.workspace_id = ${scope.workspaceId}
+          AND m.user_id = ${scope.actorUserId} AND ${ownerCondition}
+      )`;
+
+      const statements: BatchItem<'sqlite'>[] = [
+        db
+          .update(t.notepads)
+          .set({ updatedAt: t.notepads.updatedAt })
+          .where(
+            and(
+              eq(t.notepads.id, id),
+              eq(t.notepads.workspaceId, scope.workspaceId),
+              eq(t.notepads.projectId, scope.projectId),
+              isNotNull(t.notepads.deletedAt),
+              writable(scope),
+            ),
+          )
+          .returning({ id: t.notepads.id }),
+      ];
+      for (const chunk of chunkByParamBudget(allIds, 1, 14)) {
         statements.push(
+          db.run(sql`INSERT INTO pending_storage_deletions
+            (id, storage_key, project_id, workspace_id, reason, attempts, last_error, created_at, next_retry_at)
+            SELECT lower(hex(randomblob(16))), n.cover_key, ${scope.projectId}, ${scope.workspaceId}, 'notepad_delete', 0, NULL, ${now}, ${now}
+            FROM (
+              SELECT DISTINCT cover_key FROM notepads
+              WHERE id IN ${chunk} AND workspace_id = ${scope.workspaceId}
+                AND project_id = ${scope.projectId} AND cover_key IS NOT NULL AND cover_key <> ''
+            ) n
+            WHERE ${rootDeleteAllowed}`),
           db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role='owner')`),
           db.run(sql`DELETE FROM notepad_links WHERE target_id IN ${chunk} AND EXISTS (SELECT 1 FROM projects p JOIN members m ON m.workspace_id=p.workspace_id WHERE p.id=${scope.projectId} AND p.workspace_id=${scope.workspaceId} AND m.user_id=${scope.actorUserId} AND m.role='owner')`),
           db.delete(t.notepads).where(and(inArray(t.notepads.id, chunk), eq(t.notepads.workspaceId, scope.workspaceId), eq(t.notepads.projectId, scope.projectId), writable(scope))),
@@ -361,6 +399,15 @@ export function createNotepadRepository(db: DB): INotepadRepository {
         .from(t.notepads)
         .where(and(...conditions));
       return Number(row?.count ?? 0);
+    },
+
+    async listAllCoverKeys(): Promise<string[]> {
+      const rows = await db
+        .selectDistinct({ coverKey: t.notepads.coverKey })
+        .from(t.notepads)
+        .where(and(isNotNull(t.notepads.coverKey), ne(t.notepads.coverKey, '')))
+        .orderBy(sql`${t.notepads.coverKey} COLLATE BINARY`);
+      return rows.map((row) => row.coverKey!).filter(Boolean);
     },
 
     // Content & versioning

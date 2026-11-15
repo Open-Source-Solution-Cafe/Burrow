@@ -20,5 +20,23 @@
       "binding": "FILES",
       "bucket_name": "burrow-files"
     }
-  ]
+  ],
+  "env": {
+    "demo": {
+      "name": "burrow-demo",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "burrow-demo",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "FILES",
+          "bucket_name": "burrow-demo-files"
+        }
+      ]
+    }
+  }
 }

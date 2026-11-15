@@ -49,7 +49,10 @@ const configPath = path.join(root, 'wrangler.jsonc');
 const baseCfg = parseJsonc(fs.readFileSync(configPath, 'utf8'));
 const profile = isRemote ? resolveRemoteProfile(baseCfg) : null;
 const domain = profile?.domain;
-const WRANGLER_ARGS = profile && (profile.isStaging || hasFlag('--name')) ? ['--name', profile.workerName] : [];
+const WRANGLER_ARGS =
+  profile && (profile.isStaging || profile.isDemo || hasFlag('--name'))
+    ? ['--name', profile.workerName]
+    : [];
 
 function stageHeader(num, label) {
   step(`Stage ${num}/10 — ${label}`);
@@ -307,13 +310,15 @@ async function main() {
   console.log(
     profile.isStaging
       ? '✅ Remote Cloudflare Staging Setup complete!'
-      : '✅ Remote Cloudflare Setup complete!',
+      : profile.isDemo
+        ? '✅ Remote Cloudflare Demo Setup complete!'
+        : '✅ Remote Cloudflare Setup complete!',
   );
   console.log(
     `  Mode:               ${resourceValidation.mode === 'existing' || workerExists ? 'Existing installation (upgrade / retry)' : 'Fresh installation'}`,
   );
   console.log(
-    `  ${profile.isStaging ? 'Staging URL:       ' : 'Production URL:    '} ${origin}`,
+    `  ${profile.isStaging ? 'Staging URL:       ' : profile.isDemo ? 'Demo URL:          ' : 'Production URL:    '} ${origin}`,
   );
   console.log(`  D1 Database:        ${dbName} (${d1Id})`);
   if (bucketName) {

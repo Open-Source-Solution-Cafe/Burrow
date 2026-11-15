@@ -890,30 +890,83 @@ describe('Security Contract Suite', () => {
       ).toThrow(/BOOTSTRAP_TOKEN/);
     });
 
-    it('supports local-only Docker quick-start evaluation on localhost with unique generated credentials while keeping non-localhost strict (#003)', () => {
-      const localEval1 = loadConfig({
-        NODE_ENV: 'production',
-        ALLOW_LOCAL_DOCKER_EVAL: 'true',
-        BETTER_AUTH_URL: 'http://localhost:3005',
-      });
-      const localEval2 = loadConfig({
-        NODE_ENV: 'production',
-        ALLOW_LOCAL_DOCKER_EVAL: 'true',
-        BETTER_AUTH_URL: 'http://localhost:3005',
-      });
-      expect(localEval1.BETTER_AUTH_SECRET.length).toBeGreaterThanOrEqual(32);
-      expect(localEval1.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
-      expect(localEval1.BETTER_AUTH_SECRET).not.toBe(localEval2.BETTER_AUTH_SECRET);
-      expect(localEval1.BOOTSTRAP_TOKEN).not.toBe(localEval2.BOOTSTRAP_TOKEN);
+    it('disables ALLOW_LOCAL_DOCKER_EVAL by default, requires stable secrets on persistent/production deployments, and blocks public exposure (#003)', () => {
+      // Disabled by default: localhost BETTER_AUTH_URL in production is rejected without explicit opt-in
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+        }),
+      ).toThrow(/ALLOW_LOCAL_DOCKER_EVAL=true/);
 
-      // Even with ALLOW_LOCAL_DOCKER_EVAL=true, public hostnames still enforce unique non-empty secrets
+      // Local evaluation still requires stable, non-placeholder secrets in production / persistent deployments
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          ALLOW_LOCAL_DOCKER_EVAL: 'true',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+          DATABASE_URL: 'postgres://burrow:unique-pg-pw@postgres:5432/burrow',
+        }),
+      ).toThrow(/BETTER_AUTH_SECRET must be set to a stable/);
+
+      // Valid opt-in localhost evaluation with explicit stable secrets & loopback bind host succeeds
+      const localEval = loadConfig({
+        NODE_ENV: 'production',
+        ALLOW_LOCAL_DOCKER_EVAL: 'true',
+        BIND_HOST: '127.0.0.1',
+        BETTER_AUTH_URL: 'http://localhost:3005',
+        BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+        BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+        DATABASE_URL: 'postgres://burrow:unique-pg-pw@postgres:5432/burrow',
+      });
+      expect(localEval.ALLOW_LOCAL_DOCKER_EVAL).toBe('true');
+      expect(localEval.BIND_HOST).toBe('127.0.0.1');
+
+      // Prevents local eval flags from enabling insecure public access or 0.0.0.0 exposure
       expect(() =>
         loadConfig({
           NODE_ENV: 'production',
           ALLOW_LOCAL_DOCKER_EVAL: 'true',
           BETTER_AUTH_URL: 'https://notes.example.com',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
         }),
-      ).toThrow(/BETTER_AUTH_SECRET/);
+      ).toThrow(/requires a localhost or 127\.0\.0\.1/);
+
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          ALLOW_LOCAL_DOCKER_EVAL: 'true',
+          BIND_HOST: '0.0.0.0',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+        }),
+      ).toThrow(/non-loopback BIND_HOST/);
+
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          ALLOW_LOCAL_DOCKER_EVAL: 'true',
+          TRUST_PROXY: 'true',
+          BETTER_AUTH_URL: 'http://localhost:3005',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+        }),
+      ).toThrow(/TRUST_PROXY/);
+
+      // Rejects hardcoded default docker-compose PostgreSQL password in production
+      expect(() =>
+        loadConfig({
+          NODE_ENV: 'production',
+          BETTER_AUTH_URL: 'https://notes.example.com',
+          BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
+          DATABASE_URL: 'postgres://burrow:burrowpassword@postgres:5432/burrow',
+        }),
+      ).toThrow(/burrowpassword/);
 
       // Known hardcoded Docker fallback secrets remain rejected even in local eval mode
       expect(() =>
@@ -922,6 +975,7 @@ describe('Security Contract Suite', () => {
           ALLOW_LOCAL_DOCKER_EVAL: 'true',
           BETTER_AUTH_URL: 'http://localhost:3005',
           BETTER_AUTH_SECRET: 'burrow-selfhost-secret-key-32-bytes-minimum!!',
+          BOOTSTRAP_TOKEN: 'valid-bootstrap-token-16-chars',
         }),
       ).toThrow(/BETTER_AUTH_SECRET/);
     });

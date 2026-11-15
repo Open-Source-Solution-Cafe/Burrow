@@ -15,6 +15,7 @@ import { PostgresTagRepository } from './repositories/tag';
 import { PostgresNotificationRepository } from './repositories/notification';
 import { PostgresMemberRepository } from './repositories/member';
 import { PostgresInviteRepository } from './repositories/invite';
+import { PostgresStorageDeletionRepository } from './repositories/storage-deletions';
 import { PostgresSearchAdapter } from './search';
 import { PostgresLockAdapter } from './lock';
 import { createPostgresAuthProvider } from './auth';
@@ -22,6 +23,7 @@ import { APIError } from 'better-auth/api';
 import { MemberService } from '../../../services/members';
 import { createEmailFromEnv } from '../../email/factory';
 import { createStorageFromEnv } from '../../storage/factory';
+import { PostgresRateLimitStore } from '../../rate-limit';
 
 /**
  * Postgres database instance type
@@ -68,7 +70,10 @@ export async function createPostgresInfrastructure(
     notifications: new PostgresNotificationRepository(db),
     members: new PostgresMemberRepository(db),
     invites: new PostgresInviteRepository(db),
+    storageDeletions: new PostgresStorageDeletionRepository(db),
   };
+
+  const rateLimitStore = new PostgresRateLimitStore(db);
 
   // Create storage adapter (local for now, can be extended to S3)
   const storage = createStorageFromEnv(config);
@@ -109,8 +114,10 @@ export async function createPostgresInfrastructure(
       GITHUB_CLIENT_SECRET: config.GITHUB_CLIENT_SECRET,
       TRUST_PROXY: config.TRUST_PROXY,
       TRUSTED_PROXIES: config.TRUSTED_PROXIES,
+      NODE_ENV: process.env.NODE_ENV,
     },
     {
+      rateLimitStore,
       onBeforeDeleteUser: async (userId: string) => {
         try {
           await memberService.assertCanDeleteUser(userId, repositories.workspaces);
@@ -131,9 +138,12 @@ export async function createPostgresInfrastructure(
     auth,
     email,
     bootstrapToken: config.BOOTSTRAP_TOKEN,
+    rateLimitStore,
+    runtime: 'docker-postgres',
     appUrl: config.BETTER_AUTH_URL,
     env: {
       ...config,
+      NODE_ENV: process.env.NODE_ENV,
     },
   };
 }

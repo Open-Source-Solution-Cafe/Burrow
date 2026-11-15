@@ -1,6 +1,14 @@
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
-import { bodyLimit, csrfProtection, rateLimiter, resolveClientIp, securityHeaders } from './security';
+import { InMemoryRateLimitStore, RateLimitUnavailableError, type RateLimitStore } from '../adapters/rate-limit';
+import {
+  bodyLimit,
+  csrfProtection,
+  rateLimiter,
+  resolveClientIp,
+  resolveVerifiedClientIp,
+  securityHeaders,
+} from './security';
 
 describe('security headers', () => {
   it('allows only the supported YouTube iframe origin', async () => {
@@ -32,7 +40,7 @@ describe('security headers', () => {
 });
 
 describe('client IP & proxy trust safeguards (#009)', () => {
-  it('ignores client-spoofed X-Forwarded-For and CF-Connecting-IP when TRUST_PROXY is unset on Node', async () => {
+  it('ignores client-spoofed X-Forwarded-For and CF-Connecting-IP when unverified and never fabricates 127.0.0.1', async () => {
     const app = new Hono();
     app.use('/limited', rateLimiter({ maxRequests: 2, windowMs: 60_000, prefix: 'test-rl' }));
     app.get('/limited', (c) => c.json({ ip: resolveClientIp(c, { trustProxy: false }) }));
@@ -41,7 +49,7 @@ describe('client IP & proxy trust safeguards (#009)', () => {
       headers: { 'X-Forwarded-For': '203.0.113.1', 'CF-Connecting-IP': '203.0.113.10' },
     });
     expect(r1.status).toBe(200);
-    expect(await r1.json()).toEqual({ ip: '127.0.0.1' });
+    expect(await r1.json()).toEqual({ ip: null });
 
     const r2 = await app.request('http://burrow.example.com/limited', {
       headers: { 'X-Forwarded-For': '203.0.113.2', 'CF-Connecting-IP': '203.0.113.20' },
@@ -55,9 +63,81 @@ describe('client IP & proxy trust safeguards (#009)', () => {
     expect(r3.status).toBe(429);
   });
 
-  it('rejects CSRF Origin mismatch even if X-Forwarded-Host matches attacker Origin when TRUST_PROXY is false', async () => {
+  it('walks X-Forwarded-For right-to-left only when socket peer is in TRUSTED_PROXIES', async () => {
+    const app = new Hono();
+    app.get('/ip', (c) =>
+      c.json({
+        ip: resolveVerifiedClientIp(c, {
+          trustProxy: true,
+          trustedProxies: '10.0.0.0/8, 172.16.0.0/12',
+        }),
+      }),
+    );
+
+    const trustedRes = await app.fetch(
+      new Request('https://burrow.example.com/ip', {
+        headers: { 'X-Forwarded-For': '203.0.113.99, 198.51.100.42, 10.12.0.5' },
+      }),
+      { incoming: { socket: { remoteAddress: '::ffff:172.18.0.3' } } },
+    );
+    expect(await trustedRes.json()).toEqual({ ip: '198.51.100.42' });
+
+    // Untrusted peer socket cannot spoof forwarding headers even with TRUST_PROXY=true
+    const untrustedRes = await app.fetch(
+      new Request('https://burrow.example.com/ip', {
+        headers: {
+          'X-Forwarded-For': '198.51.100.42',
+          'X-Real-IP': '198.51.100.43',
+          'CF-Connecting-IP': '198.51.100.44',
+        },
+      }),
+      { incoming: { socket: { remoteAddress: '203.0.113.77' } } },
+    );
+    expect(await untrustedRes.json()).toEqual({ ip: '203.0.113.77' });
+  });
+
+  it('trusts CF-Connecting-IP only when Cloudflare edge metadata (request.cf.colo) is present', async () => {
+    const app = new Hono();
+    app.get('/ip', (c) => c.json({ ip: resolveVerifiedClientIp(c) }));
+
+    const spoofedReq = new Request('https://burrow.example.com/ip', {
+      headers: { 'CF-Connecting-IP': '198.51.100.88' },
+    });
+    const spoofedRes = await app.fetch(spoofedReq, { DB: {} });
+    expect(await spoofedRes.json()).toEqual({ ip: null });
+
+    const verifiedReq = new Request('https://burrow.example.com/ip', {
+      headers: { 'CF-Connecting-IP': '198.51.100.88' },
+    });
+    Object.defineProperty(verifiedReq, 'cf', { value: { colo: 'IAD' } });
+    const verifiedRes = await app.fetch(verifiedReq, { DB: {} });
+    expect(await verifiedRes.json()).toEqual({ ip: '198.51.100.88' });
+  });
+
+  it('fails closed with HTTP 503 when persistent rate-limit storage errors', async () => {
+    const failingStore: RateLimitStore = {
+      persistent: true,
+      async consume() {
+        throw new RateLimitUnavailableError('D1 unreachable');
+      },
+      async pruneExpired() {
+        return 0;
+      },
+      createBetterAuthStorage() {
+        return new InMemoryRateLimitStore().createBetterAuthStorage();
+      },
+    };
+    const app = new Hono();
+    app.use('/limited', rateLimiter({ maxRequests: 5, windowMs: 60_000, prefix: 'fail-closed', store: failingStore, requireStore: true }));
+    app.get('/limited', (c) => c.json({ ok: true }));
+
+    const res = await app.request('http://burrow.example.com/limited');
+    expect(res.status).toBe(503);
+  });
+
+  it('rejects CSRF Origin mismatch even if X-Forwarded-Host matches attacker Origin when proxy peer is unverified', async () => {
     const prev = process.env.TRUST_PROXY;
-    delete process.env.TRUST_PROXY;
+    process.env.TRUST_PROXY = 'true';
     try {
       const app = new Hono();
       app.use('*', csrfProtection);
@@ -72,7 +152,8 @@ describe('client IP & proxy trust safeguards (#009)', () => {
       });
       expect(res.status).toBe(403);
     } finally {
-      if (prev !== undefined) process.env.TRUST_PROXY = prev;
+      if (prev === undefined) delete process.env.TRUST_PROXY;
+      else process.env.TRUST_PROXY = prev;
     }
   });
 });

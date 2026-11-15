@@ -1,11 +1,17 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { createAuthMiddleware } from 'better-auth/api';
 import { magicLink } from 'better-auth/plugins';
-import { and, eq } from 'drizzle-orm';
 import type { AuthProvider } from '../infrastructure/types';
 import type { SignupMode } from '../policy';
 import type { IEmailProvider } from './email';
 import { createEmailFromEnv } from './email/factory';
+import {
+  RateLimitUnavailableError,
+  SqliteRateLimitStore,
+  type RateLimitStore,
+} from './rate-limit';
 
 export interface AuthEnv {
   BETTER_AUTH_SECRET: string;
@@ -18,135 +24,126 @@ export interface AuthEnv {
   EMAIL_FROM?: string;
   TRUST_PROXY?: string;
   TRUSTED_PROXIES?: string;
+  NODE_ENV?: string;
   signupMode?: SignupMode;
   emailProvider?: IEmailProvider;
 }
 
 export interface AuthProviderOptions {
   onBeforeDeleteUser?: (userId: string) => Promise<void>;
+  rateLimitStore?: RateLimitStore;
 }
 
-interface RateLimitState {
-  count: number;
-  lastRequest: number;
+export interface AuthRequestContext {
+  verifiedIp: string | null;
+  accountKey: string | null;
+  sessionKey: string | null;
+  rateLimitError?: unknown;
 }
 
-/**
- * Shared DB-backed Better Auth rate-limit storage using the existing `verification` table.
- * Persists across Worker isolates and Node processes without requiring schema changes.
- */
-export function createVerificationRateLimitStorage(db: any, verificationTable: any) {
-  const memoryFallback = new Map<string, RateLimitState>();
-  const canUseDb = Boolean(
-    db &&
-      typeof db.select === 'function' &&
-      typeof db.insert === 'function' &&
-      typeof db.update === 'function' &&
-      verificationTable,
-  );
+const authRequestStorage = new AsyncLocalStorage<AuthRequestContext>();
 
-  const consumeInMemory = (key: string, rule: { window: number; max: number }) => {
-    const now = Date.now();
-    const windowMs = rule.window * 1000;
-    const entry = memoryFallback.get(key);
-    if (!entry || now - entry.lastRequest >= windowMs) {
-      memoryFallback.set(key, { count: 1, lastRequest: now });
-      return { allowed: true, retryAfter: null };
+export function runWithAuthRequestContext<T>(ctx: AuthRequestContext, fn: () => Promise<T>): Promise<T> {
+  return authRequestStorage.run(ctx, fn);
+}
+
+const ACCOUNT_SCOPED_AUTH_PATHS = new Set([
+  '/sign-in/email',
+  '/sign-up/email',
+  '/sign-in/magic-link',
+  '/forget-password',
+  '/request-password-reset',
+  '/email-otp/send-verification-otp',
+  '/email-otp/request-password-reset',
+]);
+
+const SPRAY_GUARDED_PATH_PREFIXES = [
+  '/sign-in',
+  '/sign-up',
+  '/forget-password',
+  '/request-password-reset',
+  '/send-verification-email',
+  '/change-password',
+  '/change-email',
+];
+
+async function sha256Prefix(input: string, chars = 24): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, chars);
+}
+
+function normalizeAuthSubpath(requestUrl: string, baseURL: string): string {
+  try {
+    const basePath = new URL(baseURL || 'http://localhost:3005').pathname.replace(/\/+$/, '');
+    const reqPath = new URL(requestUrl).pathname.replace(/\/+$/, '');
+    if (basePath && reqPath.startsWith(basePath)) {
+      return reqPath.slice(basePath.length) || '/';
     }
-    if (entry.count >= rule.max) {
-      return {
-        allowed: false,
-        retryAfter: Math.max(1, Math.ceil((entry.lastRequest + windowMs - now) / 1000)),
-      };
+    if (reqPath.startsWith('/api/auth')) {
+      return reqPath.slice('/api/auth'.length) || '/';
     }
-    entry.count += 1;
-    return { allowed: true, retryAfter: null };
-  };
+    return reqPath || '/';
+  } catch {
+    return '/';
+  }
+}
 
-  return {
-    async consume(key: string, rule: { window: number; max: number }) {
-      if (!canUseDb) {
-        return consumeInMemory(key, rule);
+async function extractAccountKey(request: Request, subpath: string): Promise<string | null> {
+  if (request.method.toUpperCase() !== 'POST') return null;
+  if (!ACCOUNT_SCOPED_AUTH_PATHS.has(subpath)) return null;
+  const contentType = request.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) return null;
+
+  try {
+    const rawText = await request.clone().text();
+    if (!rawText || rawText.length > 64 * 1024) return null;
+    const body = JSON.parse(rawText) as { email?: unknown };
+    if (typeof body?.email !== 'string') return null;
+    const normalizedEmail = body.email.trim().toLowerCase();
+    if (!normalizedEmail) return null;
+    return `acct:${await sha256Prefix(normalizedEmail)}`;
+  } catch {
+    return null;
+  }
+}
+
+async function extractSessionKey(request: Request): Promise<string | null> {
+  const cookieHeader = request.headers.get('cookie');
+  if (!cookieHeader) return null;
+  const parts = cookieHeader.split(';');
+  for (const part of parts) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    const name = part.slice(0, idx).trim();
+    if (name === 'better-auth.session_token' || name === '__Secure-better-auth.session_token') {
+      const value = part.slice(idx + 1).trim();
+      const tokenId = value.split('.')[0]?.trim();
+      if (tokenId) {
+        return `sess:${await sha256Prefix(tokenId)}`;
       }
+    }
+  }
+  return null;
+}
 
-      const rowId = `rl:${key}`;
-      const windowMs = rule.window * 1000;
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const now = Date.now();
-        const expiresAt = new Date(now + windowMs);
-        try {
-          const rows = await db
-            .select({ value: verificationTable.value })
-            .from(verificationTable)
-            .where(eq(verificationTable.id, rowId))
-            .limit(1);
-          const existing = rows[0];
-
-          if (!existing) {
-            try {
-              await db.insert(verificationTable).values({
-                id: rowId,
-                identifier: 'rate_limit',
-                value: JSON.stringify({ count: 1, lastRequest: now }),
-                expiresAt,
-                createdAt: new Date(now),
-                updatedAt: new Date(now),
-              });
-              return { allowed: true, retryAfter: null };
-            } catch {
-              // Concurrent insert race; retry loop reads the winner row.
-              continue;
-            }
-          }
-
-          let parsed: RateLimitState | null = null;
-          try {
-            parsed = JSON.parse(existing.value) as RateLimitState;
-          } catch {
-            parsed = null;
-          }
-
-          if (!parsed || typeof parsed.lastRequest !== 'number' || now - parsed.lastRequest >= windowMs) {
-            const nextValue = JSON.stringify({ count: 1, lastRequest: now });
-            const updated = await db
-              .update(verificationTable)
-              .set({ value: nextValue, expiresAt, updatedAt: new Date(now) })
-              .where(and(eq(verificationTable.id, rowId), eq(verificationTable.value, existing.value)))
-              .returning({ id: verificationTable.id });
-            if (updated.length > 0) {
-              return { allowed: true, retryAfter: null };
-            }
-            continue;
-          }
-
-          if (parsed.count >= rule.max) {
-            return {
-              allowed: false,
-              retryAfter: Math.max(1, Math.ceil((parsed.lastRequest + windowMs - now) / 1000)),
-            };
-          }
-
-          const nextValue = JSON.stringify({
-            count: parsed.count + 1,
-            lastRequest: parsed.lastRequest,
-          });
-          const updated = await db
-            .update(verificationTable)
-            .set({ value: nextValue, expiresAt, updatedAt: new Date(now) })
-            .where(and(eq(verificationTable.id, rowId), eq(verificationTable.value, existing.value)))
-            .returning({ id: verificationTable.id });
-          if (updated.length > 0) {
-            return { allowed: true, retryAfter: null };
-          }
-        } catch {
-          return consumeInMemory(key, rule);
-        }
-      }
-
-      return consumeInMemory(key, rule);
+function serviceUnavailableResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      message: 'Authentication rate limiting is temporarily unavailable. Please try again later.',
+      error: {
+        code: 'service_unavailable',
+        message: 'Authentication rate limiting is temporarily unavailable. Please try again later.',
+      },
+    }),
+    {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
     },
-  };
+  );
 }
 
 const oauth = (clientId?: string, clientSecret?: string, disableImplicitSignUp = true) =>
@@ -200,14 +197,21 @@ export function createAuthProvider(
       ? createEmailFromEnv(config)
       : createEmailFromEnv({}));
 
-  const verificationTable = (adapter as any)?.schema?.verification;
-  const rateLimitStorage = createVerificationRateLimitStorage(db, verificationTable);
+  const effectiveBaseUrl = env.BETTER_AUTH_URL || 'http://localhost:3005';
+  const rateLimitStore =
+    options?.rateLimitStore ??
+    new SqliteRateLimitStore(db as unknown as Parameters<typeof SqliteRateLimitStore['prototype']['consume']> extends never ? never : any);
 
   const auth = betterAuth({
     database: drizzleAdapter(db, adapter),
     secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL || 'http://localhost:3005',
+    baseURL: effectiveBaseUrl,
     trustedOrigins: [...trustedOrigins],
+    experimental: {
+      instrumentation: {
+        enabled: false,
+      },
+    },
     advanced: {
       ipAddress: {
         ipAddressHeaders: ['x-burrow-client-ip'],
@@ -217,11 +221,21 @@ export function createAuthProvider(
       enabled: true,
       window: 60,
       max: 100,
-      customStorage: rateLimitStorage,
-      customRules: {
-        '/sign-up/*': { window: 60, max: 100 },
-        '/sign-in/*': { window: 60, max: 100 },
-      },
+      customStorage: rateLimitStore.createBetterAuthStorage({
+        resolveKey: (rawKey) => {
+          const ctx = authRequestStorage.getStore();
+          const sepIdx = rawKey.indexOf('|');
+          const path = sepIdx >= 0 ? rawKey.slice(sepIdx + 1) : rawKey;
+          if (ctx?.accountKey) return `ba:${ctx.accountKey}|${path}`;
+          if (ctx?.verifiedIp) return `ba:ip:${ctx.verifiedIp}|${path}`;
+          if (ctx?.sessionKey) return `ba:${ctx.sessionKey}|${path}`;
+          return `ba:anon|${path}`;
+        },
+        onError: (err) => {
+          const ctx = authRequestStorage.getStore();
+          if (ctx) ctx.rateLimitError = err;
+        },
+      }),
     },
     emailAndPassword: { enabled: true },
     plugins: [
@@ -256,6 +270,47 @@ export function createAuthProvider(
         },
       },
     },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path !== '/sign-in/email') return;
+        const body = ctx.body as { email?: unknown; password?: unknown } | undefined;
+        if (!body || typeof body.email !== 'string' || typeof body.password !== 'string') {
+          return;
+        }
+        const invalidCredentialsResponse = () =>
+          new Response(
+            JSON.stringify({
+              code: 'INVALID_EMAIL_OR_PASSWORD',
+              message: 'Invalid email or password',
+            }),
+            {
+              status: 401,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          );
+        const data = await ctx.context.internalAdapter.findUserByEmail(body.email.toLowerCase(), {
+          includeAccounts: true,
+        });
+        if (!data) {
+          await ctx.context.password.hash(body.password);
+          return invalidCredentialsResponse();
+        }
+        const credentialAccount = data.accounts.find(
+          (a: { providerId: string; password?: string | null }) => a.providerId === 'credential',
+        );
+        if (!credentialAccount?.password) {
+          await ctx.context.password.hash(body.password);
+          return invalidCredentialsResponse();
+        }
+        const isValid = await ctx.context.password.verify({
+          hash: credentialAccount.password,
+          password: body.password,
+        });
+        if (!isValid) {
+          return invalidCredentialsResponse();
+        }
+      }),
+    },
   });
   return {
     async getSession(headers: Headers) {
@@ -269,27 +324,93 @@ export function createAuthProvider(
           }
         : null;
     },
-    handler: (request) => {
-      const forwardedReq = request.headers.has('x-burrow-client-ip')
-        ? request
-        : new Request(request, {
-            headers: (() => {
-              const headers = new Headers(request.headers);
-              headers.set('x-burrow-client-ip', '127.0.0.1');
-              return headers;
-            })(),
-          });
-      return auth.handler(forwardedReq).catch((err) => {
-        if (err && (typeof err.statusCode === 'number' || err.status)) {
-          const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
-          const body = err.body || { message: err.message || 'Authentication error' };
-          return new Response(JSON.stringify(body), {
-            status,
-            headers: { 'Content-Type': 'application/json' },
-          });
+    handler: async (request) => {
+      const existingCtx = authRequestStorage.getStore();
+      const subpath = normalizeAuthSubpath(request.url, effectiveBaseUrl);
+      const verifiedIp = existingCtx?.verifiedIp ?? null;
+      const accountKey = existingCtx?.accountKey ?? (await extractAccountKey(request, subpath));
+      const sessionKey = existingCtx?.sessionKey ?? (await extractSessionKey(request));
+      const reqCtx: AuthRequestContext = {
+        verifiedIp,
+        accountKey,
+        sessionKey,
+        rateLimitError: undefined,
+      };
+
+      const sanitizedHeaders = new Headers(request.headers);
+      sanitizedHeaders.delete('x-burrow-client-ip');
+      if (verifiedIp) {
+        sanitizedHeaders.set('x-burrow-client-ip', verifiedIp);
+      }
+
+      const runAuthRequest = async () => {
+        if (
+          verifiedIp &&
+          SPRAY_GUARDED_PATH_PREFIXES.some((prefix) => subpath.startsWith(prefix))
+        ) {
+          try {
+            const spray = await rateLimitStore.consume(`auth-ip:${verifiedIp}`, 60_000, 25);
+            if (!spray.allowed) {
+              return new Response(
+                JSON.stringify({ message: 'Too many requests. Please try again later.' }),
+                {
+                  status: 429,
+                  statusText: 'Too Many Requests',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Retry-After': String(spray.retryAfterSeconds),
+                    'X-Retry-After': String(spray.retryAfterSeconds),
+                  },
+                },
+              );
+            }
+          } catch (err) {
+            if (err instanceof RateLimitUnavailableError) {
+              return serviceUnavailableResponse();
+            }
+            throw err;
+          }
         }
-        throw err;
-      });
+
+        const sanitizedReq = new Request(request, { headers: sanitizedHeaders });
+        try {
+          const res = await auth.handler(sanitizedReq);
+          if (reqCtx.rateLimitError) {
+            return serviceUnavailableResponse();
+          }
+          if (res.status === 429 && !res.headers.has('Retry-After')) {
+            const retryAfter = res.headers.get('X-Retry-After');
+            if (retryAfter) {
+              const patched = new Headers(res.headers);
+              patched.set('Retry-After', retryAfter);
+              return new Response(res.body, {
+                status: res.status,
+                statusText: res.statusText,
+                headers: patched,
+              });
+            }
+          }
+          return res;
+        } catch (err: any) {
+          if (
+            err instanceof RateLimitUnavailableError ||
+            reqCtx.rateLimitError instanceof RateLimitUnavailableError
+          ) {
+            return serviceUnavailableResponse();
+          }
+          if (err && (typeof err.statusCode === 'number' || err.status)) {
+            const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
+            const body = err.body || { message: err.message || 'Authentication error' };
+            return new Response(JSON.stringify(body), {
+              status,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+          throw err;
+        }
+      };
+
+      return runWithAuthRequestContext(reqCtx, runAuthRequest);
     },
   };
 }

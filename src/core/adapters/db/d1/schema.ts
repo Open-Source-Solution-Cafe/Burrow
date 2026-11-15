@@ -470,3 +470,36 @@ export const editLocks = sqliteTable('edit_locks', {
   clientId: text('client_id').notNull(), // random per editor instance (tab)
   expiresAt: integer('expires_at').notNull(),
 });
+
+// ---------------------------------------------------------------------------
+// Persistent rate limiting & durable storage deletion queue
+// ---------------------------------------------------------------------------
+
+export const rateLimits = sqliteTable(
+  'rate_limits',
+  {
+    key: text('key').primaryKey(),
+    count: integer('count').notNull().default(1),
+    resetAt: integer('reset_at').notNull(),
+  },
+  (t) => [index('rate_limits_reset_at_idx').on(t.resetAt)],
+);
+
+export const pendingStorageDeletions = sqliteTable(
+  'pending_storage_deletions',
+  {
+    id: text('id').primaryKey(),
+    storageKey: text('storage_key').notNull(),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id'),
+    reason: text('reason').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    nextRetryAt: integer('next_retry_at').notNull(),
+  },
+  (t) => [
+    index('pending_storage_deletions_retry_idx').on(t.nextRetryAt, t.createdAt),
+    index('pending_storage_deletions_key_idx').on(t.storageKey),
+  ],
+);

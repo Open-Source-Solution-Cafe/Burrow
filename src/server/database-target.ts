@@ -136,6 +136,17 @@ export function parseCliArgs(
   if (booleanFlags['--staging'] === false && values['--env'] === 'staging') {
     throw new Error('Contradictory CLI arguments: cannot combine --staging=false with --env=staging');
   }
+  if (booleanFlags['--demo'] === true && booleanFlags['--staging'] === true) {
+    throw new Error('Contradictory CLI arguments: cannot combine --demo with --staging');
+  }
+  if (booleanFlags['--demo'] === true && values['--env'] && values['--env'] !== 'demo') {
+    throw new Error(
+      `Contradictory CLI arguments: cannot combine --demo with --env=${values['--env']}`,
+    );
+  }
+  if (booleanFlags['--demo'] === false && values['--env'] === 'demo') {
+    throw new Error('Contradictory CLI arguments: cannot combine --demo=false with --env=demo');
+  }
 
   return { booleanFlags, values, positionals };
 }

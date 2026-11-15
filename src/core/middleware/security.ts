@@ -1,59 +1,119 @@
 import { createMiddleware } from 'hono/factory';
 import type { Context } from 'hono';
+import { InMemoryRateLimitStore, type RateLimitStore } from '../adapters/rate-limit';
+import {
+  formatNormalizedIp,
+  isIpInTrustedProxies,
+  parseTrustedProxies,
+  type TrustedProxyRule,
+} from '../shared/ip';
 
 export const DEFAULT_MAX_BODY_BYTES = 2_000_000; // 2 MB
 
-const VALID_IP_REGEX = /^[0-9a-fA-F:.]{2,45}$/;
+const unitTestFallbackStore = new InMemoryRateLimitStore();
 
-function extractValidIp(raw: string | undefined | null): string | null {
-  if (!raw) return null;
-  const trimmed = raw.trim().replace(/^::ffff:/i, '');
-  if (!trimmed || trimmed.length > 45 || !VALID_IP_REGEX.test(trimmed)) return null;
-  return trimmed;
+function readRuntimeEnv(c: Context, overrideEnv?: Record<string, unknown>, key?: string): string | undefined {
+  if (!key) return undefined;
+  const fromOverride = overrideEnv?.[key];
+  if (typeof fromOverride === 'string') return fromOverride;
+  const fromContext = (c.env as Record<string, unknown> | undefined)?.[key];
+  if (typeof fromContext === 'string') return fromContext;
+  if (typeof process !== 'undefined' && typeof process.env?.[key] === 'string') {
+    return process.env[key];
+  }
+  return undefined;
 }
 
 /**
- * Resolve client IP from trusted proxy headers only when behind Cloudflare Workers
- * or when TRUST_PROXY=true. Never blindly trusts client-controlled X-Forwarded-For.
+ * Returns true only when the request entered through genuine Cloudflare Workers edge
+ * metadata (`request.cf.colo`). Client headers alone never grant Cloudflare trust.
  */
-export function resolveClientIp(
+export function hasVerifiedCloudflareEdge(c: Context): boolean {
+  const cf = (c.req.raw as { cf?: unknown } | undefined)?.cf;
+  if (!cf || typeof cf !== 'object') return false;
+  const colo = (cf as { colo?: unknown }).colo;
+  return typeof colo === 'string' && colo.trim().length > 0;
+}
+
+function getTrustedProxyRules(
   c: Context,
-  options?: { trustProxy?: boolean; env?: Record<string, any> },
-): string {
-  const runtimeEnv =
-    options?.env ??
-    ((c.env as Record<string, any> | undefined) && Object.keys(c.env as object).length > 0
-      ? (c.env as Record<string, any>)
-      : undefined) ??
-    (typeof process !== 'undefined' ? process.env : {});
+  options?: { trustedProxies?: string; env?: Record<string, unknown> },
+): TrustedProxyRule[] {
+  const raw = options?.trustedProxies ?? readRuntimeEnv(c, options?.env, 'TRUSTED_PROXIES');
+  if (!raw || !raw.trim()) return [];
+  try {
+    return parseTrustedProxies(raw);
+  } catch {
+    return [];
+  }
+}
+
+export function isTrustedForwardingRequest(
+  c: Context,
+  options?: { trustProxy?: boolean; trustedProxies?: string; env?: Record<string, unknown> },
+): boolean {
+  if (hasVerifiedCloudflareEdge(c)) return true;
 
   const trustProxy =
-    options?.trustProxy ??
-    (runtimeEnv?.TRUST_PROXY === 'true' ||
-      (typeof process !== 'undefined' && process.env?.TRUST_PROXY === 'true'));
-  const isWorkersRuntime =
-    Boolean((c.env as any)?.DB) ||
-    typeof (globalThis as Record<string, unknown>).WebSocketPair !== 'undefined';
+    options?.trustProxy ?? readRuntimeEnv(c, options?.env, 'TRUST_PROXY') === 'true';
+  if (!trustProxy) return false;
 
-  if (isWorkersRuntime || trustProxy) {
-    const cfIp = extractValidIp(c.req.header('cf-connecting-ip'));
+  const socketIp = formatNormalizedIp((c.env as any)?.incoming?.socket?.remoteAddress);
+  if (!socketIp) return false;
+
+  const rules = getTrustedProxyRules(c, options);
+  if (rules.length === 0) return false;
+  return isIpInTrustedProxies(socketIp, rules);
+}
+
+/**
+ * Resolve verified client IP from authenticated edge metadata (`request.cf.colo`) or a
+ * verified reverse proxy matching `TRUST_PROXY=true` and `TRUSTED_PROXIES`.
+ * Returns `null` rather than trusting spoofed headers or fabricating `127.0.0.1` when no
+ * verified peer identity exists.
+ */
+export function resolveVerifiedClientIp(
+  c: Context,
+  options?: { trustProxy?: boolean; trustedProxies?: string; env?: Record<string, unknown> },
+): string | null {
+  if (hasVerifiedCloudflareEdge(c)) {
+    const cfIp = formatNormalizedIp(c.req.header('cf-connecting-ip'));
     if (cfIp) return cfIp;
   }
 
-  if (trustProxy) {
-    const realIp = extractValidIp(c.req.header('x-real-ip'));
-    if (realIp) return realIp;
-    const forwardedFor = c.req.header('x-forwarded-for');
-    if (forwardedFor) {
-      const firstHop = extractValidIp(forwardedFor.split(',')[0]);
-      if (firstHop) return firstHop;
+  const socketIp = formatNormalizedIp((c.env as any)?.incoming?.socket?.remoteAddress);
+  const trustProxy =
+    options?.trustProxy ?? readRuntimeEnv(c, options?.env, 'TRUST_PROXY') === 'true';
+
+  if (trustProxy && socketIp) {
+    const rules = getTrustedProxyRules(c, options);
+    if (rules.length > 0 && isIpInTrustedProxies(socketIp, rules)) {
+      const forwardedFor = c.req.header('x-forwarded-for');
+      if (forwardedFor) {
+        const hops = forwardedFor.split(',').map((part) => formatNormalizedIp(part));
+        if (hops.every((hop): hop is string => hop !== null) && hops.length > 0) {
+          for (let i = hops.length - 1; i >= 0; i -= 1) {
+            const hop = hops[i]!;
+            if (!isIpInTrustedProxies(hop, rules)) {
+              return hop;
+            }
+          }
+          return hops[0]!;
+        }
+      }
+      const realIp = formatNormalizedIp(c.req.header('x-real-ip'));
+      if (realIp) return realIp;
     }
   }
 
-  const socketIp = extractValidIp((c.env as any)?.incoming?.socket?.remoteAddress);
-  if (socketIp) return socketIp;
+  return socketIp;
+}
 
-  return '127.0.0.1';
+export function resolveClientIp(
+  c: Context,
+  options?: { trustProxy?: boolean; trustedProxies?: string; env?: Record<string, unknown> },
+): string | null {
+  return resolveVerifiedClientIp(c, options);
 }
 
 export interface RateLimiterOptions {
@@ -61,48 +121,66 @@ export interface RateLimiterOptions {
   windowMs: number;
   prefix: string;
   env?: Record<string, unknown>;
+  store?: RateLimitStore;
+  requireStore?: boolean;
+  keyResolver?: (c: Context) => string | null | Promise<string | null>;
 }
 
 /**
- * Lightweight per-IP sliding-window rate limiter middleware for sensitive public endpoints.
+ * Persistent rate limiter middleware backed by the shared `RateLimitStore`.
+ * Fails closed (HTTP 503) on backing storage errors when a store is required.
  */
 export function rateLimiter(options: RateLimiterOptions) {
-  const buckets = new Map<string, { count: number; resetAt: number }>();
   const { maxRequests, windowMs, prefix } = options;
 
   return createMiddleware(async (c, next) => {
-    const now = Date.now();
-    if (buckets.size > 10_000) {
-      for (const [k, entry] of buckets) {
-        if (now >= entry.resetAt) buckets.delete(k);
-      }
-    }
+    const isProd = readRuntimeEnv(c, options.env, 'NODE_ENV') === 'production';
+    const mustRequireStore = options.requireStore ?? isProd;
+    const store = options.store ?? (mustRequireStore ? undefined : unitTestFallbackStore);
 
-    const ip = resolveClientIp(c, { env: options.env });
-    const key = `${prefix}:${ip}`;
-    const existing = buckets.get(key);
-
-    if (!existing || now >= existing.resetAt) {
-      buckets.set(key, { count: 1, resetAt: now + windowMs });
-      return next();
-    }
-
-    if (existing.count >= maxRequests) {
-      const retryAfterSec = Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
-      c.header('Retry-After', String(retryAfterSec));
+    if (!store) {
       return c.json(
         {
           error: {
-            code: 'rate_limit_exceeded',
-            message: 'Too many requests. Please try again later.',
+            code: 'service_unavailable',
+            message: 'Rate limiting service is temporarily unavailable.',
           },
         },
-        429,
+        503,
       );
     }
 
-    existing.count += 1;
-    return next();
+    const customScope = options.keyResolver ? await options.keyResolver(c) : null;
+    const verifiedIp = customScope ? null : resolveVerifiedClientIp(c, { env: options.env });
+    const scopedIdentity = customScope ?? (verifiedIp ? `ip:${verifiedIp}` : 'unverified');
+    const key = `${prefix}:${scopedIdentity}`;
+
+    try {
+      const result = await store.consume(key, windowMs, maxRequests);
+      if (!result.allowed) {
+        c.header('Retry-After', String(result.retryAfterSeconds));
+        return c.json(
+          {
+            error: {
+              code: 'rate_limit_exceeded',
+              message: 'Too many requests. Please try again later.',
+            },
+          },
+          429,
+        );
+      }
+      return next();
+    } catch {
+      return c.json(
+        {
+          error: {
+            code: 'service_unavailable',
+            message: 'Rate limiting service is temporarily unavailable. Please try again later.',
+          },
+        },
+        503,
+      );
+    }
   });
 }
 
@@ -122,6 +200,14 @@ export const securityHeaders = createMiddleware(async (c, next) => {
   c.header('X-Frame-Options', 'DENY');
   c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 });
+
+const BODY_LIMIT_EXCEEDED = Symbol('burrow.bodyLimitExceeded');
+
+/** Returns the exceeded maxBytes when streaming bodyLimit aborted the current request body. */
+export function getBodyLimitExceeded(c: object): number | null {
+  const value = (c as Record<symbol, unknown>)[BODY_LIMIT_EXCEEDED];
+  return typeof value === 'number' ? value : null;
+}
 
 /**
  * Request body size limiter middleware.
@@ -154,19 +240,34 @@ export function bodyLimit(maxBytes = DEFAULT_MAX_BODY_BYTES) {
       (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') &&
       c.req.raw.body
     ) {
+      const sourceBody = c.req.raw.body;
+      const reader = sourceBody.getReader();
       let bytesRead = 0;
-      const limiter = new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, controller) {
-          bytesRead += chunk.byteLength;
-          if (bytesRead > maxBytes) {
-            exceeded = true;
-            controller.error(new Error(`Request body exceeds limit of ${maxBytes} bytes`));
-            return;
+      const limitedBody = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            const { done, value } = await reader.read();
+            if (done) {
+              controller.close();
+              return;
+            }
+            bytesRead += value.byteLength;
+            if (bytesRead > maxBytes) {
+              exceeded = true;
+              (c as unknown as Record<symbol, unknown>)[BODY_LIMIT_EXCEEDED] = maxBytes;
+              await reader.cancel().catch(() => {});
+              controller.close();
+              return;
+            }
+            controller.enqueue(value);
+          } catch (error) {
+            controller.error(error);
           }
-          controller.enqueue(chunk);
+        },
+        cancel(reason) {
+          return reader.cancel(reason).catch(() => {});
         },
       });
-      const limitedBody = c.req.raw.body.pipeThrough(limiter);
       c.req.raw = new Request(c.req.raw, {
         body: limitedBody,
         duplex: 'half',
@@ -217,10 +318,9 @@ export const csrfProtection = createMiddleware(async (c, next) => {
     try {
       const originUrl = new URL(origin);
       const originHost = originUrl.host;
-      const trustProxy =
-        (c.env as any)?.TRUST_PROXY === 'true' ||
-        (typeof process !== 'undefined' && process.env?.TRUST_PROXY === 'true');
-      const forwardedHost = trustProxy ? c.req.header('x-forwarded-host') : undefined;
+      const forwardedHost = isTrustedForwardingRequest(c)
+        ? c.req.header('x-forwarded-host')
+        : undefined;
       const requestHost = forwardedHost || new URL(c.req.url).host;
 
       if (originHost !== requestHost) {

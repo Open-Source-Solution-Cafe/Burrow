@@ -284,6 +284,7 @@ export interface TranslationDictionary {
     loadingTasks: string;
     markAsComplete: string;
     markAsOpen: string;
+    snooze: string;
     snoozeTomorrow: string;
     snoozedSuccess: string;
     taskMarkedComplete: string;
@@ -937,6 +938,7 @@ export const en: TranslationDictionary = {
     loadingTasks: 'Loading tasks…',
     markAsComplete: 'Mark as complete',
     markAsOpen: 'Mark as open',
+    snooze: 'Snooze',
     snoozeTomorrow: 'Snooze to tomorrow',
     snoozedSuccess: 'Task snoozed until tomorrow',
     taskMarkedComplete: 'Task marked as complete',

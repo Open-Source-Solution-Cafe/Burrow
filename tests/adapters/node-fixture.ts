@@ -13,6 +13,7 @@ import { createWorkspaceRepository } from '../../src/core/adapters/db/d1/reposit
 import { createInviteRepository } from '../../src/core/adapters/db/d1/repositories/invite';
 import { createProjectRepository } from '../../src/core/adapters/db/d1/repositories/project';
 import { createProjectFileRepository } from '../../src/core/adapters/db/d1/repositories/project-file';
+import { createStorageDeletionRepository } from '../../src/core/adapters/db/d1/repositories/storage-deletions';
 import { SqliteFtsSearchAdapter } from '../../src/core/adapters/db/d1/adapters/search/sqlite-fts';
 import { PostgresCardRepository } from '../../src/core/adapters/db/postgres/repositories/card';
 import { PostgresBoardRepository } from '../../src/core/adapters/db/postgres/repositories/board';
@@ -24,6 +25,12 @@ import { PostgresWorkspaceRepository } from '../../src/core/adapters/db/postgres
 import { PostgresInviteRepository } from '../../src/core/adapters/db/postgres/repositories/invite';
 import { PostgresProjectRepository } from '../../src/core/adapters/db/postgres/repositories/project';
 import { PostgresProjectFileRepository } from '../../src/core/adapters/db/postgres/repositories/project-file';
+import { PostgresStorageDeletionRepository } from '../../src/core/adapters/db/postgres/repositories/storage-deletions';
+import {
+  PostgresRateLimitStore,
+  SqliteRateLimitStore,
+  type RateLimitStore,
+} from '../../src/core/adapters/rate-limit';
 import { PostgresSearchAdapter } from '../../src/core/adapters/db/postgres/search';
 import { PostgresLockAdapter } from '../../src/core/adapters/db/postgres/lock';
 import { SqlLockAdapter } from '../../src/core/adapters/db/d1/adapters/lock/sql-lock';
@@ -41,6 +48,7 @@ import type {
   IInviteRepository,
   IProjectRepository,
   IProjectFileRepository,
+  IStorageDeletionRepository,
 } from '../../src/core/infrastructure/types';
 import type { ISearchAdapter } from '../../src/core/adapters/search';
 
@@ -57,6 +65,8 @@ export interface PersistenceFixture {
   invites: IInviteRepository;
   projects: IProjectRepository;
   projectFiles: IProjectFileRepository;
+  storageDeletions: IStorageDeletionRepository;
+  rateLimitStore: RateLimitStore;
   query(text: string, params?: Array<string | number | null>): Promise<Record<string, unknown>[]>;
   rejectLockInsert(notepadId: string): Promise<void>;
   close(): Promise<void>;
@@ -83,6 +93,8 @@ export async function openPersistence(
       invites: createInviteRepository(db),
       projects: createProjectRepository(db),
       projectFiles: createProjectFileRepository(db),
+      storageDeletions: createStorageDeletionRepository(db),
+      rateLimitStore: new SqliteRateLimitStore(db),
       async query(text, params = []) {
         const statement = sqlite.prepare(text);
         if (statement.reader) return statement.all(...params) as Record<string, unknown>[];
@@ -118,6 +130,8 @@ export async function openPersistence(
       invites: new PostgresInviteRepository(db),
       projects: new PostgresProjectRepository(db),
       projectFiles: new PostgresProjectFileRepository(db),
+      storageDeletions: new PostgresStorageDeletionRepository(db),
+      rateLimitStore: new PostgresRateLimitStore(db),
       async query(text, params = []) {
         let index = 0;
         return Array.from(

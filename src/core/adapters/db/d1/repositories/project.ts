@@ -4,6 +4,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import type { IProjectRepository, Project } from '../../../../infrastructure/types';
 import { projectEditor, projectGap, projectOwner, projectTail } from '../../project-mutation';
+import { uploadPolicyStorageKey } from '../../../../../shared/uploadPolicy';
 import { runBatch } from '../lib/batch';
 
 export function createProjectRepository(db: DB): IProjectRepository {
@@ -109,6 +110,8 @@ export function createProjectRepository(db: DB): IProjectRepository {
       `);
       if (scopeIssues.length > 0) throw new Error('project_scope_conflict');
 
+      const now = Date.now();
+      const policyKey = uploadPolicyStorageKey(workspaceId, projectId);
       const owner = projectOwner(workspaceId, actorUserId);
       const deleteAllowed = sql`EXISTS (SELECT 1 FROM projects
         WHERE id = ${projectId} AND workspace_id = ${workspaceId} AND name = ${confirmName})
@@ -116,6 +119,19 @@ export function createProjectRepository(db: DB): IProjectRepository {
       const statements: BatchItem<'sqlite'>[] = [
         db.run(sql`SELECT storage_key FROM project_files
           WHERE project_id = ${projectId} AND ${deleteAllowed} /* RETURNING */`),
+        db.run(sql`INSERT INTO pending_storage_deletions
+          (id, storage_key, project_id, workspace_id, reason, attempts, last_error, created_at, next_retry_at)
+          SELECT lower(hex(randomblob(16))), candidate_key, ${projectId}, ${workspaceId}, 'project_delete', 0, NULL, ${now}, ${now}
+          FROM (
+            SELECT storage_key AS candidate_key FROM project_files WHERE project_id = ${projectId}
+            UNION
+            SELECT cover_key AS candidate_key FROM notepads
+              WHERE project_id = ${projectId} AND workspace_id = ${workspaceId}
+                AND cover_key IS NOT NULL AND cover_key <> ''
+            UNION
+            SELECT ${policyKey} AS candidate_key
+          )
+          WHERE ${deleteAllowed}`),
         db.run(sql`DELETE FROM notepads_fts WHERE notepad_id IN (
           SELECT id FROM notepads WHERE project_id = ${projectId} AND workspace_id = ${workspaceId}
         ) AND ${deleteAllowed}`),
@@ -143,6 +159,13 @@ export function createProjectRepository(db: DB): IProjectRepository {
         .where(and(eq(t.projects.id, projectId), eq(t.projects.workspaceId, workspaceId)));
       if (remaining) return null;
       return result[0]?.results?.map(({ storage_key }) => storage_key) ?? [];
+    },
+
+    async listAllPolicyKeys(): Promise<string[]> {
+      const rows = await db
+        .select({ id: t.projects.id, workspaceId: t.projects.workspaceId })
+        .from(t.projects);
+      return rows.map((row) => uploadPolicyStorageKey(row.workspaceId, row.id)).sort();
     },
   };
 }

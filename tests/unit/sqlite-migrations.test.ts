@@ -212,7 +212,7 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
 
     // Add a non-destructive forward upgrade migration
     fs.writeFileSync(
-      path.join(migrations, '0001_add_project_archived_note.sql'),
+      path.join(migrations, '0002_add_project_archived_note.sql'),
       `ALTER TABLE projects ADD COLUMN upgrade_marker TEXT;
        UPDATE projects SET upgrade_marker = 'v2-migrated' WHERE id = 'proj_1';`,
     );
@@ -224,7 +224,8 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
         .all() as { filename: string }[];
       expect(ledger.map((r) => r.filename)).toEqual([
         '0000_baseline.sql',
-        '0001_add_project_archived_note.sql',
+        '0001_rate_limits_and_cleanup.sql',
+        '0002_add_project_archived_note.sql',
       ]);
 
       const roles = sqliteUpgraded
@@ -388,7 +389,7 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
         `);
 
         fs.writeFileSync(
-          path.join(pgMigrations, '0001_add_project_archived_note.sql'),
+          path.join(pgMigrations, '0002_add_project_archived_note.sql'),
           `ALTER TABLE projects ADD COLUMN upgrade_marker TEXT;
            UPDATE projects SET upgrade_marker = 'v2-migrated' WHERE id = 'proj_1';`,
         );
@@ -400,7 +401,8 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
         `;
         expect(ledger.map((r) => r.filename)).toEqual([
           '0000_baseline.sql',
-          '0001_add_project_archived_note.sql',
+          '0001_rate_limits_and_cleanup.sql',
+          '0002_add_project_archived_note.sql',
         ]);
 
         const roles = await client<{ user_id: string; role: string }[]>`

@@ -83,11 +83,13 @@ async function main() {
   console.log(
     profile.isStaging
       ? '⚠️  WARNING: CLOUDFLARE STAGING RESOURCE TEARDOWN'
-      : '🚨 DANGER: CLOUDFLARE PRODUCTION RESOURCE TEARDOWN',
+      : profile.isDemo
+        ? '⚠️  WARNING: CLOUDFLARE DEMO RESOURCE TEARDOWN'
+        : '🚨 DANGER: CLOUDFLARE PRODUCTION RESOURCE TEARDOWN',
   );
   console.log('======================================================');
   console.log(
-    `This will PERMANENTLY delete the following ${profile.isStaging ? 'STAGING' : 'PRODUCTION'} resources:`,
+    `This will PERMANENTLY delete the following ${profile.envName.toUpperCase()} resources:`,
   );
   console.log(`  1. Cloudflare Worker: "${workerName}"`);
   console.log(`  2. Cloudflare D1 Database: "${dbName}" (and all data)`);
@@ -104,12 +106,13 @@ async function main() {
       env: process.env,
       isInteractive: Boolean(process.stdin.isTTY),
     });
-    if (auth.mode === 'interactive') {
+    if (auth.mode === 'interactive' || auth.mode === 'demo-interactive') {
+      const phrase = profile.isDemo ? 'TEARDOWN-DEMO' : 'TEARDOWN-PRODUCTION';
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const confirmPhrase = await rl.question(
-        'Type "TEARDOWN-PRODUCTION" to confirm deleting production resources: ',
+        `Type "${phrase}" to confirm deleting ${profile.envName} resources: `,
       );
-      if (confirmPhrase.trim() !== 'TEARDOWN-PRODUCTION') {
+      if (confirmPhrase.trim() !== phrase) {
         rl.close();
         console.log('Teardown cancelled. No resources were modified.');
         process.exit(0);
@@ -169,7 +172,7 @@ async function main() {
   if (fs.existsSync(distDir)) {
     fs.rmSync(distDir, { recursive: true, force: true });
   }
-  if (!profile.isStaging) {
+  if (!profile.isStaging && !profile.isDemo) {
     const dataDir = path.join(root, 'data');
     if (fs.existsSync(dataDir)) {
       fs.rmSync(dataDir, { recursive: true, force: true });

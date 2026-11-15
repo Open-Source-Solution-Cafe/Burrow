@@ -303,6 +303,7 @@ export const fr: TranslationDictionary = {
     loadingTasks: 'Chargement des tâches…',
     markAsComplete: 'Marquer comme terminée',
     markAsOpen: 'Marquer comme en cours',
+    snooze: 'Reporter',
     snoozeTomorrow: "Reporter à demain",
     snoozedSuccess: 'Tâche reportée à demain',
     taskMarkedComplete: 'Tâche marquée comme terminée',

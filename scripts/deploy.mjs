@@ -30,10 +30,16 @@ const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'u
 const profile = resolveRemoteProfile(baseCfg);
 const domain = profile.domain;
 const skipChecks = profile.isStaging && hasFlag('--skip-checks');
-const WRANGLER_ARGS = profile.isStaging || hasFlag('--name') ? ['--name', profile.workerName] : [];
+const WRANGLER_ARGS =
+  profile.isStaging || profile.isDemo || hasFlag('--name') ? ['--name', profile.workerName] : [];
 
 async function main() {
-  printTargetBanner(profile.isStaging ? 'Staging Deploy' : 'Production Deploy', true, { profile });
+  const bannerLabel = profile.isStaging
+    ? 'Staging Deploy'
+    : profile.isDemo
+      ? 'Demo Deploy'
+      : 'Production Deploy';
+  printTargetBanner(bannerLabel, true, { profile });
 
   step('Preflight check (environment, Cloudflare auth & D1 configuration)');
   const preflight = validateEnvironmentPreflight();

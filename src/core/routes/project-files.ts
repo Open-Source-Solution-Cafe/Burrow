@@ -12,6 +12,7 @@ import { validateStorageKey } from '../adapters/storage/validation';
 import { isAllowedImageContent } from '../shared/image-validation';
 import { isAllowedFileContent } from '../shared/file-validation';
 import { createExplicitWorkspaceMiddleware, requireRole } from '../middleware/session';
+import { getBodyLimitExceeded } from '../middleware/security';
 import { httpError } from '../services/errors';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
@@ -106,6 +107,18 @@ export function createProjectFileRoutes(args: {
     requireRole('editor'),
     async (c) => {
       const body = await c.req.parseBody();
+      const exceededLimit = getBodyLimitExceeded(c);
+      if (exceededLimit !== null) {
+        return c.json(
+          {
+            error: {
+              code: 'payload_too_large',
+              message: `Request body exceeds limit of ${exceededLimit} bytes`,
+            },
+          },
+          413,
+        );
+      }
       const file = body['file'];
       if (!file || !(file instanceof File)) {
         throw httpError(400, 'invalid_file', 'No file provided in form field "file"');

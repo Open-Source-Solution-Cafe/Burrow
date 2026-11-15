@@ -1,4 +1,6 @@
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,7 +28,12 @@ const {
   verifyDeployment,
 } = deployLib as any;
 
-const { buildDemoSeedSql, resolveDemoResetContext, validateDemoEmail } = demoResetLib as any;
+const {
+  buildDemoSeedSql,
+  resolveDemoResetContext,
+  validateDemoEmail,
+  verifyRemoteDemoResources,
+} = demoResetLib as any;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -525,34 +532,68 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       expect(resetRes.stderr).toContain('Refusing --force reset on PRODUCTION');
     });
 
-    it('blocks CI=true and --force alone in demo-reset.mjs without explicit demo authorization (#001)', () => {
+    it('blocks CI=true, --force, missing --demo, and missing target configuration in demo-reset.mjs', () => {
+      const demoAccount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const demoDbId = '11111111-1111-4111-8111-111111111111';
+      const validDemoEnv = {
+        DEMO_CLOUDFLARE_ACCOUNT_ID: demoAccount,
+        DEMO_WORKER_NAME: 'burrow-demo',
+        DEMO_D1_DATABASE_NAME: 'burrow-demo',
+        DEMO_D1_DATABASE_ID: demoDbId,
+        DEMO_R2_BUCKET_NAME: 'burrow-demo-files',
+        BURROW_ALLOW_DEMO_RESET: 'true',
+      };
+
       const demoResCi = spawnSync(
         process.execPath,
-        [path.join(root, 'scripts', 'demo-reset.mjs'), '--remote', '--force'],
+        [path.join(root, 'scripts', 'demo-reset.mjs'), '--remote', '--demo', '--force'],
         {
           cwd: root,
           encoding: 'utf8',
-          env: { ...process.env, CI: 'true', BURROW_ALLOW_DEMO_RESET: '' },
+          env: { ...process.env, ...validDemoEnv, CI: 'true', BURROW_ALLOW_DEMO_RESET: '' },
         },
       );
       expect(demoResCi.status).not.toBe(0);
       expect(demoResCi.stderr).toContain('Refusing remote demo reset');
 
+      // Regression guard: omitting --demo previously fell back to production database 'burrow'.
       expect(() =>
         resolveDemoResetContext({
-          args: ['--remote', '--force'],
-          env: { CI: 'true' },
+          args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW'],
+          env: { ...validDemoEnv, CI: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow(/without explicit --demo flag/i);
+
+      // CI=true + --force alone must never authorize a reset.
+      expect(() =>
+        resolveDemoResetContext({
+          args: ['--remote', '--demo', '--force'],
+          env: { ...validDemoEnv, CI: 'true', BURROW_ALLOW_DEMO_RESET: 'true' },
           isInteractive: false,
         }),
       ).toThrow('Refusing remote demo reset');
 
+      // Missing exact target fields must be rejected instead of falling back to production.
+      expect(() =>
+        resolveDemoResetContext({
+          args: ['--remote', '--demo', '--confirm-demo-reset=RESET-DEMO-BURROW'],
+          env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow(/DEMO_CLOUDFLARE_ACCOUNT_ID/);
+
       const authorized = resolveDemoResetContext({
-        args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW'],
-        env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+        args: ['--remote', '--demo', '--confirm-demo-reset=RESET-DEMO-BURROW'],
+        env: validDemoEnv,
         isInteractive: false,
       });
       expect(authorized.isRemote).toBe(true);
-      expect(authorized.profile.dbName).toBe('burrow');
+      expect(authorized.profile.isDemo).toBe(true);
+      expect(authorized.profile.workerName).toBe('burrow-demo');
+      expect(authorized.profile.dbName).toBe('burrow-demo');
+      expect(authorized.profile.bucketName).toBe('burrow-demo-files');
+      expect(authorized.profile.localConfigFilename).toBe('wrangler.demo.local.jsonc');
     });
 
     it('rejects SQL injection in DEMO_EMAIL when building demo seed SQL (#001)', () => {
@@ -656,6 +697,287 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
         true,
       );
       expect(KNOWN_BOOTSTRAP_PLACEHOLDERS.has('burrow-bootstrap-token-initial-setup')).toBe(true);
+    });
+
+    it('isolates --demo profile from production and rejects contradictory demo flags', () => {
+      expect(() => parseCliArgs(['-r', '--demo', '--staging'])).toThrow(
+        'Contradictory CLI arguments',
+      );
+      expect(() => parseCliArgs(['-r', '--demo', '--env=production'])).toThrow(
+        'Contradictory CLI arguments',
+      );
+      expect(() => parseCliArgs(['-r', '--demo=false', '--env=demo'])).toThrow(
+        'Contradictory CLI arguments',
+      );
+
+      const demoProfile = resolveRemoteProfile(baseConfig, {
+        args: ['-r', '--demo'],
+        env: {
+          CLOUDFLARE_DOMAIN: 'notes.example.com',
+          D1_DATABASE_ID: 'prod-uuid-1',
+          DEMO_D1_DATABASE_ID: 'demo-uuid-3',
+        },
+      });
+      expect(demoProfile.isDemo).toBe(true);
+      expect(demoProfile.isStaging).toBe(false);
+      expect(demoProfile.envName).toBe('demo');
+      expect(demoProfile.workerName).toBe('burrow-demo');
+      expect(demoProfile.dbName).toBe('burrow-demo');
+      expect(demoProfile.bucketName).toBe('burrow-demo-files');
+      expect(demoProfile.localConfigFilename).toBe('wrangler.demo.local.jsonc');
+      expect(demoProfile.d1EnvKey).toBe('DEMO_D1_DATABASE_ID');
+      expect(demoProfile.envD1Id).toBe('demo-uuid-3');
+      expect(demoProfile.domain).toBeUndefined();
+
+      expect(() =>
+        resolveRemoteProfile(baseConfig, {
+          args: ['-r', '--demo', '--name', 'burrow'],
+          env: {},
+        }),
+      ).toThrow('Refusing demo profile');
+
+      expect(() =>
+        resolveRemoteProfile(baseConfig, {
+          args: ['-r', '--demo'],
+          env: {
+            D1_DATABASE_ID: 'same-uuid-1',
+            DEMO_D1_DATABASE_ID: 'same-uuid-1',
+          },
+        }),
+      ).toThrow('matches production D1_DATABASE_ID');
+    });
+
+    it('runs end-to-end demo-reset CLI with mocked Wrangler and enforces remote resource checks', () => {
+      const demoAccount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      const demoDbId = '11111111-1111-4111-8111-111111111111';
+      const prodDbId = '22222222-2222-4222-8222-222222222222';
+
+      const createMockDemoWorkspace = (scenario: Record<string, unknown>) => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-demo-e2e-'));
+        fs.cpSync(path.join(root, 'scripts'), path.join(tmpDir, 'scripts'), { recursive: true });
+        fs.copyFileSync(path.join(root, 'wrangler.jsonc'), path.join(tmpDir, 'wrangler.jsonc'));
+        fs.copyFileSync(path.join(root, 'package.json'), path.join(tmpDir, 'package.json'));
+        fs.symlinkSync(path.join(root, 'src'), path.join(tmpDir, 'src'), 'junction');
+        fs.symlinkSync(path.join(root, 'migrations'), path.join(tmpDir, 'migrations'), 'junction');
+
+        const realNm = path.join(root, 'node_modules');
+        const tmpNm = path.join(tmpDir, 'node_modules');
+        fs.mkdirSync(tmpNm, { recursive: true });
+        for (const entry of fs.readdirSync(realNm)) {
+          if (entry === 'wrangler' || entry === '.bin') continue;
+          const full = path.join(realNm, entry);
+          if (entry.startsWith('@') && fs.statSync(full).isDirectory()) {
+            const scopeDir = path.join(tmpNm, entry);
+            fs.mkdirSync(scopeDir, { recursive: true });
+            for (const sub of fs.readdirSync(full)) {
+              const subFull = path.join(full, sub);
+              if (fs.statSync(subFull).isDirectory()) {
+                fs.symlinkSync(fs.realpathSync(subFull), path.join(scopeDir, sub), 'junction');
+              }
+            }
+          } else if (fs.statSync(full).isDirectory()) {
+            fs.symlinkSync(fs.realpathSync(full), path.join(tmpNm, entry), 'junction');
+          }
+        }
+
+        const logFile = path.join(tmpDir, 'wrangler-calls.jsonl');
+        const wranglerDir = path.join(tmpNm, 'wrangler');
+        fs.mkdirSync(path.join(wranglerDir, 'bin'), { recursive: true });
+        fs.writeFileSync(
+          path.join(wranglerDir, 'package.json'),
+          JSON.stringify({ name: 'wrangler', version: '0.0.0-mock', bin: { wrangler: 'bin/wrangler.mjs' } }),
+        );
+        const mockScript = `
+          import fs from 'node:fs';
+          const scenario = ${JSON.stringify(scenario)};
+          const args = process.argv.slice(2);
+          fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify({
+            args,
+            accountId: process.env.CLOUDFLARE_ACCOUNT_ID || null,
+          }) + '\\n');
+          const joined = args.join(' ');
+          if (args[0] === 'whoami') {
+            process.stdout.write(JSON.stringify({ loggedIn: true, accounts: scenario.accounts }));
+            process.exit(0);
+          }
+          if (args[0] === 'd1' && args[1] === 'list') {
+            process.stdout.write(JSON.stringify(scenario.d1Databases));
+            process.exit(0);
+          }
+          if (args[0] === 'deployments' && args[1] === 'list') {
+            if (!scenario.workerExists) {
+              process.stderr.write('Worker not found');
+              process.exit(1);
+            }
+            process.stdout.write(JSON.stringify([{ id: 'dep-demo-1' }]));
+            process.exit(0);
+          }
+          if (args[0] === 'r2' && args[1] === 'bucket' && args[2] === 'info') {
+            const name = args[3];
+            if (!scenario.r2Bucket || scenario.r2Bucket !== name) {
+              process.stderr.write('R2 bucket not found');
+              process.exit(1);
+            }
+            process.stdout.write(JSON.stringify({ name }));
+            process.exit(0);
+          }
+          if (joined.includes('SELECT name FROM d1_migrations')) {
+            process.stdout.write(JSON.stringify([{ results: [{ name: '0000_baseline.sql' }] }, { results: [] }]));
+            process.exit(0);
+          }
+          if (joined.includes('SELECT storage_key AS key FROM project_files')) {
+            process.stdout.write(JSON.stringify([{ results: [] }]));
+            process.exit(0);
+          }
+          process.stdout.write(JSON.stringify([{ results: [] }]));
+          process.exit(0);
+        `;
+        fs.writeFileSync(path.join(wranglerDir, 'bin', 'wrangler.mjs'), mockScript);
+        return { tmpDir, logFile };
+      };
+
+      const baseEnv = {
+        ...process.env,
+        CI: 'true',
+        CLOUDFLARE_ACCOUNT_ID: '',
+        D1_DATABASE_ID: '',
+        CLOUDFLARE_D1_DATABASE_ID: '',
+        DEMO_CLOUDFLARE_ACCOUNT_ID: demoAccount,
+        DEMO_WORKER_NAME: 'burrow-demo',
+        DEMO_D1_DATABASE_NAME: 'burrow-demo',
+        DEMO_D1_DATABASE_ID: demoDbId,
+        DEMO_R2_BUCKET_NAME: 'burrow-demo-files',
+        BURROW_ALLOW_DEMO_RESET: 'true',
+      };
+
+      // Case 1: Full verified E2E CLI execution against isolated demo target
+      {
+        const { tmpDir, logFile } = createMockDemoWorkspace({
+          accounts: [{ id: demoAccount, name: 'Demo Account' }],
+          d1Databases: [{ uuid: demoDbId, name: 'burrow-demo' }],
+          workerExists: true,
+          r2Bucket: 'burrow-demo-files',
+        });
+        try {
+          const res = spawnSync(
+            process.execPath,
+            [
+              path.join(tmpDir, 'scripts', 'demo-reset.mjs'),
+              '--remote',
+              '--demo',
+              '--confirm-demo-reset=RESET-DEMO-BURROW',
+            ],
+            { cwd: tmpDir, encoding: 'utf8', env: baseEnv },
+          );
+          expect(res.status, res.stderr + res.stdout).toBe(0);
+          const calls = fs
+            .readFileSync(logFile, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+          expect(calls[0].args.slice(0, 2)).toEqual(['whoami', '--json']);
+          expect(calls[1].args.slice(0, 3)).toEqual(['d1', 'list', '--json']);
+          expect(calls[2].args).toEqual(['deployments', 'list', '--name', 'burrow-demo', '--json']);
+          expect(calls[3].args).toEqual(['r2', 'bucket', 'info', 'burrow-demo-files', '--json']);
+          expect(calls.every((c) => c.accountId === demoAccount)).toBe(true);
+          expect(
+            calls.some((c) => c.args.includes('wrangler.demo.local.jsonc') && c.args.includes('burrow-demo')),
+          ).toBe(true);
+          expect(calls.some((c) => c.args.includes('burrow'))).toBe(false);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      }
+
+      // Case 2: Refuses when remote D1 UUID actually points to production DB 'burrow'
+      {
+        const { tmpDir, logFile } = createMockDemoWorkspace({
+          accounts: [{ id: demoAccount, name: 'Demo Account' }],
+          d1Databases: [
+            { uuid: demoDbId, name: 'burrow' },
+            { uuid: prodDbId, name: 'burrow-demo' },
+          ],
+          workerExists: true,
+          r2Bucket: 'burrow-demo-files',
+        });
+        try {
+          const res = spawnSync(
+            process.execPath,
+            [
+              path.join(tmpDir, 'scripts', 'demo-reset.mjs'),
+              '--remote',
+              '--demo',
+              '--confirm-demo-reset=RESET-DEMO-BURROW',
+            ],
+            { cwd: tmpDir, encoding: 'utf8', env: baseEnv },
+          );
+          expect(res.status).not.toBe(0);
+          expect(res.stderr).toContain('Remote D1 mismatch');
+          const calls = fs
+            .readFileSync(logFile, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+          expect(calls.some((c) => c.args[0] === 'd1' && c.args[1] === 'execute')).toBe(false);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      }
+
+      // Case 3: Refuses when CI=true without --demo, making ZERO Wrangler invocations
+      {
+        const { tmpDir, logFile } = createMockDemoWorkspace({
+          accounts: [{ id: demoAccount, name: 'Demo Account' }],
+          d1Databases: [{ uuid: demoDbId, name: 'burrow-demo' }],
+          workerExists: true,
+          r2Bucket: 'burrow-demo-files',
+        });
+        try {
+          const res = spawnSync(
+            process.execPath,
+            [
+              path.join(tmpDir, 'scripts', 'demo-reset.mjs'),
+              '--remote',
+              '--confirm-demo-reset=RESET-DEMO-BURROW',
+            ],
+            { cwd: tmpDir, encoding: 'utf8', env: baseEnv },
+          );
+          expect(res.status).not.toBe(0);
+          expect(res.stderr).toContain('without explicit --demo flag');
+          expect(fs.existsSync(logFile)).toBe(false);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+      }
+
+      // Case 4: Rejects wrong account, missing Worker, or missing R2 bucket before destructive SQL
+      {
+        expect(() =>
+          verifyRemoteDemoResources({
+            expectedTarget: {
+              accountId: demoAccount,
+              workerName: 'burrow-demo',
+              databaseName: 'burrow-demo',
+              databaseId: demoDbId,
+              bucketName: 'burrow-demo-files',
+            },
+            wranglerBin: 'mock-wrangler',
+            runFn: (_bin: string, args: string[]) => {
+              if (args[0] === 'whoami') {
+                return {
+                  status: 0,
+                  stdout: JSON.stringify({
+                    loggedIn: true,
+                    accounts: [{ id: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', name: 'Wrong Account' }],
+                  }),
+                  stderr: '',
+                };
+              }
+              throw new Error(`Unexpected destructive call after whoami mismatch: ${args.join(' ')}`);
+            },
+          }),
+        ).toThrow(/Cloudflare account mismatch/);
+      }
     });
   });
 });

@@ -12,10 +12,26 @@ jobs:
   verify:
     name: Typecheck, Lint, Architecture & Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: burrow
+          POSTGRES_PASSWORD: burrow_test_password
+          POSTGRES_DB: burrow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U burrow -d burrow_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: '10.15.0'
 
       - uses: actions/setup-node@v4
         with:
@@ -25,14 +41,21 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify public/private decoupling
-        run: node scripts/check-decoupling.mjs
+      - name: Build production bundles
+        run: pnpm run build
 
-      - name: Verify dependency licenses
-        run: node scripts/check-licenses.mjs
+      - name: Verify architecture, decoupling, and dependency licenses
+        run: |
+          node scripts/check-basalt.mjs
+          node scripts/check-decoupling.mjs
+          node scripts/check-licenses.mjs
 
-      - name: Run typecheck, lint, unit and SQLite tests
-        run: pnpm run check:sqlite
+      - name: Typecheck and zero-warning lint
+        run: |
+          pnpm exec tsc -b
+          pnpm exec eslint --max-warnings=0 .
 
-      - name: Run Cloudflare Workers integration tests
-        run: pnpm exec vitest run --project worker
+      - name: Run SQLite, PostgreSQL 17, Unit, and Worker tests
+        env:
+          BURROW_TEST_POSTGRES_URL: postgres://burrow:burrow_test_password@127.0.0.1:5432/burrow_test
+        run: pnpm exec vitest run

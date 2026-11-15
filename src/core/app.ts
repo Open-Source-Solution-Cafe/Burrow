@@ -1,19 +1,21 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import {
-  MAX_UPLOAD_BYTES,
-  WORKER_MAX_UPLOAD_BYTES,
-  isCloudflareWorkersRuntime,
+  maxUploadBytesForRuntime,
+  resolveDeploymentRuntime,
 } from '../shared/uploadPolicy';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import type { Infrastructure } from './infrastructure/types';
+import { runWithAuthRequestContext } from './adapters/auth';
+import { RateLimitUnavailableError } from './adapters/rate-limit';
 import {
   securityHeaders,
   bodyLimit,
   csrfProtection,
+  getBodyLimitExceeded,
   rateLimiter,
-  resolveClientIp,
+  resolveVerifiedClientIp,
 } from './middleware/security';
 import {
   createIdentityMiddleware,
@@ -74,6 +76,7 @@ export function createCoreApp(
       notepads: repositories.notepads,
       projectFiles: repositories.projectFiles,
       members: repositories.members,
+      storageDeletions: repositories.storageDeletions,
     },
     storage,
     policy,
@@ -85,6 +88,8 @@ export function createCoreApp(
       tags: repositories.tags,
       members: repositories.members,
       projectFiles: repositories.projectFiles,
+      projects: repositories.projects,
+      storageDeletions: repositories.storageDeletions,
     },
     locks,
     storage,
@@ -118,6 +123,8 @@ export function createCoreApp(
     },
     policy,
   );
+  const requirePersistentRateLimitStore =
+    Boolean(infra.rateLimitStore) || infra.env?.NODE_ENV === 'production';
   const workspaceRoutes = createWorkspaceRoutes({
     workspaces: repositories.workspaces,
     members: repositories.members,
@@ -126,6 +133,9 @@ export function createCoreApp(
     email: emailProvider,
     appUrl: infra.appUrl,
     policy,
+    rateLimitStore: infra.rateLimitStore,
+    env: infra.env,
+    requirePersistentRateLimitStore,
   });
   const projectResourceRoutes = createProjectResourceRoutes({
     repositories,
@@ -142,9 +152,12 @@ export function createCoreApp(
     notifications,
     search,
   });
-  const maxUploadBytes = isCloudflareWorkersRuntime(infra.env)
-    ? WORKER_MAX_UPLOAD_BYTES
-    : MAX_UPLOAD_BYTES;
+  const runtime = resolveDeploymentRuntime({
+    runtime: infra.runtime,
+    env: infra.env,
+    databaseUrl: typeof infra.env?.DATABASE_URL === 'string' ? infra.env.DATABASE_URL : undefined,
+  });
+  const maxUploadBytes = maxUploadBytesForRuntime(runtime);
   const projectFileRoutes = createProjectFileRoutes({
     projects: repositories.projects,
     members: repositories.members,
@@ -158,6 +171,8 @@ export function createCoreApp(
     policy,
     workspaces: repositories.workspaces,
     env: infra.env,
+    runtime,
+    maxUploadBytes,
   });
 
   const signUpSchema = z.object({
@@ -177,7 +192,7 @@ export function createCoreApp(
       .use('*', securityHeaders)
       .use('/api/*', (c, next) => {
         if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
-          return bodyLimit(maxUploadBytes + 1024 * 1024)(c, next);
+          return bodyLimit(maxUploadBytes + 64 * 1024)(c, next);
         }
         return bodyLimit()(c, next);
       })
@@ -236,7 +251,14 @@ export function createCoreApp(
 
       .get(
         '/api/invites/info/:token',
-        rateLimiter({ windowMs: 60_000, maxRequests: 30, prefix: 'invites-info', env: infra.env }),
+        rateLimiter({
+          windowMs: 60_000,
+          maxRequests: 30,
+          prefix: 'invites-info',
+          env: infra.env,
+          store: infra.rateLimitStore,
+          requireStore: requirePersistentRateLimitStore,
+        }),
         async (c) => {
           const token = c.req.param('token');
           const invite = await invites.getInviteInfo(token);
@@ -261,6 +283,14 @@ export function createCoreApp(
           maxRequests: 20,
           prefix: 'invites-accept',
           env: infra.env,
+          store: infra.rateLimitStore,
+          requireStore: requirePersistentRateLimitStore,
+          keyResolver: (c) => {
+            const uid = c.get('identity')?.userId;
+            if (uid) return `user:${uid}`;
+            const ip = resolveVerifiedClientIp(c, { env: infra.env });
+            return ip ? `ip:${ip}` : 'unverified';
+          },
         }),
         zValidator('json', inviteTokenSchema),
         async (c) => {
@@ -291,21 +321,70 @@ export function createCoreApp(
       // Auth routes: custom bootstrap sign-up, then delegate to auth provider
       // ---------------------------------------------------------------------------
 
-      .post('/api/auth/sign-up/email', zValidator('json', signUpSchema), async (c) => {
-        const body = c.req.valid('json');
-        const providedBootstrapToken = body.bootstrapToken;
-        const inviteToken = body.inviteToken;
+      .post(
+        '/api/auth/sign-up/email',
+        rateLimiter({
+          windowMs: 60_000,
+          maxRequests: 25,
+          prefix: 'signup-ip',
+          env: infra.env,
+          store: infra.rateLimitStore,
+          requireStore: requirePersistentRateLimitStore,
+        }),
+        zValidator('json', signUpSchema),
+        async (c) => {
+          const body = c.req.valid('json');
+          if (infra.rateLimitStore || requirePersistentRateLimitStore) {
+            if (!infra.rateLimitStore) {
+              throw httpError(
+                503,
+                'service_unavailable',
+                'Rate limiting service is temporarily unavailable',
+              );
+            }
+            const emailHash = (await hashToken(body.email.trim().toLowerCase())).slice(0, 24);
+            let emailLimit;
+            try {
+              emailLimit = await infra.rateLimitStore.consume(`signup-acct:${emailHash}`, 10_000, 3);
+            } catch (error) {
+              if (error instanceof RateLimitUnavailableError) {
+                throw httpError(503, 'service_unavailable', error.message);
+              }
+              throw error;
+            }
+            if (!emailLimit.allowed) {
+              c.header('Retry-After', String(emailLimit.retryAfterSeconds));
+              return c.json(
+                {
+                  error: {
+                    code: 'rate_limit_exceeded',
+                    message: 'Too many requests, please try again later.',
+                  },
+                },
+                429,
+              );
+            }
+          }
+          const providedBootstrapToken = body.bootstrapToken;
+          const inviteToken = body.inviteToken;
 
         const forwardToAuth = async () => {
           const { bootstrapToken: _b, inviteToken: _i, ...betterAuthBody } = body;
+          const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
           const headers = new Headers(c.req.raw.headers);
-          headers.set('x-burrow-client-ip', resolveClientIp(c, { env: infra.env }));
+          headers.delete('x-burrow-client-ip');
+          if (verifiedIp) {
+            headers.set('x-burrow-client-ip', verifiedIp);
+          }
           const forwardReq = new Request(c.req.url, {
             method: 'POST',
             headers,
             body: JSON.stringify(betterAuthBody),
           });
-          return auth.handler(forwardReq);
+          return runWithAuthRequestContext(
+            { verifiedIp, accountKey: null, sessionKey: null },
+            () => auth.handler(forwardReq),
+          );
         };
 
         if (inviteToken && typeof inviteToken === 'string') {
@@ -445,10 +524,25 @@ export function createCoreApp(
 
       .post(
         '/api/auth/bootstrap/recover',
-        zValidator('json', z.object({ bootstrapToken: z.string(), resetClaim: z.boolean().optional() })),
+        rateLimiter({
+          windowMs: 60_000,
+          maxRequests: 15,
+          prefix: 'bootstrap-recover',
+          env: infra.env,
+          store: infra.rateLimitStore,
+          requireStore: requirePersistentRateLimitStore,
+        }),
+        zValidator(
+          'json',
+          z.object({
+            bootstrapToken: z.string(),
+            resetClaim: z.boolean().optional(),
+            confirmEmail: z.string().email().optional(),
+          }),
+        ),
         async (c) => {
           const identity = c.get('identity');
-          const { bootstrapToken: providedToken, resetClaim } = c.req.valid('json');
+          const { bootstrapToken: providedToken, resetClaim, confirmEmail } = c.req.valid('json');
           if (
             !bootstrapToken ||
             bootstrapToken.length < 16 ||
@@ -458,25 +552,29 @@ export function createCoreApp(
           }
 
           if (resetClaim) {
-            const didReset = await repositories.workspaces.resetBootstrapClaim?.();
-            if (!identity?.email) {
-              if (!didReset) {
-                throw httpError(
-                  409,
-                  'bootstrap_unavailable',
-                  'No pending bootstrap claim can be reset',
-                );
-              }
-              return c.json({ ok: true, reset: true });
+            const didReset = await repositories.workspaces.resetBootstrapClaim?.(confirmEmail);
+            if (!didReset) {
+              throw httpError(
+                409,
+                'bootstrap_unavailable',
+                'No pending bootstrap claim can be reset',
+              );
             }
-            if (didReset) {
-              await repositories.workspaces.claimBootstrap(identity.email.trim().toLowerCase());
-            }
+            return c.json({ ok: true, reset: true });
           }
 
           if (!identity?.email) throw httpError(401, 'unauthorized', 'Authentication required');
+          const normalizedEmail = identity.email.trim().toLowerCase();
+          if (confirmEmail && confirmEmail.trim().toLowerCase() !== normalizedEmail) {
+            throw httpError(
+              400,
+              'email_mismatch',
+              'Authenticated session email does not match confirmEmail',
+            );
+          }
+
           const workspace = await repositories.workspaces.completeBootstrap(
-            identity.email.trim().toLowerCase(),
+            normalizedEmail,
             createWorkspacePlan({
               userId: identity.userId,
               name: 'My Workspace',
@@ -505,10 +603,18 @@ export function createCoreApp(
         // Better-auth attempts to parse JSON body if content-type contains application/json,
         // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
         const req = c.req.raw;
-        const clientIp = resolveClientIp(c, { env: infra.env });
+        const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
         const stampedHeaders = new Headers(req.headers);
-        stampedHeaders.set('x-burrow-client-ip', clientIp);
+        stampedHeaders.delete('x-burrow-client-ip');
+        if (verifiedIp) {
+          stampedHeaders.set('x-burrow-client-ip', verifiedIp);
+        }
         const contentType = req.headers.get('content-type') || '';
+        const dispatch = (forwarded: Request) =>
+          runWithAuthRequestContext(
+            { verifiedIp, accountKey: null, sessionKey: null },
+            () => auth.handler(forwarded),
+          );
         let res: Response;
         try {
           if (
@@ -523,7 +629,7 @@ export function createCoreApp(
                 body: JSON.stringify({}),
                 duplex: 'half',
               } as RequestInit);
-              res = await auth.handler(fixedReq);
+              res = await dispatch(fixedReq);
             } else {
               const cloned = req.clone();
               const text = await cloned.text();
@@ -534,19 +640,19 @@ export function createCoreApp(
                   body: JSON.stringify({}),
                   duplex: 'half',
                 } as RequestInit);
-                res = await auth.handler(fixedReq);
+                res = await dispatch(fixedReq);
               } else {
                 const stampedReq = new Request(req.url, {
                   method: req.method,
                   headers: stampedHeaders,
                   body: text,
                 });
-                res = await auth.handler(stampedReq);
+                res = await dispatch(stampedReq);
               }
             }
           } else {
             const stampedReq = new Request(req, { headers: stampedHeaders });
-            res = await auth.handler(stampedReq);
+            res = await dispatch(stampedReq);
           }
           return res;
         } catch (err: any) {
@@ -567,6 +673,18 @@ export function createCoreApp(
       // Error handling
       // ---------------------------------------------------------------------------
       .onError((err, c) => {
+        const exceededLimit = getBodyLimitExceeded(c);
+        if (exceededLimit !== null) {
+          return c.json(
+            {
+              error: {
+                code: 'payload_too_large',
+                message: `Request body exceeds limit of ${exceededLimit} bytes`,
+              },
+            },
+            413,
+          );
+        }
         if (isHttpError(err)) {
           return c.json({ error: { code: err.code, message: err.message } }, err.status as any);
         }

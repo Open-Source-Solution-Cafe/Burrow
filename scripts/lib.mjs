@@ -88,22 +88,44 @@ function readBaseWranglerConfig() {
 export function resolveEnvironmentName(args = [], env = process.env) {
   const parsed = parseCliArgs(args);
   const cliEnvRaw = parsed.values['--env'];
-  if (cliEnvRaw !== undefined && cliEnvRaw !== 'production' && cliEnvRaw !== 'staging') {
-    throw new Error(`Invalid --env value "${cliEnvRaw}". Expected "production" or "staging".`);
-  }
-
-  const envVarRaw = env.BURROW_DEPLOY_ENV?.trim();
-  if (envVarRaw && envVarRaw !== 'production' && envVarRaw !== 'staging') {
+  if (
+    cliEnvRaw !== undefined &&
+    cliEnvRaw !== 'production' &&
+    cliEnvRaw !== 'staging' &&
+    cliEnvRaw !== 'demo'
+  ) {
     throw new Error(
-      `Invalid BURROW_DEPLOY_ENV value "${envVarRaw}". Expected "production" or "staging".`,
+      `Invalid --env value "${cliEnvRaw}". Expected "production", "staging", or "demo".`,
     );
   }
 
+  const envVarRaw = env.BURROW_DEPLOY_ENV?.trim();
+  if (
+    envVarRaw &&
+    envVarRaw !== 'production' &&
+    envVarRaw !== 'staging' &&
+    envVarRaw !== 'demo'
+  ) {
+    throw new Error(
+      `Invalid BURROW_DEPLOY_ENV value "${envVarRaw}". Expected "production", "staging", or "demo".`,
+    );
+  }
+
+  if (parsed.booleanFlags['--demo'] === true || cliEnvRaw === 'demo') {
+    return 'demo';
+  }
   if (parsed.booleanFlags['--staging'] === true || cliEnvRaw === 'staging') {
     return 'staging';
   }
-  if (parsed.booleanFlags['--staging'] === false || cliEnvRaw === 'production') {
+  if (
+    parsed.booleanFlags['--staging'] === false ||
+    parsed.booleanFlags['--demo'] === false ||
+    cliEnvRaw === 'production'
+  ) {
     return 'production';
+  }
+  if (envVarRaw === 'demo') {
+    return 'demo';
   }
   if (envVarRaw === 'staging') {
     return 'staging';
@@ -113,20 +135,23 @@ export function resolveEnvironmentName(args = [], env = process.env) {
 
 export function assertEnvironmentTargetIsolation(profile, env = process.env) {
   const prodDomain = normalizeDomain(env.CLOUDFLARE_DOMAIN);
-  const { isStaging, workerName, dbName, bucketName, domain } = profile;
+  const { isStaging, isDemo, workerName, dbName, bucketName, domain, envD1Id } = profile;
 
   if (isStaging) {
-    if (workerName === 'burrow' || !/staging/i.test(workerName)) {
+    if (workerName === 'burrow' || !/staging/i.test(workerName) || /\bdemo\b|-demo\b/i.test(workerName)) {
       throw new Error(
         `Refusing staging profile with production or unscoped Worker name "${workerName}". Staging Worker names must include "staging".`,
       );
     }
-    if (dbName === 'burrow' || !/staging/i.test(dbName)) {
+    if (dbName === 'burrow' || !/staging/i.test(dbName) || /\bdemo\b|-demo\b/i.test(dbName)) {
       throw new Error(
         `Refusing staging profile with production or unscoped D1 database "${dbName}". Staging D1 names must include "staging".`,
       );
     }
-    if (bucketName && (bucketName === 'burrow-files' || !/staging/i.test(bucketName))) {
+    if (
+      bucketName &&
+      (bucketName === 'burrow-files' || !/staging/i.test(bucketName) || /\bdemo\b|-demo\b/i.test(bucketName))
+    ) {
       throw new Error(
         `Refusing staging profile with production or unscoped R2 bucket "${bucketName}". Staging bucket names must include "staging".`,
       );
@@ -136,15 +161,69 @@ export function assertEnvironmentTargetIsolation(profile, env = process.env) {
         `Refusing to attach production domain "${domain}" to staging Worker "${workerName}".`,
       );
     }
+  } else if (isDemo) {
+    if (
+      workerName === 'burrow' ||
+      /\bstaging\b|-staging\b/i.test(workerName) ||
+      !/demo/i.test(workerName)
+    ) {
+      throw new Error(
+        `Refusing demo profile with production, staging, or non-demo Worker name "${workerName}". Demo Worker names must be distinct and include "demo".`,
+      );
+    }
+    if (dbName === 'burrow' || /\bstaging\b|-staging\b/i.test(dbName) || !/demo/i.test(dbName)) {
+      throw new Error(
+        `Refusing demo profile with production, staging, or non-demo D1 database "${dbName}". Demo D1 names must be distinct and include "demo".`,
+      );
+    }
+    if (
+      bucketName &&
+      (bucketName === 'burrow-files' ||
+        /\bstaging\b|-staging\b/i.test(bucketName) ||
+        !/demo/i.test(bucketName))
+    ) {
+      throw new Error(
+        `Refusing demo profile with production, staging, or non-demo R2 bucket "${bucketName}". Demo bucket names must be distinct and include "demo".`,
+      );
+    }
+    if (
+      domain &&
+      ((prodDomain && domain === prodDomain) || /(^|\.)staging(\.|$)|-staging\b/i.test(domain))
+    ) {
+      throw new Error(
+        `Refusing to attach conflicting domain "${domain}" to demo Worker "${workerName}".`,
+      );
+    }
+    const prodD1Id = (env.D1_DATABASE_ID || env.CLOUDFLARE_D1_DATABASE_ID)?.trim();
+    const stagingD1Id = env.STAGING_D1_DATABASE_ID?.trim();
+    if (envD1Id && prodD1Id && envD1Id.toLowerCase() === prodD1Id.toLowerCase()) {
+      throw new Error(
+        `Refusing demo profile whose DEMO_D1_DATABASE_ID matches production D1_DATABASE_ID (${envD1Id}).`,
+      );
+    }
+    if (envD1Id && stagingD1Id && envD1Id.toLowerCase() === stagingD1Id.toLowerCase()) {
+      throw new Error(
+        `Refusing demo profile whose DEMO_D1_DATABASE_ID matches STAGING_D1_DATABASE_ID (${envD1Id}).`,
+      );
+    }
   } else {
     if (/-staging\b/i.test(workerName) || /\bstaging\b/i.test(workerName)) {
       throw new Error(`Refusing production profile with staging Worker name "${workerName}".`);
     }
+    if (/-demo\b/i.test(workerName) || /\bdemo\b/i.test(workerName)) {
+      throw new Error(`Refusing production profile with demo Worker name "${workerName}".`);
+    }
     if (/-staging\b/i.test(dbName) || /\bstaging\b/i.test(dbName)) {
       throw new Error(`Refusing production profile with staging D1 database "${dbName}".`);
     }
+    if (/-demo\b/i.test(dbName) || /\bdemo\b/i.test(dbName)) {
+      throw new Error(`Refusing production profile with demo D1 database "${dbName}".`);
+    }
     if (bucketName && (/-staging\b/i.test(bucketName) || /\bstaging\b/i.test(bucketName))) {
       throw new Error(`Refusing production profile with staging R2 bucket "${bucketName}".`);
+    }
+    if (bucketName && (/-demo\b/i.test(bucketName) || /\bdemo\b/i.test(bucketName))) {
+      throw new Error(`Refusing production profile with demo R2 bucket "${bucketName}".`);
     }
     if (domain && /(^|\.)staging(\.|$)|-staging\b/i.test(domain)) {
       throw new Error(`Refusing production profile with staging domain "${domain}".`);
@@ -153,7 +232,7 @@ export function assertEnvironmentTargetIsolation(profile, env = process.env) {
 }
 
 /**
- * Resolve isolated production or staging Cloudflare resource names, domain, and local config file.
+ * Resolve isolated production, staging, or demo Cloudflare resource names, domain, and local config file.
  */
 export function resolveRemoteProfile(
   baseConfig = readBaseWranglerConfig(),
@@ -162,6 +241,7 @@ export function resolveRemoteProfile(
   const parsed = parseCliArgs(args);
   const envName = resolveEnvironmentName(args, env);
   const isStaging = envName === 'staging';
+  const isDemo = envName === 'demo';
 
   const explicitName = parsed.values['--name'];
   const explicitDomain = parsed.values['--domain'] || parsed.values['--domains'];
@@ -178,6 +258,7 @@ export function resolveRemoteProfile(
   let d1EnvKey;
   let envD1Id;
   let domain;
+  let expectedAccountId = null;
 
   if (isStaging) {
     workerName = explicitName || `${baseWorkerName}-staging`;
@@ -192,6 +273,21 @@ export function resolveRemoteProfile(
     domain = hasWorkersDevFlag
       ? undefined
       : normalizeDomain(explicitDomain || env.STAGING_CLOUDFLARE_DOMAIN);
+  } else if (isDemo) {
+    const demoSection = baseConfig?.env?.demo;
+    const demoDefaultWorker = demoSection?.name || 'burrow-demo';
+    const demoDefaultDb = demoSection?.d1_databases?.[0]?.database_name || 'burrow-demo';
+    const demoDefaultBucket = demoSection?.r2_buckets?.[0]?.bucket_name || 'burrow-demo-files';
+    workerName = explicitName || env.DEMO_WORKER_NAME?.trim() || demoDefaultWorker;
+    dbName = env.DEMO_D1_DATABASE_NAME?.trim() || demoDefaultDb;
+    bucketName = env.DEMO_R2_BUCKET_NAME?.trim() || demoDefaultBucket;
+    localConfigFilename = 'wrangler.demo.local.jsonc';
+    d1EnvKey = 'DEMO_D1_DATABASE_ID';
+    envD1Id = env.DEMO_D1_DATABASE_ID?.trim() || null;
+    expectedAccountId = env.DEMO_CLOUDFLARE_ACCOUNT_ID?.trim() || null;
+    domain = hasWorkersDevFlag
+      ? undefined
+      : normalizeDomain(explicitDomain || env.DEMO_CLOUDFLARE_DOMAIN);
   } else {
     workerName = explicitName || baseWorkerName;
     dbName = baseDbName;
@@ -207,6 +303,7 @@ export function resolveRemoteProfile(
   const effectiveConfig = JSON.parse(
     JSON.stringify(baseConfig && typeof baseConfig === 'object' ? baseConfig : {}),
   );
+  delete effectiveConfig.env;
   effectiveConfig.name = workerName;
   if (Array.isArray(effectiveConfig.d1_databases) && effectiveConfig.d1_databases[0]) {
     effectiveConfig.d1_databases[0].database_name = dbName;
@@ -217,6 +314,7 @@ export function resolveRemoteProfile(
 
   const profile = {
     isStaging,
+    isDemo,
     envName,
     workerName,
     dbName,
@@ -224,6 +322,7 @@ export function resolveRemoteProfile(
     localConfigFilename,
     d1EnvKey,
     envD1Id,
+    expectedAccountId,
     domain,
     effectiveConfig,
   };
@@ -245,7 +344,24 @@ export function assertProductionOperationAllowed({
   env = process.env,
   isInteractive = Boolean(process.stdin.isTTY),
 }) {
-  if (!profile || profile.isStaging) {
+  if (profile?.isStaging) {
+    return { mode: 'staging' };
+  }
+  if (profile?.isDemo) {
+    const parsedDemo = parseCliArgs(args);
+    const confirmDemo =
+      parsedDemo.values['--confirm-demo-reset'] || env.BURROW_DEMO_RESET_CONFIRM?.trim();
+    if (env.BURROW_ALLOW_DEMO_RESET === 'true' && confirmDemo === 'RESET-DEMO-BURROW') {
+      return { mode: 'demo-explicit' };
+    }
+    if (isInteractive && env.BURROW_ALLOW_DEMO_RESET === 'true') {
+      return { mode: 'demo-interactive' };
+    }
+    throw new Error(
+      `Refusing remote ${operation} on demo target "${profile.dbName}" without explicit demo authorization.`,
+    );
+  }
+  if (!profile) {
     return { mode: 'staging' };
   }
 
@@ -284,7 +400,8 @@ export function assertProductionOperationAllowed({
 
 /**
  * Fail-closed authorization guard for remote demo resets.
- * Requires explicit BURROW_ALLOW_DEMO_RESET=true and explicit confirmation token for non-staging targets.
+ * Enforces an explicit demo target (--demo / --env=demo), explicit BURROW_ALLOW_DEMO_RESET=true,
+ * and explicit RESET-DEMO-BURROW confirmation. Never treats CI=true or --force as authorization.
  */
 export function assertDemoResetAllowed({
   profile,
@@ -293,16 +410,11 @@ export function assertDemoResetAllowed({
   isInteractive = Boolean(process.stdin.isTTY),
 }) {
   const parsed = parseCliArgs(args);
-  const force = parsed.booleanFlags['--force'] === true;
 
-  if (profile.isStaging) {
-    if (force) return { mode: 'staging-force' };
-    if (!isInteractive) {
-      throw new Error(
-        `Refusing non-interactive demo reset on staging ("${profile.dbName}") without --force.`,
-      );
-    }
-    return { mode: 'staging-interactive' };
+  if (!profile || !profile.isDemo) {
+    throw new Error(
+      `Refusing remote demo reset on non-demo target "${profile?.envName ?? 'unknown'}" ("${profile?.dbName ?? 'unknown'}"). Pass --demo targeting an isolated demo deployment; ordinary production and staging deployments cannot be reset by demo-reset.`,
+    );
   }
 
   const demoAllowed = env.BURROW_ALLOW_DEMO_RESET === 'true';
@@ -313,9 +425,9 @@ export function assertDemoResetAllowed({
     return { mode: 'explicit-demo' };
   }
 
-  if (!demoAllowed || force || env.CI || !isInteractive) {
+  if (!demoAllowed || env.CI || !isInteractive) {
     throw new Error(
-      `Refusing remote demo reset on non-staging database "${profile.dbName}". Set BURROW_ALLOW_DEMO_RESET=true and pass --confirm-demo-reset=RESET-DEMO-BURROW (CI=true and --force alone never authorize production resets).`,
+      `Refusing remote demo reset on demo database "${profile.dbName}". Set BURROW_ALLOW_DEMO_RESET=true and pass --confirm-demo-reset=RESET-DEMO-BURROW (CI=true and --force alone never authorize resets).`,
     );
   }
 
@@ -365,6 +477,8 @@ function d1TargetArgs(target) {
 
 const LEGACY_D1_DROP_TABLES_SQL = [
   'DROP TABLE IF EXISTS notepads_fts;',
+  'DROP TABLE IF EXISTS pending_storage_deletions;',
+  'DROP TABLE IF EXISTS rate_limits;',
   'DROP TABLE IF EXISTS project_files;',
   'DROP TABLE IF EXISTS card_subtasks;',
   'DROP TABLE IF EXISTS card_comments;',
@@ -535,9 +649,12 @@ export async function executeDatabaseFile(
 /** Print a loud, prominent target banner at the start of a command. */
 export function printTargetBanner(action, isRemote, { profile } = {}) {
   const staging = profile?.isStaging ?? hasFlag('--staging');
+  const demo = profile?.isDemo ?? hasFlag('--demo');
   const remoteLabel = staging
     ? `🧪 REMOTE STAGING (Cloudflare: ${profile?.workerName || 'burrow-staging'})`
-    : '☁️  REMOTE (Cloudflare Production)';
+    : demo
+      ? `🎭 REMOTE DEMO (Cloudflare: ${profile?.workerName || 'burrow-demo'})`
+      : '☁️  REMOTE (Cloudflare Production)';
   const target =
     typeof isRemote === 'object'
       ? isRemote.kind === 'node'

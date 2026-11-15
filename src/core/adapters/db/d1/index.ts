@@ -13,8 +13,11 @@ import { createTagRepository } from './repositories/tag';
 import { createNotificationRepository } from './repositories/notification';
 import { createMemberRepository } from './repositories/member';
 import { createInviteRepository } from './repositories/invite';
+import { createStorageDeletionRepository } from './repositories/storage-deletions';
 import { APIError } from 'better-auth/api';
 import { MemberService } from '../../../services/members';
+import { SqliteRateLimitStore } from '../../rate-limit';
+import type { BurrowRuntime } from '../../../../shared/uploadPolicy';
 import type { Infrastructure } from '../../../infrastructure/types';
 import type { DB } from './client';
 
@@ -39,6 +42,7 @@ interface EnvBindings {
   SELF_UPDATE_WEBHOOK_URL?: string;
   TRUST_PROXY?: string;
   TRUSTED_PROXIES?: string;
+  NODE_ENV?: string;
 }
 
 /**
@@ -46,12 +50,17 @@ interface EnvBindings {
  * This factory wires the existing D1/Drizzle implementation behind
  * the Phase 1 repository interfaces.
  */
-export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure {
+export function createD1Infrastructure(
+  db: DB,
+  env: EnvBindings,
+  options: { runtime?: BurrowRuntime } = {},
+): Infrastructure {
   // Create adapters (stateless, can be shared)
   const search = new SqliteFtsSearchAdapter(db);
   const locks = new SqlLockAdapter(db);
   const storage = createStorageFromEnv(env);
   const email = createEmailFromEnv(env);
+  const rateLimitStore = new SqliteRateLimitStore(db);
 
   // Create repositories (stateless, can be shared)
   const repositories = {
@@ -65,6 +74,7 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     notifications: createNotificationRepository(db),
     members: createMemberRepository(db),
     invites: createInviteRepository(db),
+    storageDeletions: createStorageDeletionRepository(db),
   };
 
   const memberService = new MemberService(repositories);
@@ -74,6 +84,7 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     email,
     undefined,
     {
+      rateLimitStore,
       onBeforeDeleteUser: async (userId: string) => {
         try {
           await memberService.assertCanDeleteUser(userId, repositories.workspaces);
@@ -94,6 +105,8 @@ export function createD1Infrastructure(db: DB, env: EnvBindings): Infrastructure
     auth,
     email,
     bootstrapToken: env.BOOTSTRAP_TOKEN,
+    rateLimitStore,
+    runtime: options.runtime,
     appUrl: env.BETTER_AUTH_URL,
     env,
   };

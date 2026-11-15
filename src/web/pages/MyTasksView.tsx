@@ -63,116 +63,163 @@ function TaskRow({
   const priorityLabel = task.priority
     ? (t(`common.priorities.${task.priority}` as any) || priority?.label)
     : undefined;
+  const hasFooter = Boolean(priority || task.dueDate !== null || !task.isCompleted);
 
   return (
     <div
-      className={`group flex items-center gap-3 px-3 py-2.5 bg-[var(--surface)] border border-[var(--line)] hover:bg-[var(--hi)] transition ${
+      className={`group flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 p-3 sm:py-2.5 bg-[var(--surface)] border border-[var(--line)] hover:bg-[var(--hi)] transition ${
         priority ? `border-l-4 ${priority.class}` : ''
       }`}
     >
-      {/* Complete checkbox */}
-      <button
-        onClick={onComplete}
-        title={task.isCompleted ? t('tasks.markAsOpen') : t('tasks.markAsComplete')}
-        className={`shrink-0 min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
-          task.isCompleted
-            ? 'text-[var(--c4)] hover:brightness-110'
-            : 'text-[var(--muted)] hover:text-[var(--c4)]'
-        }`}
-      >
-        {task.isCompleted ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
-      </button>
-
-      {/* Title + meta */}
-      <button
-        onClick={onOpen}
-        className="flex-1 min-w-0 text-left space-y-1 min-h-[44px] sm:min-h-0 cursor-pointer"
-      >
-        <div
-          className={`text-sm font-medium leading-snug truncate ${
-            task.isCompleted ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
+      {/* Top / Left zone: Complete checkbox + Title + meta */}
+      <div className="flex items-start sm:items-center gap-0 sm:gap-3 flex-1 min-w-0">
+        <button
+          type="button"
+          onClick={onComplete}
+          title={task.isCompleted ? t('tasks.markAsOpen') : t('tasks.markAsComplete')}
+          aria-label={task.isCompleted ? t('tasks.markAsOpen') : t('tasks.markAsComplete')}
+          className={`shrink-0 min-w-[44px] min-h-[44px] -ml-2 -mt-2.5 sm:m-0 sm:min-w-0 sm:min-h-0 flex items-center justify-center transition cursor-pointer ${
+            task.isCompleted
+              ? 'text-[var(--c4)] hover:brightness-110'
+              : 'text-[var(--muted)] hover:text-[var(--c4)]'
           }`}
         >
-          {task.title || t('common.untitled')}
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-[var(--muted)]">
-          <Badge>
-            <span>{task.projectIcon || '📁'}</span>
-            <span className="truncate max-w-[140px]">{task.projectName}</span>
-          </Badge>
-          <span className="text-[var(--muted)]">·</span>
-          <span className="truncate max-w-[140px]">
-            {task.boardName} / {task.columnName}
-          </span>
-          {task.tags.map((tag) => (
-            <span
-              key={tag.id}
-              className="px-1.5 py-0.5 font-medium border-l-2"
-              style={{
-                borderLeftColor: tag.color || '#64748b',
-                backgroundColor: 'var(--surface2)',
-              }}
-            >
-              #{tag.name}
-            </span>
-          ))}
-        </div>
-      </button>
+          {task.isCompleted ? <CheckCircle2 className="w-5 h-5" /> : <Circle className="w-5 h-5" />}
+        </button>
 
-      {/* Right side: priority, due date, snooze */}
-      <div className="flex items-center gap-2 shrink-0">
-        {priority && (
-          <Badge className={priority.class}>
-            <StatusDiamond color={diamond ?? 'var(--c1)'} size={6} />
-            {priorityLabel}
-          </Badge>
-        )}
-
-        {task.dueDate !== null && (
-          <span
-            className={`inline-flex items-center gap-1 text-[11px] font-medium ${
-              overdue ? 'text-[var(--danger)]' : 'text-[var(--muted)]'
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex-1 min-w-0 text-left cursor-pointer"
+        >
+          <div
+            className={`text-sm font-semibold sm:font-medium leading-snug line-clamp-2 sm:truncate ${
+              task.isCompleted ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
             }`}
           >
-            <Calendar className="w-3 h-3" />
-            {formatDate(task.dueDate, { month: 'short', day: 'numeric' })}
-          </span>
-        )}
-
-        {!task.isCompleted && (
-          <button
-            onClick={onSnooze}
-            title={t('tasks.snoozeTomorrow')}
-            className="p-1 min-w-[36px] min-h-[36px] sm:min-w-0 sm:min-h-0 flex items-center justify-center text-[var(--muted)] hover:text-[var(--c2)] hover:bg-[var(--hi)] opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition cursor-pointer"
-          >
-            <AlarmClock className="w-3.5 h-3.5" />
-          </button>
-        )}
+            {task.title || t('common.untitled')}
+          </div>
+          <div className="mt-1.5 sm:mt-1 flex flex-col sm:flex-row sm:items-center sm:flex-wrap gap-1.5 text-[11px] text-[var(--muted)]">
+            <div className="flex items-center flex-wrap gap-x-2 sm:gap-x-1.5 gap-y-1 min-w-0">
+              <Badge className="max-w-full">
+                <span className="shrink-0">{task.projectIcon || '📁'}</span>
+                <span className="truncate max-w-[200px] sm:max-w-[140px]">{task.projectName}</span>
+              </Badge>
+              <span className="hidden sm:inline text-[var(--muted)]" aria-hidden="true">
+                ·
+              </span>
+              <span className="truncate max-w-full sm:max-w-[160px]">
+                {task.boardName} / {task.columnName}
+              </span>
+            </div>
+            {task.tags.length > 0 && (
+              <div className="flex items-center flex-wrap gap-1.5">
+                {task.tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="px-1.5 py-0.5 font-medium border-l-2 max-w-[180px] truncate"
+                    style={{
+                      borderLeftColor: tag.color || '#64748b',
+                      backgroundColor: 'var(--surface2)',
+                    }}
+                  >
+                    #{tag.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </button>
       </div>
+
+      {/* Bottom (mobile) / Right (desktop): priority, due date, snooze */}
+      {hasFooter && (
+        <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--hair)] sm:border-0 sm:pt-0 sm:justify-end sm:shrink-0">
+          {(priority || task.dueDate !== null) && (
+            <div className="flex items-center flex-wrap gap-2 min-w-0">
+              {priority && (
+                <Badge className={priority.class}>
+                  <StatusDiamond color={diamond ?? 'var(--c1)'} size={6} />
+                  {priorityLabel}
+                </Badge>
+              )}
+
+              {task.dueDate !== null && (
+                <span
+                  className={`inline-flex items-center gap-1 text-[11px] font-medium whitespace-nowrap ${
+                    overdue ? 'text-[var(--danger)]' : 'text-[var(--muted)]'
+                  }`}
+                >
+                  <Calendar className="w-3 h-3 shrink-0" />
+                  {formatDate(task.dueDate, { month: 'short', day: 'numeric' })}
+                </span>
+              )}
+            </div>
+          )}
+
+          {!task.isCompleted && (
+            <button
+              type="button"
+              onClick={onSnooze}
+              title={t('tasks.snoozeTomorrow')}
+              aria-label={t('tasks.snoozeTomorrow')}
+              className="ml-auto sm:ml-0 shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 sm:p-1 min-h-[32px] sm:min-h-0 sm:min-w-0 text-[11px] font-medium text-[var(--muted)] hover:text-[var(--c2)] bg-[var(--surface2)] sm:bg-transparent border border-[var(--line)] sm:border-0 hover:bg-[var(--hi)] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 transition cursor-pointer"
+            >
+              <AlarmClock className="w-3.5 h-3.5 shrink-0" />
+              <span className="sm:hidden">{t('tasks.snooze')}</span>
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function SectionHeader({
+function TaskGroup({
   icon,
   title,
-  count,
   tone,
+  tasks,
+  onSelect,
+  onComplete,
+  onSnooze,
+  t,
+  formatDate,
 }: {
   icon: React.ReactNode;
   title: string;
-  count: number;
   tone: string;
+  tasks: MyTaskItem[];
+  onSelect: (task: MyTaskItem) => void;
+  onComplete: (task: MyTaskItem) => void;
+  onSnooze: (task: MyTaskItem) => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  formatDate: (value: number | Date, options?: Intl.DateTimeFormatOptions) => string;
 }) {
-  if (count === 0) return null;
+  if (tasks.length === 0) return null;
   return (
-    <div className="flex items-center gap-2 pt-3 pb-1.5">
-      <span className={tone}>{icon}</span>
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
-        {title}
-      </h2>
-      <Badge>{count}</Badge>
-    </div>
+    <section className="space-y-2 sm:space-y-1.5">
+      <div className="flex items-center gap-2 pt-0.5">
+        <span className={tone}>{icon}</span>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+          {title}
+        </h2>
+        <Badge>{tasks.length}</Badge>
+      </div>
+      <div className="space-y-2 sm:space-y-1.5">
+        {tasks.map((task) => (
+          <TaskRow
+            key={task.id}
+            task={task}
+            onOpen={() => onSelect(task)}
+            onComplete={() => onComplete(task)}
+            onSnooze={() => onSnooze(task)}
+            t={t}
+            formatDate={formatDate}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -314,9 +361,9 @@ export function MyTasksView() {
     <div className="h-full overflow-y-auto bg-[var(--bg)]">
       <div className="max-w-4xl mx-auto px-3.5 py-4 sm:px-6 sm:py-8 space-y-4">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pb-3 sm:pb-4 border-b border-[var(--hair)]">
           <div className="flex items-center gap-2.5">
-            <Inbox className="w-6 h-6 text-[var(--accent)]" />
+            <Inbox className="w-5 h-5 sm:w-6 sm:h-6 text-[var(--accent)] shrink-0" />
             <h1 className="text-xl sm:text-2xl font-bold text-[var(--text)]">{t('tasks.title')}</h1>
           </div>
 
@@ -338,7 +385,8 @@ export function MyTasksView() {
             <Select
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-              className="w-full sm:w-auto"
+              aria-label={t('tasks.allProjects')}
+              className="w-full sm:w-auto h-9 sm:h-8"
             >
               <option value="all">{t('tasks.allProjects')}</option>
               {projects.map((p) => (
@@ -363,92 +411,53 @@ export function MyTasksView() {
             </p>
           </div>
         ) : (
-          <div className="space-y-1">
-            <SectionHeader
-              icon={<AlarmClock className="w-4 h-4" />}
-              title={t('tasks.overdue')}
-              count={groups.overdue.length}
-              tone="text-[var(--danger)]"
-            />
-            {groups.overdue.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onOpen={() => setSelected(task)}
-                onComplete={() => handleComplete(task)}
-                onSnooze={() => handleSnooze(task)}
-                t={t}
-                formatDate={formatDate}
-              />
-            ))}
-
-            <SectionHeader
-              icon={<Calendar className="w-4 h-4" />}
-              title={t('tasks.dueToday')}
-              count={groups.today.length}
-              tone="text-[var(--c2)]"
-            />
-            {groups.today.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onOpen={() => setSelected(task)}
-                onComplete={() => handleComplete(task)}
-                onSnooze={() => handleSnooze(task)}
-                t={t}
-                formatDate={formatDate}
-              />
-            ))}
-
-            <SectionHeader
-              icon={<Calendar className="w-4 h-4" />}
-              title={t('tasks.upcoming')}
-              count={groups.upcoming.length}
-              tone="text-[var(--c4)]"
-            />
-            {groups.upcoming.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onOpen={() => setSelected(task)}
-                onComplete={() => handleComplete(task)}
-                onSnooze={() => handleSnooze(task)}
-                t={t}
-                formatDate={formatDate}
-              />
-            ))}
-
-            <SectionHeader
-              icon={<ListTodo className="w-4 h-4" />}
-              title={t('tasks.later')}
-              count={groups.later.length}
-              tone="text-[var(--muted)]"
-            />
-            {groups.later.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onOpen={() => setSelected(task)}
-                onComplete={() => handleComplete(task)}
-                onSnooze={() => handleSnooze(task)}
-                t={t}
-                formatDate={formatDate}
-              />
-            ))}
-
-            <SectionHeader
-              icon={<CheckCircle2 className="w-4 h-4" />}
-              title={t('tasks.completed')}
-              count={groups.completed.length}
-              tone="text-[var(--c4)]"
-            />
-            {groups.completed.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onOpen={() => setSelected(task)}
-                onComplete={() => handleComplete(task)}
-                onSnooze={() => handleSnooze(task)}
+          <div className="space-y-5 sm:space-y-4">
+            {[
+              {
+                key: 'overdue',
+                icon: <AlarmClock className="w-4 h-4" />,
+                title: t('tasks.overdue'),
+                tone: 'text-[var(--danger)]',
+                items: groups.overdue,
+              },
+              {
+                key: 'today',
+                icon: <Calendar className="w-4 h-4" />,
+                title: t('tasks.dueToday'),
+                tone: 'text-[var(--c2)]',
+                items: groups.today,
+              },
+              {
+                key: 'upcoming',
+                icon: <Calendar className="w-4 h-4" />,
+                title: t('tasks.upcoming'),
+                tone: 'text-[var(--c4)]',
+                items: groups.upcoming,
+              },
+              {
+                key: 'later',
+                icon: <ListTodo className="w-4 h-4" />,
+                title: t('tasks.later'),
+                tone: 'text-[var(--muted)]',
+                items: groups.later,
+              },
+              {
+                key: 'completed',
+                icon: <CheckCircle2 className="w-4 h-4" />,
+                title: t('tasks.completed'),
+                tone: 'text-[var(--c4)]',
+                items: groups.completed,
+              },
+            ].map((section) => (
+              <TaskGroup
+                key={section.key}
+                icon={section.icon}
+                title={section.title}
+                tone={section.tone}
+                tasks={section.items}
+                onSelect={setSelected}
+                onComplete={handleComplete}
+                onSnooze={handleSnooze}
                 t={t}
                 formatDate={formatDate}
               />

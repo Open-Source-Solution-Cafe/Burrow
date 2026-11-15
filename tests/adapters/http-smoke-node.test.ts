@@ -97,7 +97,7 @@ describe.each(['sqlite', 'postgres'] as const)('%s HTTP smoke', (kind) => {
       },
       email: { provider: 'console', send: async () => ({ id: 'smoke-email-1' }) },
       bootstrapToken,
-      env: {},
+      env: kind === 'postgres' ? { DATABASE_URL: 'postgres://localhost/burrow' } : {},
     };
 
     const app = createCoreApp(infra);
@@ -105,6 +105,13 @@ describe.each(['sqlite', 'postgres'] as const)('%s HTTP smoke', (kind) => {
     const health = await app.request('http://localhost/api/health');
     expect(health.status).toBe(200);
     expect(await health.json()).toMatchObject({ ok: true });
+
+    const versionRes = await app.request('http://localhost/api/system/version');
+    expect(versionRes.status).toBe(200);
+    expect(await versionRes.json()).toMatchObject({
+      runtime: kind === 'postgres' ? 'docker-postgres' : 'node-sqlite',
+      maxUploadBytes: 100 * 1024 * 1024,
+    });
 
     const authConfig = await app.request('http://localhost/api/auth/config');
     expect(authConfig.status).toBe(200);

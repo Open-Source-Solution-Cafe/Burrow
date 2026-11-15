@@ -103,7 +103,9 @@ async function main() {
   // --- Remote Cloudflare D1 Reset ---
   const targetName = profile.isStaging
     ? `REMOTE Cloudflare Staging (${profile.dbName})`
-    : `REMOTE Cloudflare Production (${profile.dbName})`;
+    : profile.isDemo
+      ? `REMOTE Cloudflare Demo (${profile.dbName})`
+      : `REMOTE Cloudflare Production (${profile.dbName})`;
 
   const auth = assertProductionOperationAllowed({
     operation: 'reset',
@@ -113,10 +115,14 @@ async function main() {
     isInteractive: Boolean(process.stdin.isTTY),
   });
 
-  if (auth.mode === 'interactive' || (profile.isStaging && !force)) {
+  if (
+    auth.mode === 'interactive' ||
+    auth.mode === 'demo-interactive' ||
+    (profile.isStaging && !force)
+  ) {
     if (!process.stdin.isTTY) {
       throw new Error(
-        `Refusing non-interactive staging reset on "${profile.dbName}" without --force.`,
+        `Refusing non-interactive ${profile.envName} reset on "${profile.dbName}" without explicit authorization.`,
       );
     }
     console.log('======================================================');
@@ -128,7 +134,11 @@ async function main() {
     console.log('  - Returns the database to a completely clean, initial slate.');
     console.log('======================================================\n');
 
-    const expectedPhrase = profile.isStaging ? 'RESET-STAGING' : 'RESET-PRODUCTION';
+    const expectedPhrase = profile.isStaging
+      ? 'RESET-STAGING'
+      : profile.isDemo
+        ? 'RESET-DEMO-BURROW'
+        : 'RESET-PRODUCTION';
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await rl.question(
       `Type "${expectedPhrase}" to confirm resetting ${profile.envName}: `,

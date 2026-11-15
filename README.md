@@ -93,20 +93,20 @@ Best for zero-maintenance hosting inside Cloudflare's free-tier limits.
 
 Best for self-hosted servers, VPS environments, and Docker Compose stacks.
 
-**Local Docker evaluation (`http://localhost:3005`):**
+**Local Docker evaluation (`http://localhost:3005`, bound strictly to `127.0.0.1`):**
 
 ```bash
-cp .env.example .env
+pnpm run docker:init -- --local-eval
 docker compose up -d --build
-# Run `docker compose logs burrow` to see the generated BOOTSTRAP_TOKEN
 ```
+
+> `pnpm run docker:init -- --local-eval` generates unique stable `.env` secrets and displays your one-time `BOOTSTRAP_TOKEN` cleanly without printing secrets into production container logs.
 
 **Production Docker deployment (internet-accessible):**
 
 ```bash
-cp .env.example .env
-# Set ALLOW_LOCAL_DOCKER_EVAL=false, BETTER_AUTH_URL=https://notes.example.com,
-# BETTER_AUTH_SECRET=$(openssl rand -hex 32), and BOOTSTRAP_TOKEN=$(openssl rand -hex 16) in .env
+pnpm run docker:init -- --url https://notes.example.com
+# Place Caddy / Nginx / Traefik in front of 127.0.0.1:3005 (or set BIND_HOST intentionally)
 docker compose up -d --build
 ```
 

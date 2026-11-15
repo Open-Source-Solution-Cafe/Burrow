@@ -335,10 +335,14 @@ describe('Schema Parity: Migrations from Scratch vs Drizzle Definitions', () => 
       dbUrl.pathname = `/${testDb}`;
       client = postgres(dbUrl.toString(), { max: 2, onnotice: () => {} });
 
-      // Run squashed PostgreSQL baseline migration
-      const pgBaselinePath = path.resolve('migrations/postgres/0000_baseline.sql');
-      const pgSql = fs.readFileSync(pgBaselinePath, 'utf8');
-      await client.unsafe(pgSql);
+      // Run all PostgreSQL migrations in sorted order
+      const pgMigrationsDir = path.resolve('migrations/postgres');
+      for (const file of fs
+        .readdirSync(pgMigrationsDir)
+        .filter((name) => name.endsWith('.sql'))
+        .sort()) {
+        await client.unsafe(fs.readFileSync(path.join(pgMigrationsDir, file), 'utf8'));
+      }
 
       // 1. Table Parity
       const drizzleTables = getPgTables();

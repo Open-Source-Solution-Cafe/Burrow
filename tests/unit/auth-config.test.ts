@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createCoreApp } from '../../src/core/app';
-import { createVerificationRateLimitStorage } from '../../src/core/adapters/auth';
+import { InMemoryRateLimitStore } from '../../src/core/adapters/rate-limit';
 import { SelfHostedPolicy } from '../../src/core/policy';
 import { createWorkerApp } from '../../src/worker';
 
@@ -118,24 +118,23 @@ describe('Auth Config & Auto-Workspace Provisioning', () => {
     ]);
   });
 
-  it('enforces per-key limits in shared createVerificationRateLimitStorage (#009)', async () => {
-    const storage = createVerificationRateLimitStorage(null, null);
-    const rule = { window: 60, max: 2 };
+  it('enforces per-key limits in Better Auth customStorage adapter (#009)', async () => {
+    const store = new InMemoryRateLimitStore();
+    const storage = store.createBetterAuthStorage();
+    const rule = { window: 10, max: 3 };
 
-    expect(await storage.consume('198.51.100.1|/sign-in/email', rule)).toEqual({
-      allowed: true,
-      retryAfter: null,
-    });
-    expect(await storage.consume('198.51.100.1|/sign-in/email', rule)).toEqual({
-      allowed: true,
-      retryAfter: null,
-    });
-    const blocked = await storage.consume('198.51.100.1|/sign-in/email', rule);
+    for (let i = 0; i < 3; i += 1) {
+      expect(await storage.consume('ip:198.51.100.1|/sign-in/email', rule)).toEqual({
+        allowed: true,
+        retryAfter: null,
+      });
+    }
+    const blocked = await storage.consume('ip:198.51.100.1|/sign-in/email', rule);
     expect(blocked.allowed).toBe(false);
     expect(blocked.retryAfter).toBeGreaterThanOrEqual(1);
 
-    // Distinct IP remains isolated and allowed
-    expect(await storage.consume('198.51.100.2|/sign-in/email', rule)).toEqual({
+    // Distinct key remains isolated and allowed
+    expect(await storage.consume('ip:198.51.100.2|/sign-in/email', rule)).toEqual({
       allowed: true,
       retryAfter: null,
     });

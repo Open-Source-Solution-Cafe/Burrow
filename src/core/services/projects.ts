@@ -1,11 +1,13 @@
 import { nanoid } from 'nanoid';
 import { uploadPolicyStorageKey } from '../../shared/uploadPolicy';
 import { deleteStorageObjectWithRetry } from '../shared/storage-cleanup';
+import { StorageCleanupService } from './storage-cleanup';
 import type {
   IProjectRepository,
   INotepadRepository,
   IProjectFileRepository,
   IMemberRepository,
+  IStorageDeletionRepository,
   Project,
   UpdateProjectData,
 } from '../infrastructure/types';
@@ -51,6 +53,7 @@ export type Repositories = {
   notepads: INotepadRepository;
   members: IMemberRepository;
   projectFiles: IProjectFileRepository;
+  storageDeletions?: IStorageDeletionRepository;
 };
 
 export class ProjectService {
@@ -217,6 +220,14 @@ export class ProjectService {
         throw forbidden('forbidden', 'Only workspace owners can permanently delete a project');
       }
       throw conflict('project_delete_changed', 'Project changed before it could be deleted');
+    }
+
+    if (this.storage && this.repos.storageDeletions) {
+      await new StorageCleanupService(this.repos, this.storage).processPending({
+        now: Date.now(),
+        limit: 100,
+      });
+      return;
     }
 
     if (this.storage) {

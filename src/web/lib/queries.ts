@@ -147,6 +147,8 @@ export interface SystemVersionInfo {
   latestVersion: string;
   updateAvailable: boolean;
   allowSelfUpdate: boolean;
+  runtime?: 'worker' | 'node-sqlite' | 'docker-postgres';
+  maxUploadBytes?: number;
 }
 
 export function useSystemVersion() {

@@ -12,6 +12,7 @@ import {
   useProjects,
   useProjectTags,
   useSignOut,
+  useSystemVersion,
   useUpdateProject,
 } from '../lib/queries';
 import { Avatar } from '../components/ui/Avatar';
@@ -42,6 +43,9 @@ function UploadSettings({
   const { t } = useTranslation();
   const policy = useUploadPolicy(workspaceId, projectId);
   const update = useUpdateUploadPolicy(workspaceId, projectId);
+  const systemVersion = useSystemVersion();
+  const maxSupportedUploadBytes = systemVersion.data?.maxUploadBytes ?? MAX_UPLOAD_BYTES;
+  const maxSupportedMb = maxSupportedUploadBytes / (1024 * 1024);
   const [sizeMb, setSizeMb] = useState('');
   const [allowedTypes, setAllowedTypes] = useState<string[]>([]);
   useEffect(() => {
@@ -68,11 +72,14 @@ function UploadSettings({
       ) : (
         <>
           <label className="block space-y-1.5 text-xs font-medium text-[var(--text)]">
-            <span>{t('settings.maxFileSizeMb')}</span>
+            <span>
+              {t('settings.maxFileSizeMb')}{' '}
+              <span className="font-normal text-[var(--muted)]">(max {maxSupportedMb} MB)</span>
+            </span>
             <Input
               type="number"
               min="0.01"
-              max={MAX_UPLOAD_BYTES / (1024 * 1024)}
+              max={maxSupportedMb}
               step="any"
               value={sizeMb}
               onChange={(event) => setSizeMb(event.target.value)}
@@ -116,10 +123,10 @@ function UploadSettings({
                 if (
                   !Number.isFinite(maxFileSizeBytes) ||
                   maxFileSizeBytes < 1 ||
-                  maxFileSizeBytes > MAX_UPLOAD_BYTES
+                  maxFileSizeBytes > maxSupportedUploadBytes
                 ) {
                   toast.error(
-                    `Enter a file size between 0.01 and ${MAX_UPLOAD_BYTES / (1024 * 1024)} MB`,
+                    `Enter a file size between 0.01 and ${maxSupportedMb} MB`,
                   );
                   return;
                 }

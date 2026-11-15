@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { parseTrustedProxies } from '../core/shared/ip';
 
 export function generateBootstrapToken(): string {
   return crypto.randomBytes(16).toString('hex');
@@ -25,20 +26,30 @@ function isLocalhostAuthUrl(url: string | undefined): boolean {
   if (!url) return false;
   try {
     const parsed = new URL(url);
-    return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+    );
   } catch {
     return false;
   }
 }
 
+export function isLoopbackBindHost(host: string | undefined): boolean {
+  if (!host || !host.trim()) return true;
+  const normalized = host.trim().toLowerCase();
+  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost';
+}
+
 const configSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3005),
+  BIND_HOST: z.string().default('127.0.0.1'),
   SQLITE_PATH: z.string().min(1).default('./data/burrow.db'),
   LOCAL_STORAGE_PATH: z.string().min(1).default('./data/uploads'),
   BETTER_AUTH_SECRET: z.string().min(1).default(() => generateAuthSecret()),
   BETTER_AUTH_URL: z.string().min(1).default('http://localhost:3005'),
   BOOTSTRAP_TOKEN: z.string().default(() => generateBootstrapToken()),
-  ALLOW_LOCAL_DOCKER_EVAL: z.string().optional(),
+  ALLOW_LOCAL_DOCKER_EVAL: z.enum(['true', 'false']).default('false'),
   DATABASE_URL: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -59,13 +70,56 @@ const configSchema = z.object({
 
 export type ServerConfig = z.infer<typeof configSchema>;
 
-/** Load + validate the Node server env. Throws a zod error on bad input. */
+/** Load + validate the Node server env. Throws an explicit error on invalid or insecure config. */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const isProd = env.NODE_ENV === 'production';
   const rawUrl = env.BETTER_AUTH_URL?.trim();
   const rawSecret = env.BETTER_AUTH_SECRET?.trim();
   const rawBootstrap = env.BOOTSTRAP_TOKEN?.trim();
-  const isLocalDockerEval = env.ALLOW_LOCAL_DOCKER_EVAL === 'true' && isLocalhostAuthUrl(rawUrl);
+  const rawEvalFlag = env.ALLOW_LOCAL_DOCKER_EVAL?.trim();
+  const rawBindHost = env.BIND_HOST?.trim();
+  const rawProcessHost = env.HOST?.trim();
+
+  if (rawEvalFlag && rawEvalFlag !== 'true' && rawEvalFlag !== 'false') {
+    throw new Error(
+      `Invalid ALLOW_LOCAL_DOCKER_EVAL value "${rawEvalFlag}": expected "true" or "false".`,
+    );
+  }
+
+  const explicitLocalEvalOptIn = rawEvalFlag === 'true';
+  if (explicitLocalEvalOptIn) {
+    if (!isLocalhostAuthUrl(rawUrl)) {
+      throw new Error(
+        `ALLOW_LOCAL_DOCKER_EVAL=true requires a localhost or 127.0.0.1 BETTER_AUTH_URL (got "${rawUrl ?? ''}"). Set ALLOW_LOCAL_DOCKER_EVAL=false for public deployments.`,
+      );
+    }
+    if (!isLoopbackBindHost(rawBindHost)) {
+      throw new Error(
+        `ALLOW_LOCAL_DOCKER_EVAL=true cannot bind to non-loopback BIND_HOST "${rawBindHost}". Use 127.0.0.1 for local evaluation or disable ALLOW_LOCAL_DOCKER_EVAL.`,
+      );
+    }
+    if (rawProcessHost && !isLoopbackBindHost(rawProcessHost)) {
+      throw new Error(
+        `ALLOW_LOCAL_DOCKER_EVAL=true cannot bind to non-loopback HOST "${rawProcessHost}". Use 127.0.0.1 or disable ALLOW_LOCAL_DOCKER_EVAL.`,
+      );
+    }
+    if (env.TRUST_PROXY === 'true' || Boolean(env.TRUSTED_PROXIES?.trim())) {
+      throw new Error(
+        'ALLOW_LOCAL_DOCKER_EVAL=true cannot be combined with TRUST_PROXY or TRUSTED_PROXIES forwarding.',
+      );
+    }
+  }
+
+  const isLocalDockerEval = explicitLocalEvalOptIn && isLocalhostAuthUrl(rawUrl);
+
+  if (env.TRUSTED_PROXIES?.trim()) {
+    parseTrustedProxies(env.TRUSTED_PROXIES);
+  }
+  if (isProd && env.TRUST_PROXY === 'true' && !env.TRUSTED_PROXIES?.trim()) {
+    throw new Error(
+      'TRUST_PROXY=true in production requires TRUSTED_PROXIES to list verified reverse-proxy IP addresses or CIDR ranges.',
+    );
+  }
 
   if (rawSecret && KNOWN_SECRET_PLACEHOLDERS.has(rawSecret) && isProd) {
     throw new Error(
@@ -79,30 +133,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   }
 
   if (isProd) {
-    if (
-      !isLocalDockerEval &&
-      (!rawSecret || KNOWN_SECRET_PLACEHOLDERS.has(rawSecret) || rawSecret.length < 32)
-    ) {
+    if (!rawSecret || KNOWN_SECRET_PLACEHOLDERS.has(rawSecret) || rawSecret.length < 32) {
       throw new Error(
-        'BETTER_AUTH_SECRET must be set to a secure string of at least 32 characters in production',
+        'BETTER_AUTH_SECRET must be set to a stable, securely generated string of at least 32 characters in production and persistent Docker deployments',
       );
     }
-    if (isLocalDockerEval && rawSecret && rawSecret.length < 32) {
+    if (!rawBootstrap || KNOWN_BOOTSTRAP_PLACEHOLDERS.has(rawBootstrap) || rawBootstrap.length < 16) {
       throw new Error(
-        'BETTER_AUTH_SECRET must be at least 32 characters (or left empty for ephemeral local Docker evaluation)',
+        'BOOTSTRAP_TOKEN must be set to a stable, securely generated string of at least 16 characters in production and persistent Docker deployments',
       );
     }
-    if (
-      !isLocalDockerEval &&
-      (!rawBootstrap || KNOWN_BOOTSTRAP_PLACEHOLDERS.has(rawBootstrap) || rawBootstrap.length < 16)
-    ) {
+    if (env.DATABASE_URL?.includes(':burrowpassword@')) {
       throw new Error(
-        'BOOTSTRAP_TOKEN must be set to a secure string of at least 16 characters in production',
-      );
-    }
-    if (isLocalDockerEval && rawBootstrap && rawBootstrap.length < 16) {
-      throw new Error(
-        'BOOTSTRAP_TOKEN must be at least 16 characters (or left empty for ephemeral local Docker evaluation)',
+        'DATABASE_URL uses the insecure default password "burrowpassword". Generate a unique POSTGRES_PASSWORD cleanly in .env.',
       );
     }
     if (!rawUrl) {
@@ -115,7 +158,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       throw new Error('BETTER_AUTH_URL must be a valid URL in production');
     }
     if (!isLocalDockerEval && (parsedAuthUrl.hostname === 'localhost' || parsedAuthUrl.hostname === '127.0.0.1')) {
-      throw new Error('BETTER_AUTH_URL cannot point to localhost or 127.0.0.1 in production');
+      throw new Error(
+        'BETTER_AUTH_URL cannot point to localhost or 127.0.0.1 in production without explicit ALLOW_LOCAL_DOCKER_EVAL=true opt-in',
+      );
     }
   }
 
@@ -131,12 +176,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
 
   return configSchema.parse({
     PORT: env.PORT,
+    BIND_HOST: rawBindHost || '127.0.0.1',
     SQLITE_PATH: env.SQLITE_PATH,
     LOCAL_STORAGE_PATH: env.LOCAL_STORAGE_PATH,
     BETTER_AUTH_SECRET: authSecret,
     BETTER_AUTH_URL: rawUrl || undefined,
     BOOTSTRAP_TOKEN: bootstrapToken,
-    ALLOW_LOCAL_DOCKER_EVAL: env.ALLOW_LOCAL_DOCKER_EVAL,
+    ALLOW_LOCAL_DOCKER_EVAL: explicitLocalEvalOptIn ? 'true' : 'false',
     DATABASE_URL: env.DATABASE_URL,
     RESEND_API_KEY: env.RESEND_API_KEY,
     EMAIL_FROM: env.EMAIL_FROM,

@@ -3,11 +3,18 @@ import { APP_VERSION } from '../version';
 import type { AccessPolicy } from '../policy';
 import type { IWorkspaceRepository } from '../infrastructure/types';
 import type { Env } from '../app';
+import {
+  maxUploadBytesForRuntime,
+  resolveDeploymentRuntime,
+  type BurrowRuntime,
+} from '../../shared/uploadPolicy';
 
 export interface SystemRoutesOptions {
   policy?: AccessPolicy;
   workspaces: IWorkspaceRepository;
   env?: Record<string, any>;
+  runtime?: BurrowRuntime;
+  maxUploadBytes?: number;
 }
 
 let cachedRelease: { latestVersion: string; timestamp: number } | null = null;
@@ -60,6 +67,12 @@ export async function fetchLatestReleaseVersion(currentVersion: string): Promise
 
 export function createSystemRoutes(options: SystemRoutesOptions) {
   const { policy, workspaces, env = {} } = options;
+  const runtime = resolveDeploymentRuntime({
+    runtime: options.runtime,
+    env,
+    databaseUrl: typeof env?.DATABASE_URL === 'string' ? env.DATABASE_URL : undefined,
+  });
+  const maxUploadBytes = options.maxUploadBytes ?? maxUploadBytesForRuntime(runtime);
   const route = new Hono<Env>();
 
   route.get('/version', async (c) => {
@@ -74,6 +87,8 @@ export function createSystemRoutes(options: SystemRoutesOptions) {
       latestVersion,
       updateAvailable,
       allowSelfUpdate,
+      runtime,
+      maxUploadBytes,
     });
   });
 

@@ -8,6 +8,8 @@ import type { MemberService } from '../services/members';
 import type { InviteService } from '../services/invites';
 import { createWorkspacePlan } from '../entities/workspace';
 import { createExplicitWorkspaceMiddleware, requireRole } from '../middleware/session';
+import { rateLimiter } from '../middleware/security';
+import type { RateLimitStore } from '../adapters/rate-limit';
 import { inviteEmail } from '../services/email-templates';
 import { forbidden } from '../services/errors';
 import type { AccessPolicy } from '../policy';
@@ -33,8 +35,20 @@ export function createWorkspaceRoutes(args: {
   email: IEmailProvider;
   appUrl?: string;
   policy?: AccessPolicy;
+  rateLimitStore?: RateLimitStore;
+  env?: Record<string, unknown>;
+  requirePersistentRateLimitStore?: boolean;
 }) {
-  const { workspaces, members, memberService, invites, policy } = args;
+  const {
+    workspaces,
+    members,
+    memberService,
+    invites,
+    policy,
+    rateLimitStore,
+    env,
+    requirePersistentRateLimitStore,
+  } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const route = new Hono<Env>();
 
@@ -127,7 +141,24 @@ export function createWorkspaceRoutes(args: {
     return c.json(pending.map(({ tokenHash: _tokenHash, ...rest }) => rest));
   });
 
-  route.post('/:wid/invites', explicitWorkspace, requireRole('owner'), zValidator('json', createInviteSchema), async (c) => {
+  route.post(
+    '/:wid/invites',
+    explicitWorkspace,
+    requireRole('owner'),
+    rateLimiter({
+      windowMs: 60_000,
+      maxRequests: 20,
+      prefix: 'invites-create',
+      env,
+      store: rateLimitStore,
+      requireStore: requirePersistentRateLimitStore,
+      keyResolver: (c) => {
+        const uid = c.get('userId') || c.get('identity')?.userId;
+        return uid ? `user:${uid}` : null;
+      },
+    }),
+    zValidator('json', createInviteSchema),
+    async (c) => {
     const workspaceId = c.get('workspaceId');
     const userId = c.get('userId');
     const { email, role } = c.req.valid('json');
