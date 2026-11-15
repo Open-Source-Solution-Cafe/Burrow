@@ -233,7 +233,7 @@ async function main() {
   run(bin('typescript', 'tsc'), ['-b'], { dryRun });
   run(bin('vite'), ['build'], { dryRun });
   const deployArgs = [...configArgs, 'deploy', ...WRANGLER_ARGS];
-  if (domain) deployArgs.push('--domains', domain);
+  if (domain && !domain.endsWith('.workers.dev')) deployArgs.push('--domains', domain);
   const deploy = run(bin('wrangler'), deployArgs, { dryRun, capture: true });
   const url = domain
     ? `https://${domain}`

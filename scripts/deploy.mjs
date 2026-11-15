@@ -143,7 +143,7 @@ async function main() {
 
   step('Deploy');
   const deployArgs = [...configArgs, 'deploy', ...WRANGLER_ARGS];
-  if (domain) deployArgs.push('--domains', domain);
+  if (domain && !domain.endsWith('.workers.dev')) deployArgs.push('--domains', domain);
   const deploy = run(bin('wrangler'), deployArgs, { capture: true });
   const url = domain
     ? `https://${domain}`
