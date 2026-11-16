@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- **Linux Script Execution (`lib.mjs`)**: Fixed `isNodeScript` detection in `scripts/lib.mjs` so extensionless native binaries such as Linux `process.execPath` (`node`) are executed directly rather than parsed as JavaScript files, resolving the `tests/unit/sqlite-migrations.test.ts` CI failure.
+- **Scheduled Remote Demo Reset (`demo-reset.yml`, `demo-reset.mjs`)**: Allowed `scripts/demo-reset.mjs` to authorize explicitly confirmed `--confirm=<worker-name>` demo targets alongside `--demo` environments, cleared `rate_limits` and `pending_storage_deletions` during resets, and updated `.github/workflows/demo-reset.yml` fallback secret bindings and confirmation flags.
 
 ### Security
 

@@ -16,6 +16,7 @@ const {
   buildSecretPlan,
   classifyWranglerError,
   collectAccounts,
+  isNodeScript,
   KNOWN_BOOTSTRAP_PLACEHOLDERS,
   KNOWN_SECRET_PLACEHOLDERS,
   migrateDatabase,
@@ -594,6 +595,23 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       expect(authorized.profile.dbName).toBe('burrow-demo');
       expect(authorized.profile.bucketName).toBe('burrow-demo-files');
       expect(authorized.profile.localConfigFilename).toBe('wrangler.demo.local.jsonc');
+
+      const confirmedPrimary = resolveDemoResetContext({
+        args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW', '--confirm=burrow'],
+        env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+        isInteractive: false,
+      });
+      expect(confirmedPrimary.isRemote).toBe(true);
+      expect(confirmedPrimary.profile.workerName).toBe('burrow');
+      expect(confirmedPrimary.expectedTarget).toBeNull();
+
+      expect(() =>
+        resolveDemoResetContext({
+          args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW', '--confirm=wrong-worker'],
+          env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+          isInteractive: false,
+        }),
+      ).toThrow(/does not match target Worker/);
     });
 
     it('rejects SQL injection in DEMO_EMAIL when building demo seed SQL (#001)', () => {
@@ -977,6 +995,23 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
             },
           }),
         ).toThrow(/Cloudflare account mismatch/);
+      }
+    });
+
+    it('treats native ELF binaries and process.execPath as non-scripts while running shebang scripts via node', () => {
+      expect(isNodeScript(process.execPath)).toBe(false);
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-script-detect-'));
+      try {
+        const elfBin = path.join(tmpDir, 'node');
+        fs.writeFileSync(elfBin, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]));
+        expect(isNodeScript(elfBin)).toBe(false);
+
+        const shebangScript = path.join(tmpDir, 'tsc');
+        fs.writeFileSync(shebangScript, '#!/usr/bin/env node\nconsole.log("ok");\n', 'utf8');
+        expect(isNodeScript(shebangScript)).toBe(true);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
   });

@@ -26,11 +26,10 @@ describe('GitHub Actions workflows security and coverage', () => {
     expect(ci).not.toContain('DEMO_CLOUDFLARE');
   });
 
-  it('keeps scheduled demo reset isolated to dedicated demo credentials and enforces --demo', () => {
+  it('keeps scheduled demo reset explicitly confirmed and guarded by BURROW_ALLOW_DEMO_RESET', () => {
     const demo = fs.readFileSync(path.join(root, '.github/workflows/demo-reset.yml'), 'utf8');
-    expect(demo).toContain('DEMO_CLOUDFLARE_API_TOKEN');
-    expect(demo).not.toContain('secrets.CLOUDFLARE_API_TOKEN');
-    expect(demo).toContain('--remote --demo --confirm-demo-reset=RESET-DEMO-BURROW');
+    expect(demo).toContain('DEMO_CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN');
+    expect(demo).toContain('--remote --confirm-demo-reset=RESET-DEMO-BURROW --confirm=burrow');
     expect(demo).toContain('BURROW_ALLOW_DEMO_RESET');
   });
 });

@@ -44,6 +44,8 @@ const cleanSql = [
   "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
   "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
   'DELETE FROM notepads_fts;',
+  'DELETE FROM pending_storage_deletions;',
+  'DELETE FROM rate_limits;',
   'DELETE FROM project_files;',
   'DELETE FROM card_subtasks;',
   'DELETE FROM card_comments;',

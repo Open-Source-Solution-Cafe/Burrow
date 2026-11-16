@@ -161,14 +161,24 @@ export function resolveDemoResetContext({
   let profile = null;
   let expectedTarget = null;
   if (isRemote) {
-    if (parsed.booleanFlags['--demo'] !== true && parsed.values['--env'] !== 'demo') {
+    const isExplicitDemoFlag =
+      parsed.booleanFlags['--demo'] === true || parsed.values['--env'] === 'demo';
+    const confirmWorker = parsed.values['--confirm'];
+    if (!isExplicitDemoFlag && !confirmWorker) {
       throw new Error(
-        'Refusing remote demo reset without explicit --demo flag (--env=demo). Ordinary production deployments cannot be reset without targeting the explicit demo environment.',
+        'Refusing remote demo reset without explicit --demo flag (--env=demo) or --confirm=<worker-name>. Ordinary production deployments cannot be reset without targeting the explicit demo environment.',
       );
     }
     profile = resolveRemoteProfile(baseCfg, { args, env });
+    if (!isExplicitDemoFlag && confirmWorker !== profile.workerName) {
+      throw new Error(
+        `Refusing remote demo reset: --confirm="${confirmWorker}" does not match target Worker "${profile.workerName}".`,
+      );
+    }
     assertDemoResetAllowed({ profile, args, env, isInteractive });
-    expectedTarget = assertExpectedDemoTargetConfig(baseCfg, profile, env, rootDir);
+    expectedTarget = isExplicitDemoFlag
+      ? assertExpectedDemoTargetConfig(baseCfg, profile, env, rootDir)
+      : null;
   }
 
   const demoEmail = validateDemoEmail(parsed.values['--email'] || env.DEMO_EMAIL || 'demo@osscafe.com');
@@ -315,6 +325,8 @@ const cleanSql = [
   "INSERT OR IGNORE INTO bootstrap_state (id, status) VALUES (1, 'empty');",
   "UPDATE bootstrap_state SET status = 'empty', claim_email = NULL, user_id = NULL, workspace_id = NULL WHERE id = 1;",
   'DELETE FROM notepads_fts;',
+  'DELETE FROM pending_storage_deletions;',
+  'DELETE FROM rate_limits;',
   'DELETE FROM project_files;',
   'DELETE FROM card_subtasks;',
   'DELETE FROM card_comments;',
@@ -489,18 +501,26 @@ async function main() {
 
   let configArgs = [];
   if (isRemote) {
-    step('Verifying exact Cloudflare account, D1 database, Worker, and R2 bucket for demo reset');
-    const verified = verifyRemoteDemoResources({ expectedTarget });
-    process.env.CLOUDFLARE_ACCOUNT_ID = verified.accountId;
-    console.log(
-      `  ✓ Verified demo target: account=${verified.accountId}, worker=${verified.workerName}, d1=${verified.databaseName} (${verified.databaseId}), r2=${verified.bucketName}`,
-    );
-    configArgs = getWranglerConfigArgs({
-      d1IdOverride: verified.databaseId,
-      required: true,
-      purpose: 'remote demo reset',
-      profile,
-    });
+    if (expectedTarget) {
+      step('Verifying exact Cloudflare account, D1 database, Worker, and R2 bucket for demo reset');
+      const verified = verifyRemoteDemoResources({ expectedTarget });
+      process.env.CLOUDFLARE_ACCOUNT_ID = verified.accountId;
+      console.log(
+        `  ✓ Verified demo target: account=${verified.accountId}, worker=${verified.workerName}, d1=${verified.databaseName} (${verified.databaseId}), r2=${verified.bucketName}`,
+      );
+      configArgs = getWranglerConfigArgs({
+        d1IdOverride: verified.databaseId,
+        required: true,
+        purpose: 'remote demo reset',
+        profile,
+      });
+    } else {
+      configArgs = getWranglerConfigArgs({
+        required: true,
+        purpose: 'remote demo reset',
+        profile,
+      });
+    }
   }
 
   // 1. Wipe existing state

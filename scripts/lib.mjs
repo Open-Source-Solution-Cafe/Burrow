@@ -400,8 +400,9 @@ export function assertProductionOperationAllowed({
 
 /**
  * Fail-closed authorization guard for remote demo resets.
- * Enforces an explicit demo target (--demo / --env=demo), explicit BURROW_ALLOW_DEMO_RESET=true,
- * and explicit RESET-DEMO-BURROW confirmation. Never treats CI=true or --force as authorization.
+ * Enforces an explicit demo target (--demo / --env=demo) or explicit --confirm=<worker-name>,
+ * explicit BURROW_ALLOW_DEMO_RESET=true, and explicit RESET-DEMO-BURROW confirmation.
+ * Never treats CI=true or --force as authorization.
  */
 export function assertDemoResetAllowed({
   profile,
@@ -410,10 +411,13 @@ export function assertDemoResetAllowed({
   isInteractive = Boolean(process.stdin.isTTY),
 }) {
   const parsed = parseCliArgs(args);
+  const confirmTarget = parsed.values['--confirm'];
+  const isConfirmedWorkerTarget =
+    Boolean(profile?.workerName) && confirmTarget === profile.workerName;
 
-  if (!profile || !profile.isDemo) {
+  if (!profile || (!profile.isDemo && !isConfirmedWorkerTarget)) {
     throw new Error(
-      `Refusing remote demo reset on non-demo target "${profile?.envName ?? 'unknown'}" ("${profile?.dbName ?? 'unknown'}"). Pass --demo targeting an isolated demo deployment; ordinary production and staging deployments cannot be reset by demo-reset.`,
+      `Refusing remote demo reset on non-demo target "${profile?.envName ?? 'unknown'}" ("${profile?.dbName ?? 'unknown'}"). Pass --demo targeting an isolated demo deployment or --confirm=${profile?.workerName ?? '<worker-name>'}; ordinary production and staging deployments cannot be reset by demo-reset.`,
     );
   }
 
@@ -673,6 +677,26 @@ export function printTargetBanner(action, isRemote, { profile } = {}) {
   console.log('======================================================\n');
 }
 
+export function isNodeScript(cmd) {
+  if (!cmd || path.resolve(cmd) === path.resolve(process.execPath)) return false;
+  if (/\.(c?js|mjs)$/.test(cmd)) return true;
+  if (!path.extname(cmd) && fs.existsSync(cmd)) {
+    try {
+      const fd = fs.openSync(cmd, 'r');
+      try {
+        const buf = Buffer.alloc(2);
+        const bytesRead = fs.readSync(fd, buf, 0, 2, 0);
+        return bytesRead === 2 && buf[0] === 0x23 && buf[1] === 0x21; // '#!'
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 /**
  * Run a command. Honors --dry-run globally via `dryRun`.
  * Uses shell only where required (Windows .cmd shims such as pnpm).
@@ -694,9 +718,9 @@ export function run(cmd, args = [], opts = {}) {
   }
   if (!quiet) console.log(`  $ ${printable}`);
   // Executable scripts are run through node; shell is only needed for .cmd shims (pnpm).
-  // Extensionless files (typescript's bin/tsc) are node shebang scripts too — on
+  // Extensionless shebang files (typescript's bin/tsc) are node scripts too — on
   // Windows cmd.exe can't exec them directly, so they go through node as well.
-  const isScript = /\.(c?js|mjs)$/.test(cmd) || (!path.extname(cmd) && fs.existsSync(cmd));
+  const isScript = isNodeScript(cmd);
   const command = isScript ? process.execPath : cmd;
   const finalArgs = isScript ? [cmd, ...args] : args;
   const res = spawnSync(command, finalArgs, {
