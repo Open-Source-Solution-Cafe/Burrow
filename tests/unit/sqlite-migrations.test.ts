@@ -499,7 +499,10 @@ describe('Worker first-boot D1 auto-initialization (Deploy to Cloudflare)', () =
       .sort();
     expect(D1_MIGRATIONS.map((m) => m.name)).toEqual(diskFiles);
     for (const entry of D1_MIGRATIONS) {
-      const diskContent = fs.readFileSync(path.join(root, 'migrations', entry.name), 'utf8');
+      expect(entry.sql).not.toContain('\r');
+      const diskContent = fs
+        .readFileSync(path.join(root, 'migrations', entry.name), 'utf8')
+        .replace(/\r\n/g, '\n');
       expect(entry.sql).toBe(diskContent);
     }
   });
