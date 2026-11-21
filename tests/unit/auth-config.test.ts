@@ -54,6 +54,39 @@ describe('Auth Config & Auto-Workspace Provisioning', () => {
     expect(data.emailPasswordEnabled).toBe(true);
     expect(data.magicLinkEnabled).toBe(false);
     expect(data.oauthProviders).toEqual([]);
+    expect(data.privacyPolicyUrl).toBeNull();
+    expect(data.termsOfServiceUrl).toBeNull();
+  });
+
+  it('GET /api/auth/config returns valid PRIVACY_POLICY_URL and TERMS_OF_SERVICE_URL and sanitizes unsafe schemes', async () => {
+    const baseInfra = createMockInfra();
+    const validApp = createCoreApp({
+      ...baseInfra,
+      env: {
+        ...(baseInfra as any).env,
+        PRIVACY_POLICY_URL: 'https://example.com/privacy',
+        TERMS_OF_SERVICE_URL: 'https://example.com/terms',
+      },
+    });
+    const validRes = await validApp.request('http://localhost/api/auth/config');
+    expect(validRes.status).toBe(200);
+    const validData = (await validRes.json()) as any;
+    expect(validData.privacyPolicyUrl).toBe('https://example.com/privacy');
+    expect(validData.termsOfServiceUrl).toBe('https://example.com/terms');
+
+    const unsafeApp = createCoreApp({
+      ...baseInfra,
+      env: {
+        ...(baseInfra as any).env,
+        PRIVACY_POLICY_URL: 'javascript:alert(1)',
+        TERMS_OF_SERVICE_URL: 'data:text/html,<script>alert(1)</script>',
+      },
+    });
+    const unsafeRes = await unsafeApp.request('http://localhost/api/auth/config');
+    expect(unsafeRes.status).toBe(200);
+    const unsafeData = (await unsafeRes.json()) as any;
+    expect(unsafeData.privacyPolicyUrl).toBeNull();
+    expect(unsafeData.termsOfServiceUrl).toBeNull();
   });
 
   it('GET /api/auth/config enables magic link and oauth when configured', async () => {

@@ -13,6 +13,7 @@ The interface transforms Burrow into a carved, engineered surface rather than a 
 2. **Slate Foundation + Loud Accent**: Mid-tone blue slate background, dark slate sidebar, and sulfur yellow applied with strict intentionality to primary actions, active navigation, and key status.
 3. **Structural Status**: Cards and columns communicate status via **left-edge color bars** and **geometric diamonds**, rather than floating circular pills or soft badges.
 4. **Engineered Industrial Feel**: Archivo heavy typography, flat surfaces, zero floating SaaS drop-shadows, and crisp structural borders.
+5. **Actionable Settings Links**: Whenever an inline prompt, disabled-feature notice, or popover informs the user that a setting or feature flag is required, always render a direct clickable link to that Settings route and section anchor (e.g., `/w/:workspaceId/settings#features`) rather than unlinked text.
 
 ---
 

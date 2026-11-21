@@ -6,8 +6,9 @@ import type {
 } from '../../../../infrastructure/types';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import type { PostgresDb } from '../index';
-import { workspaces, members, projects, notepads, bootstrapState, user } from '../schema';
+import { workspaces, members, projects, notepads, projectFiles, bootstrapState, user } from '../schema';
 import { extractPlainText } from '../../../../../shared/extract';
+import { parseFeatureFlagsJson, type FeatureFlagMap } from '../../../../../shared/featureFlags';
 
 export class PostgresWorkspaceRepository implements IWorkspaceRepository {
   constructor(private db: PostgresDb) {}
@@ -94,7 +95,12 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
       return plan.workspace;
     } catch (error) {
       const [workspace] = await this.db
-        .select()
+        .select({
+          id: workspaces.id,
+          name: workspaces.name,
+          createdBy: workspaces.createdBy,
+          createdAt: workspaces.createdAt,
+        })
         .from(workspaces)
         .where(eq(workspaces.id, plan.workspace.id));
       const [owner] = await this.db
@@ -163,7 +169,12 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
       if (state.status === 'complete') {
         if (state.userId !== plan.owner.userId || !state.workspaceId) return null;
         const [workspace] = await tx
-          .select()
+          .select({
+            id: workspaces.id,
+            name: workspaces.name,
+            createdBy: workspaces.createdBy,
+            createdAt: workspaces.createdAt,
+          })
           .from(workspaces)
           .where(eq(workspaces.id, state.workspaceId));
         return workspace ?? null;
@@ -181,7 +192,16 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
   }
 
   async findById(id: string): Promise<Workspace | null> {
-    const result = await this.db.select().from(workspaces).where(eq(workspaces.id, id)).limit(1);
+    const result = await this.db
+      .select({
+        id: workspaces.id,
+        name: workspaces.name,
+        createdBy: workspaces.createdBy,
+        createdAt: workspaces.createdAt,
+      })
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+      .limit(1);
     return result[0] ?? null;
   }
 
@@ -210,5 +230,98 @@ export class PostgresWorkspaceRepository implements IWorkspaceRepository {
       )
       .limit(1);
     return rows.length > 0;
+  }
+
+  async getFeatureFlags(workspaceId: string): Promise<Partial<FeatureFlagMap>> {
+    const [row] = await this.db
+      .select({ featureFlags: workspaces.featureFlags })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+      .limit(1);
+    return parseFeatureFlagsJson(row?.featureFlags);
+  }
+
+  async updateFeatureFlags(
+    workspaceId: string,
+    actorUserId: string,
+    patch: Partial<FeatureFlagMap>,
+  ): Promise<Partial<FeatureFlagMap> | null> {
+    return this.db.transaction(async (tx) => {
+      const [ws] = await tx
+        .select({ featureFlags: workspaces.featureFlags })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .for('update');
+      if (!ws) return null;
+      const [owner] = await tx
+        .select({ userId: members.userId })
+        .from(members)
+        .where(
+          and(
+            eq(members.workspaceId, workspaceId),
+            eq(members.userId, actorUserId),
+            eq(members.role, 'owner'),
+          ),
+        );
+      if (!owner) return null;
+      const merged = { ...parseFeatureFlagsJson(ws.featureFlags), ...patch };
+      await tx
+        .update(workspaces)
+        .set({ featureFlags: JSON.stringify(merged) })
+        .where(eq(workspaces.id, workspaceId));
+      return merged;
+    });
+  }
+
+  async deleteGuarded(
+    workspaceId: string,
+    actorUserId: string,
+    confirmName: string,
+  ): Promise<string[] | null> {
+    return this.db.transaction(async (tx) => {
+      const [ws] = await tx
+        .select({ id: workspaces.id, name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .for('update');
+      if (!ws || ws.name !== confirmName) return null;
+
+      const [owner] = await tx
+        .select({ userId: members.userId })
+        .from(members)
+        .where(
+          and(
+            eq(members.workspaceId, workspaceId),
+            eq(members.userId, actorUserId),
+            eq(members.role, 'owner'),
+          ),
+        );
+      if (!owner) return null;
+
+      const coverRows = await tx
+        .select({ coverKey: notepads.coverKey })
+        .from(notepads)
+        .where(eq(notepads.workspaceId, workspaceId));
+      const fileRows = await tx
+        .select({ storageKey: projectFiles.storageKey })
+        .from(projectFiles)
+        .innerJoin(projects, eq(projects.id, projectFiles.projectId))
+        .where(eq(projects.workspaceId, workspaceId));
+
+      const keys = Array.from(
+        new Set(
+          [
+            ...coverRows.map((r) => r.coverKey),
+            ...fileRows.map((r) => r.storageKey),
+          ].filter((k): k is string => Boolean(k)),
+        ),
+      );
+
+      const deleted = await tx
+        .delete(workspaces)
+        .where(and(eq(workspaces.id, workspaceId), eq(workspaces.name, confirmName)))
+        .returning({ id: workspaces.id });
+      return deleted.length > 0 ? keys : null;
+    });
   }
 }

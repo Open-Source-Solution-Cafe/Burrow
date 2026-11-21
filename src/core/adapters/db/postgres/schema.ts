@@ -108,6 +108,7 @@ export const workspaces = pgTable('workspaces', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+  featureFlags: text('feature_flags').notNull().default('{}'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 });
 
@@ -513,6 +514,35 @@ export const pendingStorageDeletions = pgTable(
   (t) => [
     index('pending_storage_deletions_retry_idx').on(t.nextRetryAt, t.createdAt),
     index('pending_storage_deletions_key_idx').on(t.storageKey),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Opt-in public read-only share links
+// ---------------------------------------------------------------------------
+
+export const publicShares = pgTable(
+  'public_shares',
+  {
+    id: text('id').primaryKey(),
+    token: text('token').notNull().unique(),
+    workspaceId: text('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    targetType: text('target_type', { enum: ['notepad', 'board'] }).notNull(),
+    targetId: text('target_id').notNull(),
+    enabled: boolean('enabled').notNull().default(true),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    expiresAt: bigint('expires_at', { mode: 'number' }),
+  },
+  (t) => [
+    uniqueIndex('public_shares_token_uq').on(t.token),
+    uniqueIndex('public_shares_target_uq').on(t.projectId, t.targetType, t.targetId),
+    index('public_shares_ws_idx').on(t.workspaceId),
   ],
 );
 

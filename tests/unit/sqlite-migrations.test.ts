@@ -226,6 +226,9 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
         '0000_baseline.sql',
         '0001_rate_limits_and_cleanup.sql',
         '0002_add_project_archived_note.sql',
+        '0003_add_workspace_feature_flags.sql',
+        '0004_add_public_shares.sql',
+        '0005_add_public_share_enabled.sql',
       ]);
 
       const roles = sqliteUpgraded
@@ -403,6 +406,9 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
           '0000_baseline.sql',
           '0001_rate_limits_and_cleanup.sql',
           '0002_add_project_archived_note.sql',
+          '0003_add_workspace_feature_flags.sql',
+          '0004_add_public_shares.sql',
+          '0005_add_public_share_enabled.sql',
         ]);
 
         const roles = await client<{ user_id: string; role: string }[]>`

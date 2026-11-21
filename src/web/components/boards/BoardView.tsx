@@ -21,6 +21,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog';
 import type { ColumnItem } from './views/types';
 import { projectTarget } from '../../lib/workspaceRoutes';
 import { useTranslation } from '../../lib/i18n';
+import { SharePopover } from '../share/SharePopover';
 
 interface BoardViewProps {
   workspaceId: string;
@@ -218,6 +219,13 @@ export function BoardView({ workspaceId, boardId, projectId }: BoardViewProps) {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          <SharePopover
+            workspaceId={workspaceId}
+            projectId={projectId}
+            kind="board"
+            targetId={boardId}
+            title={board.name}
+          />
           {viewMode === 'kanban' && (
             <Button
               variant="primary"

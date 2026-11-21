@@ -7,6 +7,11 @@ import {
 import { toast } from 'sonner';
 import type { Board, BoardWithDetails, CardWithDetails } from '../../core/infrastructure/types';
 import type { CreatedCard } from '../../core/services/cards';
+import type {
+  FeatureFlagDefinition,
+  FeatureFlagKey,
+  FeatureFlagMap,
+} from '../../shared/featureFlags';
 import { api } from './api';
 import { projectApiPath } from './workspaceRoutes';
 
@@ -142,11 +147,66 @@ export function useAccount() {
   });
 }
 
+export interface AuthConfigInfo {
+  signupMode: 'bootstrap-or-invite' | 'open';
+  emailPasswordEnabled: boolean;
+  magicLinkEnabled: boolean;
+  oauthProviders: Array<{ id: string; name: string; kind: 'social' }>;
+  privacyPolicyUrl: string | null;
+  termsOfServiceUrl: string | null;
+}
+
+export function useAuthConfig() {
+  return useQuery({
+    queryKey: ['auth', 'config'],
+    queryFn: async () => {
+      const res = await fetch('/api/auth/config');
+      if (!res.ok) return null;
+      return (await res.json()) as AuthConfigInfo;
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useUpdateProfileName() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name }: { name: string }) => {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error('Display name cannot be empty');
+      const res = await fetch('/api/auth/update-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as {
+          error?: { message?: string };
+          message?: string;
+        };
+        throw new Error(err.error?.message || err.message || 'Failed to update display name');
+      }
+      return trimmed;
+    },
+    onSuccess: (trimmedName) => {
+      queryClient.setQueryData<AccountProfile | null>(['account'], (prev) =>
+        prev ? { ...prev, user: { ...prev.user, name: trimmedName } } : prev,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['account'] });
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to update display name'),
+  });
+}
+
 export interface SystemVersionInfo {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
   allowSelfUpdate: boolean;
+  releaseNotesUrl?: string;
+  publishedAt?: string | null;
+  webhookConfigured?: boolean;
   runtime?: 'worker' | 'node-sqlite' | 'docker-postgres';
   maxUploadBytes?: number;
 }
@@ -161,6 +221,55 @@ export function useSystemVersion() {
     },
     staleTime: 1000 * 60 * 30,
     retry: false,
+  });
+}
+
+export interface WorkspaceFeatureFlagsResponse {
+  flags: FeatureFlagMap;
+  definitions: FeatureFlagDefinition[];
+  lockedKeys: FeatureFlagKey[];
+}
+
+export async function fetchWorkspaceFeatureFlags(
+  workspaceId: string,
+): Promise<WorkspaceFeatureFlagsResponse | null> {
+  const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/feature-flags`);
+  if (!res.ok) return null;
+  return (await res.json()) as WorkspaceFeatureFlagsResponse;
+}
+
+export function useFeatureFlags(workspaceId?: string) {
+  return useQuery({
+    queryKey: ['feature-flags', workspaceId] as const,
+    queryFn: async () => {
+      if (!workspaceId) return null;
+      return fetchWorkspaceFeatureFlags(workspaceId);
+    },
+    enabled: Boolean(workspaceId),
+    staleTime: 30_000,
+  });
+}
+
+export function useUpdateFeatureFlags(workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: Partial<FeatureFlagMap>) => {
+      if (!workspaceId) throw new Error('Workspace is required');
+      const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/feature-flags`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(err.error?.message || 'Failed to update feature flags');
+      }
+      return (await res.json()) as WorkspaceFeatureFlagsResponse;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['feature-flags', workspaceId], data);
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to update feature flags'),
   });
 }
 

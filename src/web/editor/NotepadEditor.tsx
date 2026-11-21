@@ -56,6 +56,7 @@ import { SaveConflictError, SaveLockController, type EditorScope } from './saveL
 import { useTheme } from '../lib/theme';
 import { ReferenceScopeProvider } from './referenceScope';
 import { useTranslation } from '../lib/i18n';
+import { SharePopover } from '../components/share/SharePopover';
 
 function getTabClientId(): string {
   if (typeof window === 'undefined') return nanoid();
@@ -1746,13 +1747,23 @@ function NotepadEditorInner({
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => void handleShare()}
-              className="hidden sm:flex h-7 px-3 theme-radius-md bg-[var(--accent)] text-[var(--accent-ink)] font-semibold text-[13px] items-center hover:brightness-110 transition cursor-pointer"
-            >
-              {t('editor.share')}
-            </button>
+            {data.kind === 'notepad' ? (
+              <SharePopover
+                workspaceId={data.workspaceId}
+                projectId={data.projectId}
+                kind="notepad"
+                targetId={data.id}
+                title={data.title || t('editor.untitled')}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleShare()}
+                className="hidden sm:flex h-7 px-3 theme-radius-md bg-[var(--accent)] text-[var(--accent-ink)] font-semibold text-[13px] items-center hover:brightness-110 transition cursor-pointer"
+              >
+                {t('editor.share')}
+              </button>
+            )}
 
             <DocumentOutline editor={editor} containerRef={containerRef} variant="floating" />
 

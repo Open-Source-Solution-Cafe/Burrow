@@ -14,6 +14,7 @@ import {
   Settings,
   Star,
   Trash2,
+  User,
   Users,
   X,
 } from 'lucide-react';
@@ -22,7 +23,7 @@ import { toast } from 'sonner';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { ThemeToggle } from './ThemeToggle';
-import { LanguageSelector, LanguageToggle } from '../ui/LanguageSelector';
+import { LanguageSelector } from '../ui/LanguageSelector';
 import { Badge } from '../ui/Badge';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { Avatar } from '../ui/Avatar';
@@ -53,6 +54,7 @@ import {
   projectLibraryTarget,
   trashTarget,
   workspaceMembersTarget,
+  workspaceProfileTarget,
   workspaceSettingsTarget,
   workspaceTasksTarget,
   workspaceTarget,
@@ -305,12 +307,23 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
           type="button"
           onClick={() => {
             setAccountMenuOpen(false);
+            navigate(workspaceId ? workspaceProfileTarget(workspaceId) : { to: '/' });
+          }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
+        >
+          <User className="w-3.5 h-3.5" />
+          <span>{t('settings.profileAndAccount')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setAccountMenuOpen(false);
             navigate(workspaceId ? workspaceSettingsTarget(workspaceId) : { to: '/' });
           }}
           className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-text hover:bg-hi theme-radius-xs transition text-left cursor-pointer"
         >
           <Settings className="w-3.5 h-3.5" />
-          <span>{t('sidebar.settings')}</span>
+          <span>{t('sidebar.workspaceSettings')}</span>
         </button>
         {workspaceRole === 'owner' && (
           <button
@@ -720,7 +733,6 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               <span className="truncate font-medium">{account?.user?.name || 'Account'}</span>
             </button>
             <div className="flex items-center gap-1 shrink-0">
-              <LanguageSelector className="hidden sm:inline-flex" />
               <ThemeToggle />
               <button
                 type="button"
@@ -892,7 +904,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             {/* Update available indicator */}
             {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
               <a
-                href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
+                href={systemVersion.releaseNotesUrl || 'https://github.com/Open-Source-Solution-Cafe/Burrow/releases'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-10 h-10 flex items-center justify-center transition cursor-pointer text-accent relative hover:bg-hi theme-radius-md"
@@ -903,9 +915,6 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <Clock className="w-[18px] h-[18px]" />
               </a>
             )}
-
-            {/* Language Toggle */}
-            <LanguageToggle className="w-10 h-10 md:w-10 md:h-10" />
 
             {/* Theme Toggle */}
             <ThemeToggle className="w-10 h-10 md:w-10 md:h-10" />

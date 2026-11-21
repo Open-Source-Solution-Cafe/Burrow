@@ -8,6 +8,20 @@
       "when": 1793047033499,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795025117530,
+      "tag": "0001_add_workspace_feature_flags",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795025512708,
+      "tag": "0002_add_public_shares",
+      "breakpoints": true
     }
   ]
 }

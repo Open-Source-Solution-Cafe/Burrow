@@ -19,6 +19,8 @@ export interface Env {
     GITHUB_CLIENT_ID?: string;
     GITHUB_CLIENT_SECRET?: string;
     SELF_UPDATE_WEBHOOK_URL?: string;
+    PRIVACY_POLICY_URL?: string;
+    TERMS_OF_SERVICE_URL?: string;
     TRUST_PROXY?: string;
     TRUSTED_PROXIES?: string;
   };

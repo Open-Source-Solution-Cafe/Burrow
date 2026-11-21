@@ -40,7 +40,25 @@ import { createProjectResourceRoutes } from './routes/project-resources';
 import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
 import { createSystemRoutes } from './routes/system';
+import { createFeatureFlagRoutes } from './routes/feature-flags';
+import { createWorkspaceExportRoutes } from './routes/workspace-export';
+import {
+  createShareManagementRoutes,
+  createPublicShareViewerRoutes,
+} from './routes/public-shares';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
+
+function parseSafeHttpUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || /[\r\n\0]/.test(trimmed)) return null;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 // Type for Hono context with our custom variables
 export interface Env {
@@ -174,6 +192,29 @@ export function createCoreApp(
     runtime,
     maxUploadBytes,
   });
+  const featureFlagRoutes = createFeatureFlagRoutes({
+    workspaces: repositories.workspaces,
+    members: repositories.members,
+    policy,
+    env: infra.env,
+  });
+  const workspaceExportRoutes = createWorkspaceExportRoutes({
+    repositories,
+    storage,
+    policy,
+    env: infra.env,
+  });
+  const shareManagementRoutes = createShareManagementRoutes({
+    repositories,
+    policy,
+    env: infra.env,
+  });
+  const publicShareViewerRoutes = createPublicShareViewerRoutes({
+    repositories,
+    storage,
+    policy,
+    env: infra.env,
+  });
 
   const signUpSchema = z.object({
     email: z.string().email().max(254),
@@ -214,6 +255,8 @@ export function createCoreApp(
             ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
             ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
           ],
+          privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
+          termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
         });
       })
 
@@ -248,6 +291,149 @@ export function createCoreApp(
           workspaces,
         });
       })
+
+      .get(
+        '/api/account/export',
+        rateLimiter({
+          windowMs: 60_000,
+          maxRequests: 10,
+          prefix: 'account-export',
+          env: infra.env,
+          store: infra.rateLimitStore,
+          requireStore: requirePersistentRateLimitStore,
+          keyResolver: (c) => {
+            const uid = c.get('identity')?.userId;
+            if (uid) return `user:${uid}`;
+            const ip = resolveVerifiedClientIp(c, { env: infra.env });
+            return ip ? `ip:${ip}` : 'unverified';
+          },
+        }),
+        async (c) => {
+          const identity = c.get('identity');
+          if (!identity) {
+            return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+          }
+
+          const requestedWorkspaceId = c.req.query('workspaceId')?.trim() || null;
+          const allWorkspaces = await repositories.workspaces.listByUser(identity.userId);
+          const workspaceNameById = new Map(allWorkspaces.map((ws) => [ws.id, ws.name]));
+
+          if (requestedWorkspaceId && !workspaceNameById.has(requestedWorkspaceId)) {
+            return c.json(
+              { error: { code: 'not_found', message: 'Workspace not found' } },
+              404,
+            );
+          }
+
+          const targetWorkspaces = requestedWorkspaceId
+            ? allWorkspaces.filter((ws) => ws.id === requestedWorkspaceId)
+            : allWorkspaces;
+
+          const assignedTasksByWs = await Promise.all(
+            targetWorkspaces.map(async (ws) => {
+              const items = repositories.cards.getMyTasks
+                ? await repositories.cards.getMyTasks(ws.id, identity.userId, { status: 'all' })
+                : [];
+              return items.map((item) => ({
+                ...item,
+                workspaceId: ws.id,
+                workspaceName: ws.name,
+              }));
+            }),
+          );
+          const notificationsByWs = await Promise.all(
+            targetWorkspaces.map(async (ws) => {
+              const items = repositories.notifications.listByUser
+                ? await repositories.notifications.listByUser(identity.userId, ws.id, false)
+                : [];
+              return items.map((item) => ({
+                ...item,
+                workspaceName: ws.name,
+              }));
+            }),
+          );
+          const rawComments = repositories.cards.listCommentsByUser
+            ? await repositories.cards.listCommentsByUser(identity.userId)
+            : [];
+
+          const scopedComments = requestedWorkspaceId
+            ? rawComments
+                .filter((comment) => comment.workspaceId === requestedWorkspaceId)
+                .map((comment) => ({
+                  ...comment,
+                  workspaceName: workspaceNameById.get(comment.workspaceId) ?? null,
+                  formerWorkspace: false,
+                }))
+            : rawComments.map((comment) => {
+                const activeWorkspaceName = workspaceNameById.get(comment.workspaceId);
+                if (activeWorkspaceName !== undefined) {
+                  return {
+                    ...comment,
+                    workspaceName: activeWorkspaceName,
+                    formerWorkspace: false,
+                  };
+                }
+                // User is no longer a member of this workspace: retain authored words for GDPR Art. 15
+                // while redacting internal workspace/project/card identifiers.
+                return {
+                  id: comment.id,
+                  cardId: null,
+                  workspaceId: null,
+                  workspaceName: null,
+                  projectId: null,
+                  content: comment.content,
+                  createdAt: comment.createdAt,
+                  updatedAt: comment.updatedAt,
+                  formerWorkspace: true,
+                };
+              });
+
+          c.header('Cache-Control', 'private, no-store');
+          if (c.req.query('download') === '1') {
+            const dateSlug = new Date().toISOString().slice(0, 10);
+            if (requestedWorkspaceId) {
+              const rawName = workspaceNameById.get(requestedWorkspaceId) ?? 'workspace';
+              const safeSlug =
+                rawName
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, '-')
+                  .replace(/^-+|-+$/g, '')
+                  .slice(0, 40) || 'workspace';
+              c.header(
+                'Content-Disposition',
+                `attachment; filename="burrow-personal-data-${safeSlug}-${dateSlug}.json"`,
+              );
+            } else {
+              c.header(
+                'Content-Disposition',
+                `attachment; filename="burrow-personal-data-${dateSlug}.json"`,
+              );
+            }
+          }
+
+          return c.json({
+            schemaVersion: 'burrow-personal-export-v1',
+            exportedAt: Date.now(),
+            scope: requestedWorkspaceId
+              ? {
+                  type: 'workspace' as const,
+                  workspaceId: requestedWorkspaceId,
+                  workspaceName: workspaceNameById.get(requestedWorkspaceId) ?? null,
+                }
+              : { type: 'all-workspaces' as const },
+            user: {
+              id: identity.userId,
+              name: identity.name ?? '',
+              email: identity.email ?? '',
+              image: identity.image ?? null,
+            },
+            workspaces: targetWorkspaces,
+            assignedTasks: assignedTasksByWs.flat(),
+            comments: scopedComments,
+            notifications: notificationsByWs.flat(),
+          });
+        },
+      )
 
       .get(
         '/api/invites/info/:token',
@@ -302,11 +488,15 @@ export function createCoreApp(
       )
 
       .route('/api/workspaces', workspaceRoutes)
+      .route('/api/workspaces', featureFlagRoutes)
+      .route('/api/workspaces', workspaceExportRoutes)
       .route('/api/workspaces/:wid/projects', projectRoutes)
       .route('/api/system', systemRoutes)
       .route('/api', workspaceViewRoutes)
       .route('/api', projectResourceRoutes)
       .route('/api', projectFileRoutes)
+      .route('/api', shareManagementRoutes)
+      .route('/api/public/shares', publicShareViewerRoutes)
       .delete('/api/workspaces/:wid/projects/:id', createExplicitWorkspaceMiddleware(repositories.members), requireRole('owner'), zValidator('query', deleteProjectQuerySchema), async (c) => {
         await projects.permanentDeleteProject({
           workspaceId: c.get('workspaceId'),

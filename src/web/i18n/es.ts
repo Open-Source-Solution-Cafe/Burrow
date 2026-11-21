@@ -506,7 +506,7 @@ export const es: TranslationDictionary = {
   },
   settings: {
     title: 'Configuración',
-    subtitle: 'Administra tu perfil, preferencias del proyecto y etiquetas de flujo de trabajo.',
+    subtitle: 'Administra el espacio de trabajo, preferencias del proyecto, funciones y sistema.',
     profileAndAccount: 'Perfil y Cuenta',
     workspaceRole: 'Rol en el espacio:',
     logOut: 'Cerrar sesión',

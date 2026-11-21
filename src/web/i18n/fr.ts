@@ -510,7 +510,7 @@ export const fr: TranslationDictionary = {
   },
   settings: {
     title: 'Paramètres',
-    subtitle: 'Gérez votre profil, les préférences du projet et les étiquettes.',
+    subtitle: "Gérez l'espace de travail, les préférences du projet, les fonctionnalités et le système.",
     profileAndAccount: 'Profil et Compte',
     workspaceRole: "Rôle dans l'espace :",
     logOut: 'Se déconnecter',

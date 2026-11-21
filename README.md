@@ -1,6 +1,6 @@
 # Burrow
 
-**Fast, self-hostable shared team workspace for rich notepads, Kanban boards, and file storage — engineered for Cloudflare Workers + D1 + R2 and Docker + PostgreSQL.**
+**Fast, open-source (AGPL-3.0), self-hostable shared team workspace for rich notepads, Kanban boards, and file storage — engineered for Cloudflare Workers + D1 + R2 and Docker + PostgreSQL.**
 
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6.svg)](https://www.typescriptlang.org/)
@@ -14,6 +14,19 @@
 ---
 
 ![Burrow Kanban board in Modern Dark theme showing sprint columns, card priorities, subtasks, and resizable sidebar](docs/assets/screenshots/kanban-board.png)
+
+---
+
+## Why Teams Self-Host Burrow
+
+Burrow focuses on doing three things cleanly—**rich block notepads, multi-view task boards, and project file storage**—without artificial paywalls or heavy infrastructure:
+
+- **Zero per-seat caps:** Invite your whole team (`owner`, `editor`, `viewer` roles) with unlimited seats, workspaces, and projects out of the box (unlike AppFlowy's 1-seat limit and AFFiNE's 10-seat cap on free self-hosted tiers).
+- **Uncapped Kanban, List & Calendar views:** Switch freely between drag-and-drop Kanban boards (with WIP limits), tabular List view, and drag-and-drop Calendar view in the core AGPL-3.0 release (unlike Docmost's paid tier for Kanban).
+- **Native email & password auth:** Boots ready with built-in email/password authentication via [Better Auth](https://www.better-auth.com/) and zero-trust `BOOTSTRAP_TOKEN` owner claiming—no external Keycloak, Authentik, or OIDC server required (unlike Outline). Optional Magic Link (`RESEND_API_KEY`) and Google/GitHub OAuth stay hidden unless configured.
+- **Lightweight Cloudflare or Docker hosting:** Deploy serverless inside Cloudflare's free-tier limits (**Workers + D1 + R2**), run **Docker Compose + PostgreSQL 17**, or develop locally on **SQLite** with zero telemetry.
+
+> **Honest scope:** Burrow is a focused team workspace for notepads, Kanban/List/Calendar boards, and files—it does **not** include Notion-style relational databases or simultaneous CRDT real-time co-editing (notepads use lease-based edit locking so teammates take turns safely without conflicting overwrites).
 
 ---
 
@@ -163,14 +176,25 @@ This separation lets you run the exact same application locally on SQLite, on Cl
 
 ---
 
-## Documentation, Contributing & License
+## Documentation, Contributing & Open-Source Commitment
 
 | Guide | Description |
 | :--- | :--- |
 | [Deployment, Configuration & Upgrades](docs/DEPLOYMENT_AND_UPGRADES.md) | Complete Cloudflare Workers and Docker/PostgreSQL setup, env reference, Time Travel backups, and troubleshooting |
 | [Bootstrap Recovery & Migration Checks](docs/BOOTSTRAP_RECOVERY.md) | Recovering interrupted owner setup, preflight data checks, and storage inventory |
 | [Cloudflare Deploy Button Assessment](docs/CLOUDFLARE_DEPLOY_BUTTON.md) | Technical evaluation of one-click Cloudflare provisioning requirements |
-| [Contributing Guide](CONTRIBUTING.md) | Architecture walkthrough, local dev commands, `pnpm run check:sqlite`, and screenshot automation |
+| [Contributing Guide](CONTRIBUTING.md) | Contribution status, architecture walkthrough, local dev commands, `pnpm run check:sqlite`, and screenshot automation |
 | [Changelog](CHANGELOG.md) | Version history and unreleased improvements |
 
-Licensed under the [AGPL-3.0-or-later](LICENSE) license. See [CLA.md](CLA.md) for contributor licensing details.
+### Permanent Self-Hosted Commitment & License
+
+Burrow is licensed under **[AGPL-3.0-or-later](LICENSE)**. The following core capabilities in this self-hosted codebase will remain **open source and uncapped permanently**—with zero seat caps, feature paywalls, or license-key gates:
+
+- **Unlimited seats & structure:** Unlimited workspace members (`owner`, `editor`, `viewer`), workspaces, projects, boards, and notepads.
+- **All board views & task workflows:** Uncapped **Kanban**, **List**, and **Calendar** views, WIP limits, priorities, due dates, subtasks, tags, comments, and `My Tasks`.
+- **Rich notepads, search & files:** BlockNote editor with nested sub-pages, document outlines, lease-based edit locking, `Cmd+K` / `Ctrl+K` full-text search (`SQLite FTS5` and `PostgreSQL tsvector`), and file/media storage (`Cloudflare R2`, `S3-compatible`, or local disk).
+- **Native auth & runtime portability:** Built-in Email & Password authentication, `BOOTSTRAP_TOKEN` owner setup, invite-only onboarding, optional Magic Link / Google / GitHub OAuth, **English / Spanish / French** UI, all built-in themes, and full support for **Cloudflare Workers (D1 + R2)**, **Docker + PostgreSQL 17**, and **Node.js + SQLite** with zero telemetry.
+
+### Contributor License Agreement (`CLA.md`)
+
+Burrow includes a [Contributor License Agreement (CLA)](CLA.md) so the project maintainers retain dual-licensing flexibility alongside the copyleft `AGPL-3.0-or-later` public release. External pull requests are currently paused while the project is maintainer-led (see [CONTRIBUTING.md](CONTRIBUTING.md)); the core self-hosted features listed above remain permanently uncapped under `AGPL-3.0-or-later`.

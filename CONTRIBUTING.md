@@ -1,6 +1,16 @@
 # Contributing to Burrow
 
-Thank you for contributing to **Burrow**! This guide covers local development, project structure, quality checks, and pull request expectations.
+Thank you for your interest in **Burrow**! This guide covers current contribution status, local development, project structure, quality checks, and maintainer workflow expectations.
+
+---
+
+## Contribution Status & Licensing
+
+> **Important Notice:** External pull requests and code contributions are **not** currently accepted.
+> If you encounter a bug, have a feature idea, or want to share feedback on self-hosting, please open a GitHub Issue instead of submitting a pull request. External pull requests are closed without review in accordance with our [pull request template](.github/PULL_REQUEST_TEMPLATE.md).
+
+- **Open-Source License:** Burrow is licensed under [AGPL-3.0-or-later](LICENSE). See [README.md](README.md#permanent-self-hosted-commitment--license) for what stays permanently open source and uncapped in the self-hosted release.
+- **Contributor License Agreement (`CLA.md`):** [CLA.md](CLA.md) is kept in the repository as a dormant governance safeguard for any future time when external code contributions open, ensuring maintainers retain dual-licensing flexibility alongside `AGPL-3.0-or-later`.
 
 ---
 
@@ -53,7 +63,7 @@ tests/           # Unit, adapter contract, API scope & integration suites
 
 ## Quality Gates & Tests
 
-Run the full check suite before opening a pull request:
+Run the full check suite before pushing or opening an internal pull request:
 
 ```bash
 pnpm run check:sqlite
@@ -90,9 +100,9 @@ This runs, in order:
 
 ---
 
-## Submitting Changes
+## Submitting Changes (Maintainers)
 
-1. Branch from `main`.
+1. Branch from `master`.
 2. Keep changes focused, include unit or API tests for behavior changes, and avoid committing `.env`, `.dev.vars`, or `wrangler.local.jsonc`.
 3. Record user-facing changes under `## [Unreleased]` in `CHANGELOG.md`.
-4. Ensure `pnpm run check:sqlite` passes cleanly with zero errors.
+4. Ensure `pnpm run check:sqlite` (and `pnpm check` when PostgreSQL is available) passes cleanly with zero errors.

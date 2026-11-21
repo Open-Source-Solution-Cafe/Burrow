@@ -6,6 +6,7 @@ import type { RateLimitStore } from '../adapters/rate-limit';
 import type { ExtractedLink } from '../../shared/extract';
 import type { ContentReferenceKind, ReferencePreview } from '../../shared/references';
 import type { BurrowRuntime } from '../../shared/uploadPolicy';
+import type { FeatureFlagMap } from '../../shared/featureFlags';
 
 /**
  * Minimal auth provider interface for the core app factory.
@@ -36,6 +37,7 @@ export interface RepositoryContainer {
   members: IMemberRepository;
   invites: IInviteRepository;
   storageDeletions?: IStorageDeletionRepository;
+  publicShares?: IPublicShareRepository;
 }
 
 /**
@@ -78,8 +80,18 @@ export interface IWorkspaceRepository {
   create(plan: WorkspaceProvisioningPlan): Promise<Workspace>;
   /** Rename only when the actor is still an owner in this workspace. */
   rename(workspaceId: string, actorUserId: string, name: string): Promise<boolean>;
+  /** Revalidate owner & confirmName inside delete; return distinct pre-cascade cover and project-file keys for storage cleanup. */
+  deleteGuarded?(workspaceId: string, actorUserId: string, confirmName: string): Promise<string[] | null>;
   /** Check whether a user is the authorized instance administrator from initial bootstrap. */
   isInstanceOwner?(userId: string): Promise<boolean>;
+  /** Read workspace-level feature flag overrides. */
+  getFeatureFlags?(workspaceId: string): Promise<Partial<FeatureFlagMap>>;
+  /** Merge and persist workspace-level feature flag overrides while actor remains an owner. */
+  updateFeatureFlags?(
+    workspaceId: string,
+    actorUserId: string,
+    patch: Partial<FeatureFlagMap>,
+  ): Promise<Partial<FeatureFlagMap> | null>;
   count(): Promise<number>;
   releaseBootstrap?(email: string): Promise<boolean>;
   resetBootstrapClaim?(confirmEmail?: string): Promise<boolean>;
@@ -270,6 +282,8 @@ export interface ICardRepository {
   // Comments
   /** Comments for a card whose board, column and body agree with the supplied workspace and project. */
   listComments(scope: ProjectScope, cardId: string): Promise<Comment[]>;
+  /** Lists card comments authored by this user across live workspaces for personal data export. */
+  listCommentsByUser?(userId: string): Promise<UserAuthoredComment[]>;
   /** Creates a comment and current-member mention notifications atomically if the actor is still an editor. */
   createCommentGuarded(args: CreateCommentMutation): Promise<Comment | null>;
   /** Returns a comment only when its card and source graph belong to the supplied workspace/project. */
@@ -532,6 +546,34 @@ export interface IInviteRepository {
 // ---------------------------------------------------------------------------
 // Entity Types (minimal shapes matching the database schema)
 // ---------------------------------------------------------------------------
+
+export interface PublicShare {
+  id: string;
+  token: string;
+  workspaceId: string;
+  projectId: string;
+  targetType: 'notepad' | 'board';
+  targetId: string;
+  enabled: boolean;
+  createdBy: string | null;
+  createdAt: number;
+  expiresAt: number | null;
+}
+
+export interface IPublicShareRepository {
+  findByTarget(
+    scope: ProjectScope,
+    targetType: 'notepad' | 'board',
+    targetId: string,
+  ): Promise<PublicShare | null>;
+  findByToken(token: string): Promise<PublicShare | null>;
+  upsert(share: PublicShare): Promise<PublicShare>;
+  revokeByTarget(
+    scope: ProjectScope,
+    targetType: 'notepad' | 'board',
+    targetId: string,
+  ): Promise<boolean>;
+}
 
 export interface Workspace {
   id: string;
@@ -937,6 +979,16 @@ export interface CreateCommentData {
   id: string;
   cardId: string;
   userId: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UserAuthoredComment {
+  id: string;
+  cardId: string;
+  workspaceId: string;
+  projectId: string;
   content: string;
   createdAt: number;
   updatedAt: number;

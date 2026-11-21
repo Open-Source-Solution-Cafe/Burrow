@@ -19,7 +19,9 @@ import { ProjectHome } from './pages/ProjectHome';
 import { ProjectMediaLibrary } from './components/media/ProjectMediaLibrary';
 import { MembersSettings } from './pages/MembersSettings';
 import { MyTasksView } from './pages/MyTasksView';
+import { ProfileView } from './pages/ProfileView';
 import { SettingsView } from './pages/SettingsView';
+import { PublicShareView } from './pages/PublicShareView';
 import { StatusDiamond } from './components/ui/StatusDiamond';
 import { useTranslation, t } from './lib/i18n';
 import {
@@ -441,6 +443,11 @@ const tasksRoute = createRoute({
   path: 'tasks',
   component: MyTasksView,
 });
+const profileRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'profile',
+  component: ProfileView,
+});
 const settingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings',
@@ -477,6 +484,11 @@ const legacyTasksRoute = createRoute({
   path: '/my-tasks',
   component: () => <LegacyWorkspaceRedirect target="tasks" />,
 });
+const legacyProfileRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: '/profile',
+  component: () => <LegacyWorkspaceRedirect target="profile" />,
+});
 const legacySettingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/settings',
@@ -488,7 +500,7 @@ const legacyMembersRoute = createRoute({
   component: () => <LegacyWorkspaceRedirect target="members" />,
 });
 
-type LegacyWorkspaceTarget = 'tasks' | 'settings' | 'members';
+type LegacyWorkspaceTarget = 'tasks' | 'profile' | 'settings' | 'members';
 function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -502,6 +514,8 @@ function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) 
     }
     if (!workspaceId) return;
     if (target === 'tasks') void navigate({ to: '/w/$workspaceId/tasks', params: { workspaceId } });
+    else if (target === 'profile')
+      void navigate({ to: '/w/$workspaceId/profile', params: { workspaceId } });
     else if (target === 'members')
       void navigate({ to: '/w/$workspaceId/settings/members', params: { workspaceId } });
     else void navigate({ to: '/w/$workspaceId/settings', params: { workspaceId } });
@@ -513,9 +527,16 @@ function LegacyWorkspaceRedirect({ target }: { target: LegacyWorkspaceTarget }) 
   return <Status>{t('router.openingWorkspace')}</Status>;
 }
 
+const publicShareRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/s/$token',
+  component: PublicShareView,
+});
+
 const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
+  publicShareRoute,
   shellRoute.addChildren([
     homeRoute,
     workspaceRoute.addChildren([
@@ -528,6 +549,7 @@ const routeTree = rootRoute.addChildren([
         libraryRoute,
       ]),
       tasksRoute,
+      profileRoute,
       settingsRoute,
       membersRoute,
     ]),
@@ -536,6 +558,7 @@ const routeTree = rootRoute.addChildren([
     legacyBoardRoute,
     legacyTrashRoute,
     legacyTasksRoute,
+    legacyProfileRoute,
     legacySettingsRoute,
     legacyMembersRoute,
   ]),

@@ -11,6 +11,7 @@ import type {
   UpdateSubtaskData,
   CardAssignee,
   Comment,
+  UserAuthoredComment,
   MyTasksFilters,
   MyTaskItem,
   CardSummary,
@@ -19,7 +20,7 @@ import type {
   CardWithDetails,
   CardPlan,
 } from '../../../../infrastructure/types';
-import { eq, and, inArray, asc, sql, isNull } from 'drizzle-orm';
+import { eq, and, inArray, asc, desc, sql, isNull } from 'drizzle-orm';
 import type { PostgresDb } from '../index';
 import { cardCreationRows } from '../../../../entities/card';
 import {
@@ -677,5 +678,24 @@ export class PostgresCardRepository implements ICardRepository {
         ),
       )
       .limit(limit);
+  }
+
+  async listCommentsByUser(userId: string): Promise<UserAuthoredComment[]> {
+    return this.db
+      .select({
+        id: cardComments.id,
+        cardId: cardComments.cardId,
+        workspaceId: projects.workspaceId,
+        projectId: projects.id,
+        content: cardComments.content,
+        createdAt: cardComments.createdAt,
+        updatedAt: cardComments.updatedAt,
+      })
+      .from(cardComments)
+      .innerJoin(cards, eq(cards.id, cardComments.cardId))
+      .innerJoin(boards, eq(boards.id, cards.boardId))
+      .innerJoin(projects, eq(projects.id, boards.projectId))
+      .where(eq(cardComments.userId, userId))
+      .orderBy(desc(cardComments.createdAt));
   }
 }

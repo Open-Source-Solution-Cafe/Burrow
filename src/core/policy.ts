@@ -1,4 +1,5 @@
 import type { HttpError } from './services/errors';
+import type { FeatureFlagMap } from '../shared/featureFlags';
 
 /**
  * Account admission strategy for the Burrow instance.
@@ -52,6 +53,12 @@ export interface AccessPolicy {
    * Defaults to true in self-hosted deployments.
    */
   allowSelfUpdate?(): boolean;
+
+  /**
+   * Optional instance-level feature flag overrides.
+   * Returning `{ flagKey: false }` hard-disables a feature across the instance.
+   */
+  featureFlags?(): Partial<FeatureFlagMap>;
 }
 
 /**

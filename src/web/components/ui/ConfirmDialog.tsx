@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ModalShell } from './ModalShell';
 import { Button } from './Button';
 
@@ -9,6 +10,8 @@ export interface ConfirmDialogProps {
   cancelLabel?: string;
   danger?: boolean;
   busy?: boolean;
+  confirmDisabled?: boolean;
+  children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -26,12 +29,15 @@ export function ConfirmDialog({
   cancelLabel = 'Cancel',
   danger = true,
   busy = false,
+  confirmDisabled = false,
+  children,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   return (
     <ModalShell open={open} onClose={busy ? undefined : onCancel} title={title}>
       <p className="text-xs leading-relaxed text-[var(--muted)]">{message}</p>
+      {children}
       <div className="mt-4 flex items-center justify-end gap-2">
         <Button
           variant="ghost"
@@ -45,7 +51,7 @@ export function ConfirmDialog({
           variant={danger ? 'danger' : 'primary'}
           size="sm"
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || confirmDisabled}
         >
           {busy ? 'Working…' : confirmLabel}
         </Button>

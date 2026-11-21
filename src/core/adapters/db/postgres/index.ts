@@ -16,6 +16,7 @@ import { PostgresNotificationRepository } from './repositories/notification';
 import { PostgresMemberRepository } from './repositories/member';
 import { PostgresInviteRepository } from './repositories/invite';
 import { PostgresStorageDeletionRepository } from './repositories/storage-deletions';
+import { PostgresPublicShareRepository } from './repositories/public-share';
 import { PostgresSearchAdapter } from './search';
 import { PostgresLockAdapter } from './lock';
 import { createPostgresAuthProvider } from './auth';
@@ -71,6 +72,7 @@ export async function createPostgresInfrastructure(
     members: new PostgresMemberRepository(db),
     invites: new PostgresInviteRepository(db),
     storageDeletions: new PostgresStorageDeletionRepository(db),
+    publicShares: new PostgresPublicShareRepository(db),
   };
 
   const rateLimitStore = new PostgresRateLimitStore(db);

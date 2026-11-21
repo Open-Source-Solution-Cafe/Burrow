@@ -13,8 +13,13 @@
       "better-sqlite3"
     ],
     "overrides": {
+      "@vitest/mocker": "^4.1.12",
+      "esbuild": "^0.28.2",
+      "minimatch": "^11.0.1",
       "seroval": "^1.8.1",
+      "sharp": "^0.35.5",
       "source-map-js": "^1.2.2",
+      "undici": "^7.30.1",
       "vite": "^8.3.8"
     }
   },
@@ -55,7 +60,7 @@
     "@blocknote/shadcn": "^0.55.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^8.0.0",
-    "@hono/node-server": "^2.1.1",
+    "@hono/node-server": "^2.1.11",
     "@hono/zod-validator": "^0.9.1",
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-router": "^1.170.39",
@@ -67,8 +72,9 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.3",
+    "fflate": "^0.8.3",
     "fractional-indexing": "^4.0.0",
-    "hono": "^4.13.8",
+    "hono": "^4.13.19",
     "jose": "latest",
     "lucide-react": "^1.47.0",
     "nanoid": "^6.0.1",
@@ -81,7 +87,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.11",
-    "@cloudflare/workers-types": "^5.20261023.1",
+    "@cloudflare/workers-types": "^5.20261118.1",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -101,7 +107,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.8",
-    "vitest": "^4.1.11",
-    "wrangler": "^4.137.0"
+    "vitest": "^4.1.12",
+    "wrangler": "^4.165.0"
   }
 }

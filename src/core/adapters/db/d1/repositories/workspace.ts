@@ -10,6 +10,7 @@ import type {
 import { runBatch } from '../lib/batch';
 import { ftsInsertNowStmt } from '../lib/search';
 import { extractPlainText } from '../../../../../shared/extract';
+import { parseFeatureFlagsJson, type FeatureFlagMap } from '../../../../../shared/featureFlags';
 
 export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
   const provisionStatements = (plan: WorkspaceProvisioningPlan) => [
@@ -41,7 +42,15 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
         await runBatch(db, provisionStatements(plan));
         return plan.workspace;
       } catch (error) {
-        const [workspace] = await db.select().from(t.workspaces).where(eq(t.workspaces.id, plan.workspace.id));
+        const [workspace] = await db
+          .select({
+            id: t.workspaces.id,
+            name: t.workspaces.name,
+            createdBy: t.workspaces.createdBy,
+            createdAt: t.workspaces.createdAt,
+          })
+          .from(t.workspaces)
+          .where(eq(t.workspaces.id, plan.workspace.id));
         const [owner] = await db
           .select({ userId: t.members.userId })
           .from(t.members)
@@ -159,7 +168,12 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
           state.workspaceId
         ) {
           const [workspace] = await db
-            .select()
+            .select({
+              id: t.workspaces.id,
+              name: t.workspaces.name,
+              createdBy: t.workspaces.createdBy,
+              createdAt: t.workspaces.createdAt,
+            })
             .from(t.workspaces)
             .where(eq(t.workspaces.id, state.workspaceId));
           return workspace ?? null;
@@ -176,7 +190,15 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
     },
 
     async findById(id: string): Promise<Workspace | null> {
-      const [row] = await db.select().from(t.workspaces).where(eq(t.workspaces.id, id));
+      const [row] = await db
+        .select({
+          id: t.workspaces.id,
+          name: t.workspaces.name,
+          createdBy: t.workspaces.createdBy,
+          createdAt: t.workspaces.createdAt,
+        })
+        .from(t.workspaces)
+        .where(eq(t.workspaces.id, id));
       return row ?? null;
     },
 
@@ -205,6 +227,84 @@ export function createWorkspaceRepository(db: DB): IWorkspaceRepository {
         LIMIT 1
       `);
       return rows.length > 0;
+    },
+
+    async getFeatureFlags(workspaceId: string): Promise<Partial<FeatureFlagMap>> {
+      const [row] = await db
+        .select({ featureFlags: t.workspaces.featureFlags })
+        .from(t.workspaces)
+        .where(eq(t.workspaces.id, workspaceId));
+      return parseFeatureFlagsJson(row?.featureFlags);
+    },
+
+    async updateFeatureFlags(
+      workspaceId: string,
+      actorUserId: string,
+      patch: Partial<FeatureFlagMap>,
+    ): Promise<Partial<FeatureFlagMap> | null> {
+      const [existing] = await db
+        .select({ featureFlags: t.workspaces.featureFlags })
+        .from(t.workspaces)
+        .where(eq(t.workspaces.id, workspaceId));
+      if (!existing) return null;
+      const merged = { ...parseFeatureFlagsJson(existing.featureFlags), ...patch };
+      const serialized = JSON.stringify(merged);
+      const rows = await db.all<{ id: string }>(sql`UPDATE workspaces SET feature_flags = ${serialized}
+        WHERE id = ${workspaceId} AND EXISTS (
+          SELECT 1 FROM members WHERE workspace_id = ${workspaceId}
+            AND user_id = ${actorUserId} AND role = 'owner'
+        ) RETURNING id`);
+      return rows.length > 0 ? merged : null;
+    },
+
+    async deleteGuarded(
+      workspaceId: string,
+      actorUserId: string,
+      confirmName: string,
+    ): Promise<string[] | null> {
+      const [ws] = await db
+        .select({ id: t.workspaces.id, name: t.workspaces.name })
+        .from(t.workspaces)
+        .where(eq(t.workspaces.id, workspaceId));
+      if (!ws || ws.name !== confirmName) return null;
+
+      const [owner] = await db
+        .select({ userId: t.members.userId })
+        .from(t.members)
+        .where(
+          and(
+            eq(t.members.workspaceId, workspaceId),
+            eq(t.members.userId, actorUserId),
+            eq(t.members.role, 'owner'),
+          ),
+        );
+      if (!owner) return null;
+
+      const coverRows = await db
+        .select({ coverKey: t.notepads.coverKey })
+        .from(t.notepads)
+        .where(eq(t.notepads.workspaceId, workspaceId));
+      const fileRows = await db
+        .select({ storageKey: t.projectFiles.storageKey })
+        .from(t.projectFiles)
+        .innerJoin(t.projects, eq(t.projects.id, t.projectFiles.projectId))
+        .where(eq(t.projects.workspaceId, workspaceId));
+
+      const keys = Array.from(
+        new Set(
+          [
+            ...coverRows.map((r) => r.coverKey),
+            ...fileRows.map((r) => r.storageKey),
+          ].filter((k): k is string => Boolean(k)),
+        ),
+      );
+
+      const deleted = await db.all<{ id: string }>(sql`DELETE FROM workspaces
+        WHERE id = ${workspaceId} AND name = ${confirmName} AND EXISTS (
+          SELECT 1 FROM members WHERE workspace_id = ${workspaceId}
+            AND user_id = ${actorUserId} AND role = 'owner'
+        ) RETURNING id`);
+      return deleted.length > 0 ? keys : null;
     },
   };
 }

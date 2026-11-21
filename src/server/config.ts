@@ -64,6 +64,8 @@ const configSchema = z.object({
   GITHUB_CLIENT_ID: z.string().optional(),
   GITHUB_CLIENT_SECRET: z.string().optional(),
   SELF_UPDATE_WEBHOOK_URL: z.string().optional(),
+  PRIVACY_POLICY_URL: z.string().optional(),
+  TERMS_OF_SERVICE_URL: z.string().optional(),
   TRUST_PROXY: z.string().optional(),
   TRUSTED_PROXIES: z.string().optional(),
 });
@@ -197,6 +199,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     GITHUB_CLIENT_ID: env.GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET: env.GITHUB_CLIENT_SECRET,
     SELF_UPDATE_WEBHOOK_URL: env.SELF_UPDATE_WEBHOOK_URL,
+    PRIVACY_POLICY_URL: env.PRIVACY_POLICY_URL,
+    TERMS_OF_SERVICE_URL: env.TERMS_OF_SERVICE_URL,
     TRUST_PROXY: env.TRUST_PROXY,
     TRUSTED_PROXIES: env.TRUSTED_PROXIES,
   });

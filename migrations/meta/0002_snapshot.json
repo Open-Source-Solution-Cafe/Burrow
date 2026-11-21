@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9308d38c-e6e6-428d-8e95-c45a5e20e4fc",
-  "prevId": "4388443a-aa15-47d3-802e-69c8be4c997c",
+  "id": "4ffc6f12-2931-44f4-83a8-e369bc7bf69a",
+  "prevId": "ada23374-05a7-44cf-871c-745618d35d32",
   "tables": {
     "account": {
       "name": "account",
@@ -181,6 +181,14 @@
             "position"
           ],
           "isUnique": false
+        },
+        "columns_id_board_uq": {
+          "name": "columns_id_board_uq",
+          "columns": [
+            "id",
+            "board_id"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -254,6 +262,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "deletion_operation_id": {
+          "name": "deletion_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -289,6 +304,21 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "boards_project_id_workspace_id_projects_id_workspace_id_fk": {
+          "name": "boards_project_id_workspace_id_projects_id_workspace_id_fk",
+          "tableFrom": "boards",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -338,7 +368,34 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "bootstrap_state_user_id_user_id_fk": {
+          "name": "bootstrap_state_user_id_user_id_fk",
+          "tableFrom": "bootstrap_state",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "bootstrap_state_workspace_id_workspaces_id_fk": {
+          "name": "bootstrap_state_workspace_id_workspaces_id_fk",
+          "tableFrom": "bootstrap_state",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
@@ -348,7 +405,7 @@
         },
         "bootstrap_state_valid": {
           "name": "bootstrap_state_valid",
-          "value": "(\"bootstrap_state\".\"status\" = 'empty' AND \"bootstrap_state\".\"claim_email\" IS NULL AND \"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL)\n        OR (\"bootstrap_state\".\"status\" = 'claimed' AND \"bootstrap_state\".\"claim_email\" IS NOT NULL AND \"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL)\n        OR (\"bootstrap_state\".\"status\" = 'complete' AND ((\"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL) OR (\"bootstrap_state\".\"claim_email\" IS NOT NULL AND \"bootstrap_state\".\"user_id\" IS NOT NULL AND \"bootstrap_state\".\"workspace_id\" IS NOT NULL)))"
+          "value": "(\"bootstrap_state\".\"status\" = 'empty' AND \"bootstrap_state\".\"claim_email\" IS NULL AND \"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL)\n        OR (\"bootstrap_state\".\"status\" = 'claimed' AND \"bootstrap_state\".\"claim_email\" IS NOT NULL AND \"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL)\n        OR (\"bootstrap_state\".\"status\" = 'complete' AND ((\"bootstrap_state\".\"user_id\" IS NULL AND \"bootstrap_state\".\"workspace_id\" IS NULL) OR (\"bootstrap_state\".\"claim_email\" IS NOT NULL)))"
         }
       }
     },
@@ -378,6 +435,19 @@
           "tableTo": "cards",
           "columnsFrom": [
             "card_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "card_assignees_user_id_user_id_fk": {
+          "name": "card_assignees_user_id_user_id_fk",
+          "tableFrom": "card_assignees",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
           ],
           "columnsTo": [
             "id"
@@ -593,6 +663,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'card'"
+        },
         "position": {
           "name": "position",
           "type": "text",
@@ -678,6 +756,36 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "cards_column_id_board_id_board_columns_id_board_id_fk": {
+          "name": "cards_column_id_board_id_board_columns_id_board_id_fk",
+          "tableFrom": "cards",
+          "tableTo": "board_columns",
+          "columnsFrom": [
+            "column_id",
+            "board_id"
+          ],
+          "columnsTo": [
+            "id",
+            "board_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "cards_notepad_id_kind_notepads_id_kind_fk": {
+          "name": "cards_notepad_id_kind_notepads_id_kind_fk",
+          "tableFrom": "cards",
+          "tableTo": "notepads",
+          "columnsFrom": [
+            "notepad_id",
+            "kind"
+          ],
+          "columnsTo": [
+            "id",
+            "kind"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -724,6 +832,19 @@
           "tableTo": "notepads",
           "columnsFrom": [
             "notepad_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "edit_locks_user_id_user_id_fk": {
+          "name": "edit_locks_user_id_user_id_fk",
+          "tableFrom": "edit_locks",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
           ],
           "columnsTo": [
             "id"
@@ -778,7 +899,7 @@
           "name": "invited_by",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "expires_at": {
@@ -832,6 +953,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "invites_invited_by_user_id_fk": {
+          "name": "invites_invited_by_user_id_fk",
+          "tableFrom": "invites",
+          "tableTo": "user",
+          "columnsFrom": [
+            "invited_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -871,12 +1005,12 @@
         }
       },
       "indexes": {
-        "members_user_id_unique": {
-          "name": "members_user_id_unique",
+        "members_user": {
+          "name": "members_user",
           "columns": [
             "user_id"
           ],
-          "isUnique": true
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -886,6 +1020,19 @@
           "tableTo": "workspaces",
           "columnsFrom": [
             "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "members_user_id_user_id_fk": {
+          "name": "members_user_id_user_id_fk",
+          "tableFrom": "members",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
           ],
           "columnsTo": [
             "id"
@@ -929,6 +1076,50 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "target_user_id": {
+          "name": "target_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(CASE WHEN target_type = 'user' THEN target_id ELSE NULL END)",
+            "type": "stored"
+          }
+        },
+        "target_notepad_id": {
+          "name": "target_notepad_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(CASE WHEN target_type = 'notepad' THEN target_id ELSE NULL END)",
+            "type": "stored"
+          }
+        },
+        "target_card_id": {
+          "name": "target_card_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(CASE WHEN target_type = 'card' THEN target_id ELSE NULL END)",
+            "type": "stored"
+          }
+        },
+        "target_board_id": {
+          "name": "target_board_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "generated": {
+            "as": "(CASE WHEN target_type = 'board' THEN target_id ELSE NULL END)",
+            "type": "stored"
+          }
         }
       },
       "indexes": {
@@ -954,6 +1145,58 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "notepad_links_target_user_id_user_id_fk": {
+          "name": "notepad_links_target_user_id_user_id_fk",
+          "tableFrom": "notepad_links",
+          "tableTo": "user",
+          "columnsFrom": [
+            "target_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notepad_links_target_notepad_id_notepads_id_fk": {
+          "name": "notepad_links_target_notepad_id_notepads_id_fk",
+          "tableFrom": "notepad_links",
+          "tableTo": "notepads",
+          "columnsFrom": [
+            "target_notepad_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notepad_links_target_card_id_cards_id_fk": {
+          "name": "notepad_links_target_card_id_cards_id_fk",
+          "tableFrom": "notepad_links",
+          "tableTo": "cards",
+          "columnsFrom": [
+            "target_card_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notepad_links_target_board_id_boards_id_fk": {
+          "name": "notepad_links_target_board_id_boards_id_fk",
+          "tableFrom": "notepad_links",
+          "tableTo": "boards",
+          "columnsFrom": [
+            "target_board_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -967,7 +1210,12 @@
         }
       },
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "notepad_links_single_target_chk": {
+          "name": "notepad_links_single_target_chk",
+          "value": "(\"notepad_links\".\"target_user_id\" IS NOT NULL) + (\"notepad_links\".\"target_notepad_id\" IS NOT NULL) + (\"notepad_links\".\"target_card_id\" IS NOT NULL) + (\"notepad_links\".\"target_board_id\" IS NOT NULL) = 1"
+        }
+      }
     },
     "notepad_tags": {
       "name": "notepad_tags",
@@ -1127,11 +1375,18 @@
           "notNull": false,
           "autoincrement": false
         },
+        "deletion_operation_id": {
+          "name": "deletion_operation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_by": {
           "name": "created_by",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {
@@ -1175,6 +1430,21 @@
             "position"
           ],
           "isUnique": false
+        },
+        "notepads_deletion_operation_idx": {
+          "name": "notepads_deletion_operation_idx",
+          "columns": [
+            "deletion_operation_id"
+          ],
+          "isUnique": false
+        },
+        "notepads_id_kind_uq": {
+          "name": "notepads_id_kind_uq",
+          "columns": [
+            "id",
+            "kind"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -1200,6 +1470,34 @@
           ],
           "columnsTo": [
             "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notepads_created_by_user_id_fk": {
+          "name": "notepads_created_by_user_id_fk",
+          "tableFrom": "notepads",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "notepads_project_id_workspace_id_projects_id_workspace_id_fk": {
+          "name": "notepads_project_id_workspace_id_projects_id_workspace_id_fk",
+          "tableFrom": "notepads",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id",
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "workspace_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -1244,7 +1542,7 @@
           "name": "actor_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "notepad_id": {
@@ -1288,6 +1586,45 @@
         }
       },
       "foreignKeys": {
+        "notifications_workspace_id_workspaces_id_fk": {
+          "name": "notifications_workspace_id_workspaces_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notifications_user_id_user_id_fk": {
+          "name": "notifications_user_id_user_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "notifications_actor_id_user_id_fk": {
+          "name": "notifications_actor_id_user_id_fk",
+          "tableFrom": "notifications",
+          "tableTo": "user",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "notifications_notepad_id_notepads_id_fk": {
           "name": "notifications_notepad_id_notepads_id_fk",
           "tableFrom": "notifications",
@@ -1316,6 +1653,198 @@
         }
       },
       "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pending_storage_deletions": {
+      "name": "pending_storage_deletions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "next_retry_at": {
+          "name": "next_retry_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "pending_storage_deletions_retry_idx": {
+          "name": "pending_storage_deletions_retry_idx",
+          "columns": [
+            "next_retry_at",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "pending_storage_deletions_key_idx": {
+          "name": "pending_storage_deletions_key_idx",
+          "columns": [
+            "storage_key"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "project_files": {
+      "name": "project_files",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "storage_key": {
+          "name": "storage_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "filename": {
+          "name": "filename",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "project_files_storage_key_idx": {
+          "name": "project_files_storage_key_idx",
+          "columns": [
+            "storage_key"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "project_files_project_id_projects_id_fk": {
+          "name": "project_files_project_id_projects_id_fk",
+          "tableFrom": "project_files",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "project_files_created_by_user_id_fk": {
+          "name": "project_files_created_by_user_id_fk",
+          "tableFrom": "project_files",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "project_files_project_id_storage_key_pk": {
+          "columns": [
+            "project_id",
+            "storage_key"
+          ],
+          "name": "project_files_project_id_storage_key_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -1394,6 +1923,14 @@
             "position"
           ],
           "isUnique": false
+        },
+        "projects_id_ws_uq": {
+          "name": "projects_id_ws_uq",
+          "columns": [
+            "id",
+            "workspace_id"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {
@@ -1411,6 +1948,190 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "public_shares": {
+      "name": "public_shares",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "public_shares_token_unique": {
+          "name": "public_shares_token_unique",
+          "columns": [
+            "token"
+          ],
+          "isUnique": true
+        },
+        "public_shares_token_uq": {
+          "name": "public_shares_token_uq",
+          "columns": [
+            "token"
+          ],
+          "isUnique": true
+        },
+        "public_shares_target_uq": {
+          "name": "public_shares_target_uq",
+          "columns": [
+            "project_id",
+            "target_type",
+            "target_id"
+          ],
+          "isUnique": true
+        },
+        "public_shares_ws_idx": {
+          "name": "public_shares_ws_idx",
+          "columns": [
+            "workspace_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "public_shares_workspace_id_workspaces_id_fk": {
+          "name": "public_shares_workspace_id_workspaces_id_fk",
+          "tableFrom": "public_shares",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "public_shares_project_id_projects_id_fk": {
+          "name": "public_shares_project_id_projects_id_fk",
+          "tableFrom": "public_shares",
+          "tableTo": "projects",
+          "columnsFrom": [
+            "project_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "public_shares_created_by_user_id_fk": {
+          "name": "public_shares_created_by_user_id_fk",
+          "tableFrom": "public_shares",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "rate_limits": {
+      "name": "rate_limits",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "count": {
+          "name": "count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "reset_at": {
+          "name": "reset_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "rate_limits_reset_at_idx": {
+          "name": "rate_limits_reset_at_idx",
+          "columns": [
+            "reset_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1712,8 +2433,16 @@
           "name": "created_by",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
+        },
+        "feature_flags": {
+          "name": "feature_flags",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
         },
         "created_at": {
           "name": "created_at",
@@ -1724,7 +2453,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "workspaces_created_by_user_id_fk": {
+          "name": "workspaces_created_by_user_id_fk",
+          "tableFrom": "workspaces",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

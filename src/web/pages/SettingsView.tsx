@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from '@tanstack/react-router';
-import { Archive, LogOut, Plus, Settings, Tag, Trash2, User, Users, Check } from 'lucide-react';
+import { useLocation, useNavigate, useParams } from '@tanstack/react-router';
+import { Archive, Plus, Settings, Tag, Trash2, Users, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   useCreateTag,
@@ -11,22 +11,32 @@ import {
   useRenameWorkspace,
   useProjects,
   useProjectTags,
-  useSignOut,
   useSystemVersion,
   useUpdateProject,
 } from '../lib/queries';
-import { Avatar } from '../components/ui/Avatar';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Input } from '../components/ui/Input';
+import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { Select } from '../components/ui/Select';
 import { StatusDiamond } from '../components/ui/StatusDiamond';
 import { workspaceTarget } from '../lib/workspaceRoutes';
 import { useUploadPolicy, useUpdateUploadPolicy } from '../lib/uploadPolicy';
 import { MAX_UPLOAD_BYTES, UPLOAD_FILE_TYPES } from '../../shared/uploadPolicy';
 import { useTranslation } from '../lib/i18n';
-import { LanguageSelector } from '../components/ui/LanguageSelector';
+import { FeatureFlagsSection } from '../components/settings/FeatureFlagsSection';
+import { SystemUpdateSection } from '../components/settings/SystemUpdateSection';
+import { DataPortabilitySection } from '../components/settings/DataPortabilitySection';
+
+type SettingsTab = 'workspace' | 'system';
+
+const SYSTEM_SETTINGS_HASHES = new Set(['features', 'system', 'portability', 'updates']);
+
+function resolveSettingsTabFromHash(hash?: string): SettingsTab {
+  const normalized = (hash ?? '').replace(/^#/, '').toLowerCase();
+  return SYSTEM_SETTINGS_HASHES.has(normalized) ? 'system' : 'workspace';
+}
 
 const ICON_PRESETS = ['📁', '🚀', '⚡', '🎯', '🛠️', '💡', '📊', '📝', '📦', '✨'];
 const COLOR_PRESETS = ['#6366f1', '#059669', '#d97706', '#dc2626', '#9333ea', '#0284c7', '#64748b'];
@@ -157,10 +167,10 @@ function UploadSettings({
 
 export function SettingsView() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: account, isError: accountError } = useAccount();
-  const signOut = useSignOut();
   const {
     data: projects = [],
     isLoading: projectsLoading,
@@ -173,9 +183,44 @@ export function SettingsView() {
   const createTagMutation = useCreateTag();
   const deleteTagMutation = useDeleteTag();
 
-  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
+    resolveSettingsTabFromHash(
+      location.hash || (typeof window !== 'undefined' ? window.location.hash : ''),
+    ),
+  );
   const [confirmLeaveWorkspace, setConfirmLeaveWorkspace] = useState(false);
+  const [confirmDeleteWorkspace, setConfirmDeleteWorkspace] = useState(false);
+  const [deleteWorkspaceConfirmName, setDeleteWorkspaceConfirmName] = useState('');
+  const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
+
+  useEffect(() => {
+    const hash = location.hash || (typeof window !== 'undefined' ? window.location.hash : '');
+    if (hash) {
+      setActiveTab(resolveSettingsTabFromHash(hash));
+    }
+  }, [location.hash]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onHashChange = () => {
+      setActiveTab(resolveSettingsTabFromHash(window.location.hash));
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const handleTabChange = (next: string) => {
+    const tab: SettingsTab = next === 'system' ? 'system' : 'workspace';
+    setActiveTab(tab);
+    if (typeof window !== 'undefined') {
+      const nextUrl =
+        tab === 'system'
+          ? `${window.location.pathname}${window.location.search}#system`
+          : `${window.location.pathname}${window.location.search}`;
+      window.history.replaceState(null, '', nextUrl);
+    }
+  };
 
   // Selected project state
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
@@ -389,58 +434,28 @@ export function SettingsView() {
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="max-w-4xl mx-auto py-5 px-3.5 sm:py-8 sm:px-6 space-y-5 sm:space-y-8">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text)]">{t('settings.title')}</h1>
-          <p className="text-xs sm:text-sm text-[var(--muted)]">
-            {t('settings.subtitle')}
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[var(--text)]">
+              {t('settings.title')}
+            </h1>
+            <p className="text-xs sm:text-sm text-[var(--muted)]">{t('settings.subtitle')}</p>
+          </div>
+          <SegmentedControl
+            value={activeTab}
+            onValueChange={handleTabChange}
+            ariaLabel="Settings sections"
+            options={[
+              { value: 'workspace', label: 'Workspace & Projects' },
+              { value: 'system', label: 'Features & System' },
+            ]}
+          />
         </div>
 
-        {/* Section 1: Profile Details */}
-        <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
-          <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
-            <User className="w-4 h-4 text-[var(--accent)]" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
-              {t('settings.profileAndAccount')}
-            </h2>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <Avatar name={account?.user?.name || t('common.user')} size="md" />
-              <div>
-                <div className="text-sm font-semibold text-[var(--text)]">
-                  {account?.user?.name || t('common.user')}
-                </div>
-                <div className="text-xs text-[var(--muted)]">{account?.user?.email}</div>
-                <div className="mt-1 flex items-center gap-1.5">
-                  <span className="text-[11px] text-[var(--muted)]">{t('settings.workspaceRole')}</span>
-                  <Badge className="uppercase text-[10px] tracking-wider font-mono">
-                    {t(`common.roles.${role}` as any) || role || t('common.roles.member')}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setConfirmSignOut(true)}
-              className="flex items-center gap-1.5"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>{t('settings.logOut')}</span>
-            </Button>
-          </div>
-
-          <div className="flex items-center justify-between border-t border-[var(--hair)] pt-3 text-xs">
-            <span className="text-[var(--muted)] font-medium">{t('common.language')}</span>
-            <LanguageSelector />
-          </div>
-        </div>
-
-        {workspaceId && currentWorkspace && (
-          <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
+        {activeTab === 'workspace' && (
+          <>
+            {workspaceId && currentWorkspace && (
+              <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2 border-b border-[var(--hair)] pb-3">
               <Users className="w-4 h-4 text-[var(--accent)]" />
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text)]">
@@ -479,14 +494,30 @@ export function SettingsView() {
               <p className="max-w-xl text-xs text-[var(--muted)]">
                 {t('settings.leaveWorkspaceNotice')}
               </p>
-              <Button type="button" variant="danger" size="sm" onClick={() => setConfirmLeaveWorkspace(true)}>
-                {t('settings.leaveWorkspace')}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="danger" size="sm" onClick={() => setConfirmLeaveWorkspace(true)}>
+                  {t('settings.leaveWorkspace')}
+                </Button>
+                {role === 'owner' && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setDeleteWorkspaceConfirmName('');
+                      setConfirmDeleteWorkspace(true);
+                    }}
+                    className="border border-[var(--danger)]/40 text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                  >
+                    Delete Workspace
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Section 2: Project Settings */}
+        {/* Project Settings */}
         <div className="chamfer-sm border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-4 border-b border-[var(--hair)] pb-3 flex-wrap">
             <div className="flex items-center gap-2">
@@ -782,26 +813,27 @@ export function SettingsView() {
             )}
           </div>
         </div>
-      </div>
+          </>
+        )}
 
-      {/* Confirm Sign Out */}
-      <ConfirmDialog
-        open={confirmSignOut}
-        title={t('sidebar.confirmSignOutTitle')}
-        message={t('sidebar.confirmSignOutMessage')}
-        confirmLabel={t('common.signOut')}
-        danger={false}
-        busy={signOut.isPending}
-        onConfirm={async () => {
-          try {
-            await signOut.mutateAsync();
-          } catch (err: any) {
-            toast.error(err?.message || 'Failed to sign out');
-            setConfirmSignOut(false);
-          }
-        }}
-        onCancel={() => setConfirmSignOut(false)}
-      />
+        {activeTab === 'system' && (
+          <>
+            {workspaceId && currentWorkspace && (
+              <FeatureFlagsSection workspaceId={workspaceId} isOwner={role === 'owner'} />
+            )}
+
+            {workspaceId && currentWorkspace && (
+              <DataPortabilitySection
+                workspaceId={workspaceId}
+                workspaceName={currentWorkspace.name}
+                role={role}
+              />
+            )}
+
+            <SystemUpdateSection isOwner={role === 'owner'} />
+          </>
+        )}
+      </div>
 
       {confirmLeaveWorkspace && currentWorkspace && (
         <ConfirmDialog
@@ -814,6 +846,46 @@ export function SettingsView() {
           onConfirm={handleLeaveWorkspace}
           onCancel={() => setConfirmLeaveWorkspace(false)}
         />
+      )}
+
+      {confirmDeleteWorkspace && currentWorkspace && workspaceId && (
+        <ConfirmDialog
+          open
+          title="Permanently Delete Workspace"
+          message={`This will permanently delete "${currentWorkspace.name}", all projects, notepads, boards, cards, and uploaded files. Type "${currentWorkspace.name}" to confirm:`}
+          confirmLabel="Delete Workspace"
+          danger
+          busy={deletingWorkspace}
+          confirmDisabled={deleteWorkspaceConfirmName !== currentWorkspace.name}
+          onConfirm={async () => {
+            setDeletingWorkspace(true);
+            try {
+              const res = await fetch(
+                `/api/workspaces/${encodeURIComponent(workspaceId)}?confirm=${encodeURIComponent(deleteWorkspaceConfirmName)}`,
+                { method: 'DELETE' },
+              );
+              if (!res.ok) {
+                const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+                throw new Error(err.error?.message || 'Failed to delete workspace');
+              }
+              toast.success('Workspace permanently deleted');
+              setConfirmDeleteWorkspace(false);
+              navigate({ to: '/' });
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : 'Failed to delete workspace');
+            } finally {
+              setDeletingWorkspace(false);
+            }
+          }}
+          onCancel={() => setConfirmDeleteWorkspace(false)}
+        >
+          <Input
+            value={deleteWorkspaceConfirmName}
+            onChange={(e) => setDeleteWorkspaceConfirmName(e.target.value)}
+            placeholder={currentWorkspace.name}
+            className="mt-2"
+          />
+        </ConfirmDialog>
       )}
 
       {/* Confirm Archive Project */}

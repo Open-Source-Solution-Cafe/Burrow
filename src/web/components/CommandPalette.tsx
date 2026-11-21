@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Command } from 'cmdk';
 import { useNavigate, useParams } from '@tanstack/react-router';
-import { Home, Kanban, LogOut, Search, Settings, Trash2, Users, Globe } from 'lucide-react';
+import { Home, Kanban, LogOut, Search, Settings, Trash2, User, Users, Globe } from 'lucide-react';
 import { useBoards, useProjects, useRecentNotepads, useSearch, useSignOut } from '../lib/queries';
 import {
   boardTarget,
@@ -9,6 +9,7 @@ import {
   projectTarget,
   trashTarget,
   workspaceMembersTarget,
+  workspaceProfileTarget,
   workspaceSettingsTarget,
 } from '../lib/workspaceRoutes';
 import { ModalShell } from './ui/ModalShell';
@@ -297,6 +298,18 @@ export function CommandPalette() {
                     >
                       <Users className="w-4 h-4 text-blue-500 shrink-0" />
                       <span>{t('commandPalette.membersAndInvites')}</span>
+                    </Command.Item>
+
+                    <Command.Item
+                      onSelect={() =>
+                        handleSelect(() => {
+                          if (workspaceId) navigate(workspaceProfileTarget(workspaceId));
+                        })
+                      }
+                      className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
+                    >
+                      <User className="w-4 h-4 text-[var(--accent)] shrink-0" />
+                      <span>{t('settings.profileAndAccount')}</span>
                     </Command.Item>
 
                     <Command.Item

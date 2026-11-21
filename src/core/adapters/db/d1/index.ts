@@ -14,6 +14,7 @@ import { createNotificationRepository } from './repositories/notification';
 import { createMemberRepository } from './repositories/member';
 import { createInviteRepository } from './repositories/invite';
 import { createStorageDeletionRepository } from './repositories/storage-deletions';
+import { createPublicShareRepository } from './repositories/public-share';
 import { APIError } from 'better-auth/api';
 import { MemberService } from '../../../services/members';
 import { SqliteRateLimitStore } from '../../rate-limit';
@@ -40,6 +41,8 @@ interface EnvBindings {
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   SELF_UPDATE_WEBHOOK_URL?: string;
+  PRIVACY_POLICY_URL?: string;
+  TERMS_OF_SERVICE_URL?: string;
   TRUST_PROXY?: string;
   TRUSTED_PROXIES?: string;
   NODE_ENV?: string;
@@ -75,6 +78,7 @@ export function createD1Infrastructure(
     members: createMemberRepository(db),
     invites: createInviteRepository(db),
     storageDeletions: createStorageDeletionRepository(db),
+    publicShares: createPublicShareRepository(db),
   };
 
   const memberService = new MemberService(repositories);

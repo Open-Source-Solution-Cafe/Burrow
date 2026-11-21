@@ -22,6 +22,8 @@ interface AuthConfig {
   emailPasswordEnabled: boolean;
   magicLinkEnabled: boolean;
   oauthProviders: OAuthProviderConfig[];
+  privacyPolicyUrl?: string | null;
+  termsOfServiceUrl?: string | null;
 }
 
 async function hasAccountSession(signal?: AbortSignal): Promise<boolean> {
@@ -102,6 +104,8 @@ export function Login() {
             emailPasswordEnabled: data.emailPasswordEnabled ?? true,
             magicLinkEnabled: Boolean(data.magicLinkEnabled),
             oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
+            privacyPolicyUrl: data.privacyPolicyUrl ?? null,
+            termsOfServiceUrl: data.termsOfServiceUrl ?? null,
           });
         }
       })
@@ -655,6 +659,33 @@ export function Login() {
               </button>
             </div>
           </>
+        )}
+        {(authConfig.privacyPolicyUrl || authConfig.termsOfServiceUrl) && (
+          <div className="pt-2 border-t border-[var(--hair)] flex items-center justify-center gap-3 text-[11px] text-[var(--muted)]">
+            {authConfig.privacyPolicyUrl && (
+              <a
+                href={authConfig.privacyPolicyUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-[var(--text)] underline"
+              >
+                Privacy Policy
+              </a>
+            )}
+            {authConfig.privacyPolicyUrl && authConfig.termsOfServiceUrl && (
+              <span aria-hidden="true">&bull;</span>
+            )}
+            {authConfig.termsOfServiceUrl && (
+              <a
+                href={authConfig.termsOfServiceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-[var(--text)] underline"
+              >
+                Terms of Service
+              </a>
+            )}
+          </div>
         )}
       </div>
     </div>

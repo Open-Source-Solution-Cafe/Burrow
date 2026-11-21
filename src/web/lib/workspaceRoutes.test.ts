@@ -9,6 +9,7 @@ import {
   trashTarget,
   uniqueWorkspaceForProject,
   workspaceMembersTarget,
+  workspaceProfileTarget,
   workspaceSettingsTarget,
   workspaceTarget,
   workspaceTasksTarget,
@@ -49,6 +50,10 @@ describe('workspace route helpers', () => {
       params: { workspaceId: 'workspace-a' },
     });
     expect(workspaceTasksTarget('workspace-a').params.workspaceId).toBe('workspace-a');
+    expect(workspaceProfileTarget('workspace-a')).toEqual({
+      to: '/w/$workspaceId/profile',
+      params: { workspaceId: 'workspace-a' },
+    });
     expect(workspaceSettingsTarget('workspace-a').params.workspaceId).toBe('workspace-a');
     expect(workspaceMembersTarget('workspace-a').params.workspaceId).toBe('workspace-a');
   });

@@ -23,6 +23,7 @@ import type {
   CardSummary,
   ProjectScope,
   Comment,
+  UserAuthoredComment,
   CardPriority,
   CardWithDetails,
   CardPlan,
@@ -745,6 +746,25 @@ export function createCardRepository(db: DB): ICardRepository {
         boardName: r.boardName,
         priority: r.priority as CardPriority | null,
       }));
+    },
+
+    async listCommentsByUser(userId: string): Promise<UserAuthoredComment[]> {
+      return db
+        .select({
+          id: t.cardComments.id,
+          cardId: t.cardComments.cardId,
+          workspaceId: t.projects.workspaceId,
+          projectId: t.projects.id,
+          content: t.cardComments.content,
+          createdAt: t.cardComments.createdAt,
+          updatedAt: t.cardComments.updatedAt,
+        })
+        .from(t.cardComments)
+        .innerJoin(t.cards, eq(t.cards.id, t.cardComments.cardId))
+        .innerJoin(t.boards, eq(t.boards.id, t.cards.boardId))
+        .innerJoin(t.projects, eq(t.projects.id, t.boards.projectId))
+        .where(eq(t.cardComments.userId, userId))
+        .orderBy(desc(t.cardComments.createdAt));
     },
   };
 }

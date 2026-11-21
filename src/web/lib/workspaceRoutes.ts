@@ -65,6 +65,13 @@ export function workspaceSettingsTarget(workspaceId: WorkspaceId) {
   };
 }
 
+export function workspaceProfileTarget(workspaceId: WorkspaceId) {
+  return {
+    to: '/w/$workspaceId/profile' as const,
+    params: { workspaceId },
+  };
+}
+
 export function workspaceMembersTarget(workspaceId: WorkspaceId) {
   return {
     to: '/w/$workspaceId/settings/members' as const,

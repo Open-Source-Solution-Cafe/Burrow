@@ -1141,7 +1141,7 @@ export const en: TranslationDictionary = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Manage your profile, project preferences, and workflow tags.',
+    subtitle: 'Manage workspace preferences, project settings, feature flags, and system options.',
     profileAndAccount: 'Profile & Account',
     workspaceRole: 'Workspace Role:',
     logOut: 'Log out',
