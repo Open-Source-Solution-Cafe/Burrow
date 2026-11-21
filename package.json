@@ -1,7 +1,7 @@
 {
   "name": "burrow",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "packageManager": "pnpm@10.15.0",
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -44,7 +44,9 @@
     "check": "node scripts/check.mjs",
     "check:ci": "node scripts/pre-push.mjs",
     "check:sync": "node scripts/check-sync.mjs",
+    "check:version": "node scripts/check-version.mjs",
     "check:sqlite": "node scripts/check.mjs --sqlite",
+    "version:bump": "node scripts/bump-version.mjs",
     "check:data": "node scripts/check-data.mjs",
     "check:data:postgres": "node scripts/check-data.mjs --postgres",
     "db:generate": "drizzle-kit generate",

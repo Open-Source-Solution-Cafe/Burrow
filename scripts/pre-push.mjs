@@ -6,10 +6,12 @@
  * Set SKIP_PRE_PUSH=1 only for explicit emergency bypasses.
  */
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ZERO_SHA = /^0+$/;
 
 if (process.env.SKIP_PRE_PUSH === '1') {
   console.warn('⚠️  SKIP_PRE_PUSH=1 set: bypassing pre-push CI parity checks.');
@@ -22,6 +24,23 @@ const pnpmCmd = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const env = { ...process.env };
 // Never silently skip PostgreSQL or Worker tests during pre-push verification.
 delete env.BURROW_TEST_SQLITE_ONLY;
+
+function readGitPushRefs() {
+  if (process.env.BURROW_GIT_PRE_PUSH !== '1') return [];
+  try {
+    const raw = fs.readFileSync(0, 'utf8');
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [localRef, localSha, remoteRef, remoteSha] = line.split(/\s+/);
+        return { localRef, localSha, remoteRef, remoteSha };
+      });
+  } catch {
+    return [];
+  }
+}
 
 function runStep(label, cmd, args, { shell = false } = {}) {
   console.log(`\n==> [pre-push] ${label}`);
@@ -43,6 +62,17 @@ function runStep(label, cmd, args, { shell = false } = {}) {
   }
 }
 
+const pushRefs = readGitPushRefs();
+const activeRef = pushRefs.find((ref) => ref.localSha && !ZERO_SHA.test(ref.localSha));
+const versionArgs = [path.join(root, 'scripts', 'check-version.mjs')];
+if (activeRef) {
+  if (activeRef.remoteSha && !ZERO_SHA.test(activeRef.remoteSha)) {
+    versionArgs.push('--base', activeRef.remoteSha);
+  }
+  versionArgs.push('--head', activeRef.localSha);
+}
+
+runStep('SemVer bump & version parity (check-version)', process.execPath, versionArgs);
 runStep('Sync, line-ending, migration & lockfile parity', process.execPath, [
   path.join(root, 'scripts', 'check-sync.mjs'),
 ]);

@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.3.0] - 2026-11-21
+
+### Added
+- **Automated SemVer Bump & Pre-Push Version Enforcement (`scripts/version-lib.mjs`, `scripts/check-version.mjs`, `scripts/bump-version.mjs`, `.githooks/pre-push`, `.github/workflows/ci.yml`)**: Added `pnpm run check:version` (enforced in `pre-push`, `pnpm run check`, and GitHub CI) to guarantee `package.json` ↔ `src/core/version.ts` (`APP_VERSION`) parity and verify that pushes containing `major` (breaking), `minor` (`feat:` / new SQL migrations), or `patch` (`fix:` / `security:` / `perf:` / runtime) changes have bumped the version accordingly, plus `pnpm run version:bump` to auto-detect the SemVer level and update `package.json`, `src/core/version.ts`, and `CHANGELOG.md` together.
 - **CI-Parity Pre-Push Gate & Cross-Platform Sync Guard (`.githooks/pre-push`, `scripts/pre-push.mjs`, `scripts/check-sync.mjs`, `scripts/sync-d1-migrations.mjs`, `scripts/install-hooks.mjs`, `.github/workflows/ci.yml`)**: Added an automatic Git `pre-push` hook (installed via `prepare` / `pnpm run hooks:install` and runnable manually via `pnpm run check:ci`) that mirrors GitHub Actions CI before any push (`check-sync.mjs`, `pnpm run build`, `check-basalt`, `check-decoupling`, `check-licenses`, `tsc -b`, `eslint --max-warnings=0`, and the full Unit + SQLite + PostgreSQL 17 + Worker Vitest suite), plus `pnpm run db:sync-d1` and `check-sync.mjs` to catch `D1_MIGRATIONS` drift, SQLite/PostgreSQL migration filename mismatches, Windows CRLF index leaks, and `pnpm-lock.yaml` mismatches locally.
 - **One-Click "Deploy to Cloudflare" Button & Zero-Input Worker Initialization (`README.md`, `.env.example`, `src/worker/bootstrap.ts`, `src/worker/d1-migrations.ts`, `src/worker/index.ts`, `src/core/app.ts`, `src/web/pages/Login.tsx`, `docs/CLOUDFLARE_DEPLOY_BUTTON.md`)**: Added the **Deploy to Cloudflare** button (`deploy.workers.cloudflare.com`) to `README.md`, commented out `.env.example` variables so Cloudflare's deploy wizard requires zero manual env inputs, added automatic first-boot D1 migration execution (`d1_migrations`), dynamic HTTPS origin derivation for `BETTER_AUTH_URL` (ignoring localhost placeholders on HTTPS traffic), D1-persisted CSPRNG `BETTER_AUTH_SECRET` generation (`_worker_runtime_config`), and atomic first-user Owner claiming when `BOOTSTRAP_TOKEN` is omitted (`bootstrapTokenRequired: false` on `GET /api/auth/config`, locking immediately to `403 invite_required` after the first workspace is created).
 - **Multi-Workspace Selection for Workspace ZIP Export (`DataPortabilitySection.tsx`, `markdownPortability.ts`, `notionImporter.ts`)**: Added a **Workspaces to Export** checklist in **Settings → Features & System** allowing workspace `owner`s to select any combination of their owned, export-enabled workspaces (with **Select All Exportable** / **Current Workspace Only** quick actions and direct links to `#features` for owned workspaces without export enabled), packaging multi-workspace selections into a single ZIP (`burrow-multi-workspace-backup.json` + `workspaces/<slug>/...`) with multi-workspace backup migration support while keeping personal GDPR exports independent in **Profile & Account**.
@@ -27,10 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings & Profile Separation + Sidebar Footer Cleanup (`ProfileView.tsx`, `SettingsView.tsx`, `Sidebar.tsx`, `router.tsx`, `CommandPalette.tsx`)**: Split personal **Profile & Account** (`/w/:workspaceId/profile`, with `/profile` redirect) into its own dedicated page separate from tabbed **Workspace & Projects** and **Features & System** settings (`/w/:workspaceId/settings`, preserving `#features` deep links); added **Profile & Account** directly to the account menu and Command Palette, and removed the inline language switcher from the bottom-left sidebar footer (keeping it in the account menu, Profile & Account, and Command Palette).
 - **Documentation & Open-Source Positioning (`README.md`, `CONTRIBUTING.md`)**: Clarified upfront product scope and differentiators (zero per-seat caps, uncapped Kanban/List/Calendar views, native email/password authentication, and Cloudflare Workers or Docker hosting), added an explicit permanent open-source commitment under `AGPL-3.0-or-later` alongside transparency on `CLA.md`, and aligned `CONTRIBUTING.md` with `.github/PULL_REQUEST_TEMPLATE.md` (external PR status and `master` branch workflow).
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 - **CI Cross-Platform Migration Sync & PostgreSQL Test Isolation (`src/worker/d1-migrations.ts`, `tests/unit/sqlite-migrations.test.ts`, `tests/adapters/project-file-node.test.ts`)**: Normalized embedded `D1_MIGRATIONS` SQL to LF (`\n`) and normalized disk reads in the migration sync test so Windows CRLF checkouts no longer break Linux CI, and isolated the PostgreSQL `project-file-node` contract test in its own disposable database to eliminate concurrent `project_files` table races with `project-delete-node`.
 - **Preserve Workspace Feature Flags & Project Upload Policies in Backups (`workspace-export.ts`, `markdownPortability.ts`, `DataPortabilitySection.tsx`)**: Included workspace `featureFlags` and custom project `uploadPolicy` in `GET /api/workspaces/:wid/export` (`burrow-backup.json`) and restored both automatically during `POST /api/workspaces/:wid/projects/:pid/import` and `POST /api/workspaces/import-bundle` migrations.
@@ -39,7 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **Dependency Vulnerability Remediation (`package.json`, `pnpm-lock.yaml`)**: Upgraded `hono` (`^4.13.19`), `@hono/node-server` (`^2.1.11`), `vitest` (`^4.1.12`), `wrangler` (`^4.165.0`), and `@cloudflare/workers-types` (`^5.20261118.1`), and added `pnpm.overrides` for `@vitest/mocker` (`^4.1.12`), `esbuild` (`^0.28.2`), `minimatch` (`^11.0.1`), `sharp` (`^0.35.5`), and `undici` (`^7.30.1`), clearing all 32 `pnpm audit` advisories while keeping permissive dependency licenses (`check-licenses.mjs`: 453 packages, 0 violations).
-
 ## [0.2.0] - 2026-11-15
 
 ### Added

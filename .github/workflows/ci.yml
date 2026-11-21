@@ -47,6 +47,7 @@ jobs:
       - name: Verify architecture, decoupling, sync, and dependency licenses
         run: |
           node scripts/check-sync.mjs
+          node scripts/check-version.mjs
           node scripts/check-basalt.mjs
           node scripts/check-decoupling.mjs
           node scripts/check-licenses.mjs

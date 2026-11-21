@@ -19,6 +19,7 @@ describe('GitHub Actions workflows security and coverage', () => {
     expect(ci).toContain('tsc -b');
     expect(ci).toContain('eslint --max-warnings=0');
     expect(ci).toContain('check-sync.mjs');
+    expect(ci).toContain('check-version.mjs');
     expect(ci).toContain('check-decoupling.mjs');
     expect(ci).toContain('check-licenses.mjs');
     expect(ci).toContain('vitest run');
@@ -34,6 +35,7 @@ describe('GitHub Actions workflows security and coverage', () => {
 
     const prePush = fs.readFileSync(path.join(root, 'scripts/pre-push.mjs'), 'utf8');
     for (const required of [
+      'check-version.mjs',
       'check-sync.mjs',
       "'build'",
       'check-basalt.mjs',
