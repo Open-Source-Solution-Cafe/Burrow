@@ -1,6 +1,7 @@
 import { createCoreApp } from '../core/app';
 import { createD1Infrastructure } from '../core/adapters/db/d1';
 import { createDb } from '../core/adapters/db/d1/client';
+import { ensureWorkerRuntimeEnv, type ResolvedWorkerBindings } from './bootstrap';
 import type { Env } from './env';
 import type { Hono } from 'hono';
 import type { ExecutionContext } from 'hono';
@@ -16,14 +17,14 @@ type ExportedHandler<Env> = {
  * Create the Hono app for a given Worker environment.
  * Used by tests and the production fetch handler.
  */
-export function createWorkerApp(env: Env['Bindings']): Hono<any, any, any> {
+export function createWorkerApp(env: Env['Bindings'] | ResolvedWorkerBindings): Hono<any, any, any> {
   const infra = createD1Infrastructure(
     createDb(env.DB),
     {
       FILES: env.FILES,
-      BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
-      BETTER_AUTH_URL: env.BETTER_AUTH_URL,
-      BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN,
+      BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET ?? '',
+      BETTER_AUTH_URL: env.BETTER_AUTH_URL ?? '',
+      BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN ?? '',
       RESEND_API_KEY: env.RESEND_API_KEY,
       EMAIL_FROM: env.EMAIL_FROM,
       GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID,
@@ -47,8 +48,9 @@ export function createWorkerApp(env: Env['Bindings']): Hono<any, any, any> {
  */
 export default {
   async fetch(request: Request, env: Env['Bindings'], ctx: ExecutionContext): Promise<Response> {
-    const app = createWorkerApp(env);
-    return app.fetch(request, env, ctx);
+    const runtimeEnv = await ensureWorkerRuntimeEnv(env, request);
+    const app = createWorkerApp(runtimeEnv);
+    return app.fetch(request, runtimeEnv, ctx);
   },
 } satisfies ExportedHandler<Env['Bindings']>;
 

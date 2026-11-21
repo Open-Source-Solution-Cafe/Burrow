@@ -88,6 +88,8 @@ export function createCoreApp(
     email: emailProvider,
     bootstrapToken,
   } = infra;
+  const trimmedBootstrapToken = bootstrapToken?.trim() ?? '';
+  const hasBootstrapToken = trimmedBootstrapToken.length > 0;
   const projects = new ProjectService(
     {
       projects: repositories.projects,
@@ -249,6 +251,7 @@ export function createCoreApp(
         c.header('Cache-Control', 'no-store');
         return c.json({
           signupMode: policy.signupMode(),
+          bootstrapTokenRequired: hasBootstrapToken,
           emailPasswordEnabled: true,
           magicLinkEnabled,
           oauthProviders: [
@@ -657,21 +660,23 @@ export function createCoreApp(
           );
         }
 
-        const isTokenValid =
-          Boolean(bootstrapToken && bootstrapToken.length >= 16) &&
-          typeof providedBootstrapToken === 'string' &&
-          (await timingSafeEqualString(providedBootstrapToken, bootstrapToken));
+        if (hasBootstrapToken) {
+          const isTokenValid =
+            trimmedBootstrapToken.length >= 16 &&
+            typeof providedBootstrapToken === 'string' &&
+            (await timingSafeEqualString(providedBootstrapToken, trimmedBootstrapToken));
 
-        if (!isTokenValid) {
-          return c.json(
-            {
-              error: {
-                code: 'invalid_bootstrap_token',
-                message: 'Valid bootstrap token required for initial sign-up',
+          if (!isTokenValid) {
+            return c.json(
+              {
+                error: {
+                  code: 'invalid_bootstrap_token',
+                  message: 'Valid bootstrap token required for initial sign-up',
+                },
               },
-            },
-            403,
-          );
+              403,
+            );
+          }
         }
 
         if (!(await repositories.workspaces.claimBootstrap(body.email.trim().toLowerCase()))) {
@@ -725,7 +730,7 @@ export function createCoreApp(
         zValidator(
           'json',
           z.object({
-            bootstrapToken: z.string(),
+            bootstrapToken: z.string().optional(),
             resetClaim: z.boolean().optional(),
             confirmEmail: z.string().email().optional(),
           }),
@@ -733,12 +738,15 @@ export function createCoreApp(
         async (c) => {
           const identity = c.get('identity');
           const { bootstrapToken: providedToken, resetClaim, confirmEmail } = c.req.valid('json');
-          if (
-            !bootstrapToken ||
-            bootstrapToken.length < 16 ||
-            !(await timingSafeEqualString(providedToken, bootstrapToken))
-          ) {
-            throw httpError(403, 'invalid_bootstrap_token', 'Valid bootstrap token required');
+          if (hasBootstrapToken || resetClaim) {
+            if (
+              !hasBootstrapToken ||
+              trimmedBootstrapToken.length < 16 ||
+              typeof providedToken !== 'string' ||
+              !(await timingSafeEqualString(providedToken, trimmedBootstrapToken))
+            ) {
+              throw httpError(403, 'invalid_bootstrap_token', 'Valid bootstrap token required');
+            }
           }
 
           if (resetClaim) {

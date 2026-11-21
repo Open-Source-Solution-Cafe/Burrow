@@ -1,38 +1,31 @@
-# Native "Deploy to Cloudflare" Button Feasibility Assessment
+# Native "Deploy to Cloudflare" Button Guide & Architecture
 
-This document evaluates supporting Cloudflare's native one-click **Deploy to Cloudflare** button (`https://deploy.workers.cloudflare.com/?url=https://github.com/Open-Source-Solution-Cafe/Burrow`) alongside Burrow's verified CLI installer (`pnpm run setup -r`).
-
----
-
-## Summary Verdict
-
-**Status: Not recommended for advertisement yet (blocked by bootstrap secret & dynamic D1 binding UX).**
-
-Burrow must **not** advertise a one-click Deploy to Cloudflare button until the application supports safe in-browser first-boot setup without pre-configured secrets and static/template D1 provisioning. Today, `pnpm run setup -r` remains the reliable, idempotent, and fully verified Cloudflare deployment method.
+This document describes Burrow's support for Cloudflare's native one-click **Deploy to Cloudflare** button (`https://deploy.workers.cloudflare.com/?url=https://github.com/Open-Source-Solution-Cafe/Burrow`) alongside Burrow's CLI installer (`pnpm run setup -r`).
 
 ---
 
-## Technical Evaluation
+## Summary Status
 
-| Requirement | Current State in Burrow | Deploy Button Behavior / Gap |
-| :--- | :--- | :--- |
-| **Worker + Static Assets** | Defined cleanly in `wrangler.jsonc` (`main: src/worker/index.ts`, `assets.directory: ./dist/web`, `nodejs_compat`). | **Compatible.** Standard Vite build + Wrangler asset upload works cleanly in Cloudflare Workers Builds. |
-| **Cloudflare D1 Binding** | `wrangler.jsonc` intentionally leaves `database_id` unset so contributors never commit personal UUIDs; `scripts/lib.mjs` discovers/creates `burrow` and writes git-ignored `wrangler.local.jsonc`. | **Gap.** Deploy to Cloudflare provisioning flows expect either explicit template provisioning or an automated binding flow without manual `wrangler.local.jsonc` generation. |
-| **D1 Migrations** | Migrations live in `migrations/*.sql` and are applied by `wrangler d1 migrations apply burrow --remote` inside `setup.mjs` and `deploy.mjs`. | **Requires build/deploy hook.** Workers Builds build commands must explicitly chain D1 creation/migration or execute migrations on deploy; failures during unattended builds lack Burrow's recovery prompts and Time Travel bookmarks. |
-| **R2 Bucket (`burrow-files`)** | Declared in `wrangler.jsonc` (`r2_buckets[0]`). Requires R2 activation on the target Cloudflare account. | **Partial gap.** Fails cleanly with an actionable error in `setup.mjs` if R2 is not activated; button flows give less clear guidance when R2 dashboard activation is missing on free accounts. |
-| **`BETTER_AUTH_SECRET`** | Required 32+ byte secret for session signing (`setup.mjs` generates cryptographically random bytes via `crypto.randomBytes(32)`). | **UX / Security risk.** Asking users to invent or paste a 32-byte random secret manually inside a generic Cloudflare form risks weak user-chosen secrets. |
-| **`BETTER_AUTH_URL`** | Required to match the deployed Worker URL (`https://<worker>.<subdomain>.workers.dev` or custom domain) for auth origin validation. | **Chicken-and-egg problem.** During initial button setup, users often do not yet know their exact assigned `workers.dev` subdomain before the first deploy finishes. |
-| **`BOOTSTRAP_TOKEN`** | Required during first signup so unauthenticated visitors on a newly deployed public URL cannot hijack the Owner account before the deployer arrives. | **Gap.** Without `setup.mjs` generating and printing a one-time `BOOTSTRAP_TOKEN`, the deployer either has to supply one upfront via Cloudflare secrets or risk leaving registration unconfigured. |
-| **Cloudflare Free Tier** | Worker + D1 + R2 free tiers cover typical team usage with zero external services required. | **Compatible.** Once R2 is activated in the Cloudflare Dashboard, all runtime components fit free-tier limits. |
+**Status: Supported & Active.**
+
+Burrow's Worker entrypoint (`src/worker/index.ts` → `ensureWorkerRuntimeEnv` in `src/worker/bootstrap.ts`) automatically initializes a freshly provisioned Cloudflare Worker + D1 deployment on first request with **zero manual environment variable inputs** required during the Cloudflare Deploy wizard.
 
 ---
 
-## Recommended Next Steps Before Enabling the Button
+## How One-Click Deployment Works
 
-Before adding a **Deploy to Cloudflare** badge to `README.md`, implement these targeted prerequisites:
+| Requirement | Implementation in Burrow |
+| :--- | :--- |
+| **Worker + Static Assets** | Defined in `wrangler.jsonc` (`main: src/worker/index.ts`, `assets.directory: ./dist/web`, `nodejs_compat`). Cloudflare Workers Builds installs dependencies, builds the SPA (`pnpm run build`), and deploys the Worker + assets. |
+| **Zero-Prompt `.env.example`** | All environment variables in `.env.example` are commented out by default so Cloudflare's Deploy to Workers wizard does not prompt for localhost defaults, Docker settings, or static secrets. |
+| **Cloudflare D1 Binding & First-Boot Migrations** | `wrangler.jsonc` declares the `DB` binding (`database_name: "burrow"`). On first request (`ensureWorkerRuntimeEnv`), Burrow checks `sqlite_master` and `d1_migrations`, atomically applies any pending migrations from `src/worker/d1-migrations.ts` (byte-for-byte synced with `migrations/*.sql`), and caches readiness per `DB` binding instance. |
+| **R2 Bucket (`burrow-files`)** | Declared in `wrangler.jsonc` (`r2_buckets[0]`). Requires R2 Object Storage to be enabled once on the target Cloudflare account (free tier available). |
+| **`BETTER_AUTH_SECRET`** | When `BETTER_AUTH_SECRET` is unset or shorter than 32 characters, `ensureWorkerRuntimeEnv` generates a 64-hex CSPRNG secret (`crypto.getRandomValues`) and persists it in D1 (`_worker_runtime_config`) using `INSERT OR IGNORE` so all isolates share one stable secret. Operators can still override it explicitly via Worker Secrets. |
+| **`BETTER_AUTH_URL`** | When `BETTER_AUTH_URL` is omitted (or left on a `localhost`/`127.0.0.1` placeholder while serving HTTPS traffic), `deriveWorkerAuthUrl` automatically resolves the canonical origin from validated HTTPS requests (`https://<worker>.<subdomain>.workers.dev`). |
+| **First-User Owner Claim (`BOOTSTRAP_TOKEN` Optional)** | When `BOOTSTRAP_TOKEN` is omitted (`GET /api/auth/config` returns `bootstrapTokenRequired: false`), the first user who registers at `/login` atomically claims Owner (`bootstrap_state`) and `/api/auth/sign-up/email` immediately locks to invite-only (`403 invite_required`) as soon as the first workspace exists. Operators who want an explicit pre-setup passphrase can still configure `BOOTSTRAP_TOKEN` (≥ 16 chars) in Worker Secrets or via Docker `pnpm run docker:init`. |
 
-1. **Dynamic Origin Fallback for `BETTER_AUTH_URL`**: When `BETTER_AUTH_URL` is omitted in production Workers behind Cloudflare HTTPS, safely derive the canonical origin from validated `request.url` or explicit trusted configuration so a first deploy boots on its `workers.dev` URL without pre-entering the URL.
-2. **Managed Worker Secret Fallback / Ephemeral Setup Guard**: Document and support deterministic Worker secret generation or a dedicated Cloudflare Workers Builds deploy hook (`pnpm run build && npx wrangler d1 migrations apply ...`) paired with clear instructions for `BETTER_AUTH_SECRET` and `BOOTSTRAP_TOKEN`.
-3. **End-to-End Fresh-Account Validation**: Test the full Cloudflare Dashboard Deploy Button clone -> build -> migrate -> secret entry -> Owner bootstrap flow end-to-end on a clean Cloudflare account before advertising the badge publicly.
+---
 
-Until those three items are completed, continue recommending **`pnpm run setup -r`** as the primary one-command Cloudflare deployment flow.
+## CLI Alternative (`pnpm run setup -r`)
+
+For operators who want automated Time Travel bookmarks, interactive domain binding, and CLI-generated secrets printed once at install time, `pnpm run setup -r` remains fully supported.

@@ -19,6 +19,7 @@ interface OAuthProviderConfig {
 
 interface AuthConfig {
   signupMode: 'bootstrap-or-invite' | 'open';
+  bootstrapTokenRequired?: boolean;
   emailPasswordEnabled: boolean;
   magicLinkEnabled: boolean;
   oauthProviders: OAuthProviderConfig[];
@@ -85,6 +86,7 @@ export function Login() {
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
   const [authConfig, setAuthConfig] = useState<AuthConfig>({
     signupMode: 'bootstrap-or-invite',
+    bootstrapTokenRequired: true,
     emailPasswordEnabled: true,
     magicLinkEnabled: false,
     oauthProviders: [],
@@ -101,6 +103,7 @@ export function Login() {
         if (data) {
           setAuthConfig({
             signupMode: data.signupMode ?? 'bootstrap-or-invite',
+            bootstrapTokenRequired: data.bootstrapTokenRequired ?? true,
             emailPasswordEnabled: data.emailPasswordEnabled ?? true,
             magicLinkEnabled: Boolean(data.magicLinkEnabled),
             oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
@@ -145,7 +148,11 @@ export function Login() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const bootstrapSignup = isSignUp && Boolean(bootstrapToken.trim());
+    const bootstrapSignup =
+      isSignUp &&
+      !inviteToken.trim() &&
+      (Boolean(bootstrapToken.trim()) ||
+        (authConfig.signupMode !== 'open' && authConfig.bootstrapTokenRequired === false));
 
     try {
       const endpoint = isSignUp ? '/api/auth/sign-up/email' : '/api/auth/sign-in/email';
@@ -153,7 +160,11 @@ export function Login() {
       const payload: Record<string, string> = { email, password };
       if (isSignUp) {
         payload.name = name;
-        if (bootstrapToken.trim() && authConfig.signupMode !== 'open') {
+        if (
+          bootstrapToken.trim() &&
+          authConfig.signupMode !== 'open' &&
+          authConfig.bootstrapTokenRequired !== false
+        ) {
           payload.bootstrapToken = bootstrapToken.trim();
         }
         if (inviteToken.trim()) payload.inviteToken = inviteToken.trim();
@@ -278,7 +289,9 @@ export function Login() {
       const res = await fetch('/api/auth/bootstrap/recover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bootstrapToken: bootstrapToken.trim() }),
+        body: JSON.stringify(
+          bootstrapToken.trim() ? { bootstrapToken: bootstrapToken.trim() } : {},
+        ),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
@@ -403,23 +416,27 @@ export function Login() {
               </Button>
             )}
             <form onSubmit={handleRecover} className="space-y-4">
-              <label
-                className="block text-xs font-medium text-[var(--text)]"
-                htmlFor="recover-bootstrap-token"
-              >
-                {t('login.bootstrapToken')}
-              </label>
-              <Input
-                id="recover-bootstrap-token"
-                type="password"
-                required
-                value={bootstrapToken}
-                onChange={(e) => setBootstrapToken(e.target.value)}
-                autoComplete="off"
-                autoCapitalize="none"
-                spellCheck="false"
-                className="w-full px-3 py-2 text-base sm:text-sm font-mono"
-              />
+              {authConfig.bootstrapTokenRequired !== false && (
+                <>
+                  <label
+                    className="block text-xs font-medium text-[var(--text)]"
+                    htmlFor="recover-bootstrap-token"
+                  >
+                    {t('login.bootstrapToken')}
+                  </label>
+                  <Input
+                    id="recover-bootstrap-token"
+                    type="password"
+                    required
+                    value={bootstrapToken}
+                    onChange={(e) => setBootstrapToken(e.target.value)}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
+                    className="w-full px-3 py-2 text-base sm:text-sm font-mono"
+                  />
+                </>
+              )}
               <Button
                 type="submit"
                 variant="primary"
@@ -565,23 +582,25 @@ export function Login() {
 
                 {isSignUp && (
                   <>
-                    {authConfig.signupMode !== 'open' && !inviteToken.trim() && (
-                      <div>
-                        <label className="block text-xs font-medium text-[var(--text)] mb-1">
-                          {t('login.bootstrapTokenLabel')}
-                        </label>
-                        <Input
-                          type="text"
-                          value={bootstrapToken}
-                          onChange={(e) => setBootstrapToken(e.target.value)}
-                          placeholder={t('login.bootstrapTokenPlaceholder')}
-                          autoComplete="off"
-                          autoCapitalize="none"
-                          spellCheck="false"
-                          className="w-full px-3 py-2 text-base sm:text-sm font-mono"
-                        />
-                      </div>
-                    )}
+                    {authConfig.signupMode !== 'open' &&
+                      authConfig.bootstrapTokenRequired !== false &&
+                      !inviteToken.trim() && (
+                        <div>
+                          <label className="block text-xs font-medium text-[var(--text)] mb-1">
+                            {t('login.bootstrapTokenLabel')}
+                          </label>
+                          <Input
+                            type="text"
+                            value={bootstrapToken}
+                            onChange={(e) => setBootstrapToken(e.target.value)}
+                            placeholder={t('login.bootstrapTokenPlaceholder')}
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            spellCheck="false"
+                            className="w-full px-3 py-2 text-base sm:text-sm font-mono"
+                          />
+                        </div>
+                      )}
 
                     <div>
                       <div className="flex items-center justify-between mb-1">

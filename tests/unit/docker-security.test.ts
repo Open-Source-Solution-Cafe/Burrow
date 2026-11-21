@@ -17,6 +17,7 @@ describe('Docker deployment security defaults and env generator', () => {
     const envExample = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
     expect(envExample).not.toMatch(/^ALLOW_LOCAL_DOCKER_EVAL=true/m);
     expect(envExample).not.toMatch(/^BIND_HOST=0\.0\.0\.0/m);
+    expect(envExample).not.toMatch(/^[A-Z0-9_]+=/m);
   });
 
   it('rejects missing or localhost URLs in production mode and requires explicit --local-eval opt-in', () => {

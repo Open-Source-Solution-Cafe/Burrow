@@ -2,9 +2,9 @@ export interface Env {
   Bindings: {
     DB: D1Database;
     FILES: R2Bucket;
-    BETTER_AUTH_SECRET: string;
-    BETTER_AUTH_URL: string;
-    BOOTSTRAP_TOKEN: string;
+    BETTER_AUTH_SECRET?: string;
+    BETTER_AUTH_URL?: string;
+    BOOTSTRAP_TOKEN?: string;
     LOCAL_STORAGE_PATH?: string;
     S3_ENDPOINT?: string;
     S3_REGION?: string;

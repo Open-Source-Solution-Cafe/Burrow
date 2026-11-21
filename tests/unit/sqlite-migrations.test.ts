@@ -11,6 +11,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { applyPostgresMigrations } from '../../src/core/adapters/db/postgres/index';
 import { openSqliteDatabase } from '../../src/server/sqlite';
 import { splitSqlStatements } from '../../src/server/sql-statements';
+import { D1_MIGRATIONS } from '../../src/worker/d1-migrations';
+import {
+  deriveWorkerAuthUrl,
+  ensureWorkerRuntimeEnv,
+} from '../../src/worker/bootstrap';
 
 const exec = promisify(execFile);
 const docker = async (...args: string[]) =>
@@ -448,4 +453,131 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
     },
     120_000,
   );
+});
+
+describe('Worker first-boot D1 auto-initialization (Deploy to Cloudflare)', () => {
+  function createSqliteBackedD1(sqlite: InstanceType<typeof Database>): D1Database {
+    const createStatement = (sqlText: string, params: unknown[] = []) => ({
+      bind: (...nextParams: unknown[]) => createStatement(sqlText, nextParams),
+      first: async <T = unknown>() =>
+        (sqlite.prepare(sqlText).get(...params) as T | undefined) ?? null,
+      all: async <T = unknown>() => ({
+        results: sqlite.prepare(sqlText).all(...params) as T[],
+        success: true,
+        meta: {},
+      }),
+      run: async () => {
+        const info = sqlite.prepare(sqlText).run(...params);
+        return { success: true, meta: { changes: info.changes, last_row_id: info.lastInsertRowid } };
+      },
+    });
+    return {
+      prepare: (sqlText: string) => createStatement(sqlText),
+      batch: async (stmts: Array<{ run: () => Promise<any> }>) => {
+        const results = [];
+        const tx = sqlite.transaction(() => {});
+        void tx;
+        sqlite.exec('BEGIN');
+        try {
+          for (const stmt of stmts) {
+            results.push(await stmt.run());
+          }
+          sqlite.exec('COMMIT');
+        } catch (err) {
+          sqlite.exec('ROLLBACK');
+          throw err;
+        }
+        return results;
+      },
+    } as unknown as D1Database;
+  }
+
+  it('keeps D1_MIGRATIONS byte-for-byte synced with migrations/*.sql', () => {
+    const diskFiles = fs
+      .readdirSync(path.join(root, 'migrations'))
+      .filter((name) => name.endsWith('.sql'))
+      .sort();
+    expect(D1_MIGRATIONS.map((m) => m.name)).toEqual(diskFiles);
+    for (const entry of D1_MIGRATIONS) {
+      const diskContent = fs.readFileSync(path.join(root, 'migrations', entry.name), 'utf8');
+      expect(entry.sql).toBe(diskContent);
+    }
+  });
+
+  it('derives BETTER_AUTH_URL safely for HTTPS and localhost when omitted', () => {
+    expect(
+      deriveWorkerAuthUrl('https://notes.example.com', 'https://other.workers.dev/api/health'),
+    ).toBe('https://notes.example.com');
+    expect(deriveWorkerAuthUrl(undefined, 'https://burrow.myacct.workers.dev/api/health')).toBe(
+      'https://burrow.myacct.workers.dev',
+    );
+    expect(
+      deriveWorkerAuthUrl('http://localhost:3005', 'https://burrow.example.workers.dev/api/auth/config'),
+    ).toBe('https://burrow.example.workers.dev');
+    expect(deriveWorkerAuthUrl('', 'http://localhost:8787/api/auth/config')).toBe(
+      'http://localhost:8787',
+    );
+    expect(deriveWorkerAuthUrl('', 'http://evil.example/api/auth/config')).toBe('');
+  });
+
+  it('auto-migrates a fresh D1 database, persists a CSPRNG secret, and holds all invariants', async () => {
+    const { directory, filename } = temporaryDatabase();
+    void directory;
+    const sqlite = new Database(filename);
+    try {
+      sqlite.pragma('foreign_keys = ON');
+      const d1 = createSqliteBackedD1(sqlite);
+      const env1 = await ensureWorkerRuntimeEnv(
+        {
+          DB: d1,
+          FILES: {} as R2Bucket,
+          BETTER_AUTH_SECRET: '',
+          BETTER_AUTH_URL: '',
+          BOOTSTRAP_TOKEN: 'boot-token-123456',
+        },
+        new Request('https://fresh-burrow.example.workers.dev/api/health'),
+      );
+
+      expect(env1.BETTER_AUTH_URL).toBe('https://fresh-burrow.example.workers.dev');
+      expect(env1.BETTER_AUTH_SECRET).toMatch(/^[0-9a-f]{64}$/);
+      expect(env1.BOOTSTRAP_TOKEN).toBe('boot-token-123456');
+
+      const appliedRows = sqlite
+        .prepare('SELECT name FROM d1_migrations ORDER BY name')
+        .all() as Array<{ name: string }>;
+      expect(appliedRows.map((r) => r.name)).toEqual(D1_MIGRATIONS.map((m) => m.name));
+
+      const wsCols = sqlite
+        .prepare("PRAGMA table_info('workspaces')")
+        .all() as Array<{ name: string }>;
+      expect(wsCols.some((c) => c.name === 'feature_flags')).toBe(true);
+
+      const psCols = sqlite
+        .prepare("PRAGMA table_info('public_shares')")
+        .all() as Array<{ name: string }>;
+      expect(psCols.some((c) => c.name === 'enabled')).toBe(true);
+
+      // Re-running on a fresh DB handle (simulating cold isolate restart) reuses the exact persisted secret
+      const d1ColdRestart = createSqliteBackedD1(sqlite);
+      const env2 = await ensureWorkerRuntimeEnv(
+        {
+          DB: d1ColdRestart,
+          FILES: {} as R2Bucket,
+          BETTER_AUTH_SECRET: '',
+          BETTER_AUTH_URL: '',
+          BOOTSTRAP_TOKEN: '',
+        },
+        new Request('https://fresh-burrow.example.workers.dev/api/auth/config'),
+      );
+      expect(env2.BETTER_AUTH_SECRET).toBe(env1.BETTER_AUTH_SECRET);
+
+      const invariantSql = fs.readFileSync(path.join(root, 'scripts/check-invariants.sql'), 'utf8');
+      const offenders = splitSqlStatements(invariantSql).flatMap((stmt) =>
+        sqlite.prepare(stmt).all(),
+      );
+      expect(offenders).toEqual([]);
+    } finally {
+      sqlite.close();
+    }
+  });
 });

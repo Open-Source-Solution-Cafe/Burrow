@@ -11,6 +11,8 @@
 [![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers_D1_R2-F38020.svg)](https://workers.cloudflare.com/)
 [![Docker and PostgreSQL](https://img.shields.io/badge/Docker-PostgreSQL_17-2496ED.svg)](./docker-compose.yml)
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Open-Source-Solution-Cafe/Burrow)
+
 ---
 
 ![Burrow Kanban board in Modern Dark theme showing sprint columns, card priorities, subtasks, and resizable sidebar](docs/assets/screenshots/kanban-board.png)
@@ -69,7 +71,16 @@ Explore a live instance hosted on Cloudflare Workers, D1, and R2 (reset automati
 - **Node.js `^20.19.0` or `>=22.12.0`** (required by Vite 8) and **pnpm 10+** (or **Docker** for container self-hosting)
 - A **Cloudflare account** (for edge deployment with [R2 Object Storage activated](docs/DEPLOYMENT_AND_UPGRADES.md#prerequisites))
 
-### Deploy to Cloudflare in 4 Commands
+### Option 1: One-Click Deploy to Cloudflare
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Open-Source-Solution-Cafe/Burrow)
+
+1. Make sure **R2 Object Storage** is enabled in your Cloudflare Dashboard (free tier supported).
+2. Click **Deploy to Cloudflare** above — no manual environment variables are required. Cloudflare will clone the repo, provision the `burrow` D1 database and `burrow-files` R2 bucket, and build the Worker + SPA.
+3. On first HTTP request, Burrow automatically initializes the D1 schema, derives `BETTER_AUTH_URL` from your deployed HTTPS origin, and generates + persists a CSPRNG `BETTER_AUTH_SECRET` in D1.
+4. Open `/login` and create your first account to automatically claim workspace Owner access (further sign-ups are immediately locked to invite-only). *(Optional: set `BOOTSTRAP_TOKEN` ≥ 16 chars in Worker Variables/Secrets before deploying if you want an extra passphrase gate on initial registration.)*
+
+### Option 2: Deploy to Cloudflare via CLI (4 Commands)
 
 ```bash
 git clone https://github.com/Open-Source-Solution-Cafe/Burrow.git
@@ -97,12 +108,11 @@ Runs the API + React app locally using SQLite (`./data/burrow.db`) and local fil
 
 Best for zero-maintenance hosting inside Cloudflare's free-tier limits.
 
-- **First-time install or safe retry**: `pnpm run setup -r`
+- **One-click Cloudflare Deploy**: Click **Deploy to Cloudflare** above for zero-input deployment (auto-provisions D1 + R2, initializes schema & session secret on first boot, and lets the first `/login` registration claim Owner before locking sign-ups to invite-only). See [Native Deploy Button Guide](docs/CLOUDFLARE_DEPLOY_BUTTON.md).
+- **First-time CLI install or safe retry**: `pnpm run setup -r`
 - **Custom domain** (on Cloudflare DNS): `pnpm run setup -r -- --domain notes.example.com`
 - **Dry-run preview** (prints all 10 stages cleanly): `pnpm run setup -r -- --dry-run`
 - **Safe upgrades**: `git pull && pnpm install && pnpm run deploy` (records a D1 Time Travel bookmark before running migrations, preserves all Worker secrets, and verifies `/api/health`, `/api/auth/config`, `/api/system/version`, and `/` post-deploy).
-
-> Curious about Cloudflare's native one-click deploy button? Read our engineering assessment in [Native Deploy Button Feasibility](docs/CLOUDFLARE_DEPLOY_BUTTON.md).
 
 ### Option B: Docker & PostgreSQL
 
