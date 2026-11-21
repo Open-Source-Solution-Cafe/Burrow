@@ -18,12 +18,33 @@ describe('GitHub Actions workflows security and coverage', () => {
     expect(ci).toContain('BURROW_TEST_POSTGRES_URL');
     expect(ci).toContain('tsc -b');
     expect(ci).toContain('eslint --max-warnings=0');
+    expect(ci).toContain('check-sync.mjs');
     expect(ci).toContain('check-decoupling.mjs');
     expect(ci).toContain('check-licenses.mjs');
     expect(ci).toContain('vitest run');
     expect(ci).toContain('contents: read');
     expect(ci).not.toContain('CLOUDFLARE_API_TOKEN');
     expect(ci).not.toContain('DEMO_CLOUDFLARE');
+  });
+
+  it('keeps local pre-push git hook aligned with GitHub CI parity checks', () => {
+    const hook = fs.readFileSync(path.join(root, '.githooks/pre-push'), 'utf8');
+    expect(hook).not.toContain('\r');
+    expect(hook).toContain('scripts/pre-push.mjs');
+
+    const prePush = fs.readFileSync(path.join(root, 'scripts/pre-push.mjs'), 'utf8');
+    for (const required of [
+      'check-sync.mjs',
+      "'build'",
+      'check-basalt.mjs',
+      'check-decoupling.mjs',
+      'check-licenses.mjs',
+      'tsc',
+      'eslint',
+      'vitest',
+    ]) {
+      expect(prePush).toContain(required);
+    }
   });
 
   it('keeps scheduled demo reset explicitly confirmed and guarded by BURROW_ALLOW_DEMO_RESET', () => {

@@ -44,8 +44,9 @@ jobs:
       - name: Build production bundles
         run: pnpm run build
 
-      - name: Verify architecture, decoupling, and dependency licenses
+      - name: Verify architecture, decoupling, sync, and dependency licenses
         run: |
+          node scripts/check-sync.mjs
           node scripts/check-basalt.mjs
           node scripts/check-decoupling.mjs
           node scripts/check-licenses.mjs
