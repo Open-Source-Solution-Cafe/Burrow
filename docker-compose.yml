@@ -16,7 +16,7 @@ services:
       - ALLOW_LOCAL_DOCKER_EVAL=${ALLOW_LOCAL_DOCKER_EVAL:-false}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:?Run pnpm run docker:init or set BETTER_AUTH_URL in .env}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Run pnpm run docker:init or set BETTER_AUTH_SECRET in .env}
-      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:?Run pnpm run docker:init or set BOOTSTRAP_TOKEN in .env}
+      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:-}
       # Persistent local storage for project files and attachments
       - LOCAL_STORAGE_PATH=/app/data/uploads
       # Automatically run migrations on container start

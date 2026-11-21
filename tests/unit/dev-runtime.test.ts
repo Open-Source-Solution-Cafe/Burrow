@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   lib: {
     root: '/repo/burrow',
     bin: vi.fn((name: string) => `/bin/${name}`),
-    getBootstrapToken: vi.fn(() => 'test-bootstrap'),
     loadEnv: vi.fn(),
     run: vi.fn(),
   },
@@ -81,7 +80,7 @@ describe('Shared development runtime', () => {
           LOCAL_STORAGE_PATH: path.resolve(mocks.lib.root, 'data/uploads'),
           BETTER_AUTH_SECRET: 'dev-secret-change-me-32-bytes-minimum!!',
           BETTER_AUTH_URL: 'http://localhost:3005',
-          BOOTSTRAP_TOKEN: 'test-bootstrap',
+          BOOTSTRAP_TOKEN: '',
         }),
       },
     );
@@ -143,12 +142,24 @@ describe('Shared development runtime', () => {
       '--var',
       'BETTER_AUTH_URL:https://dev.example.test',
       '--var',
-      'BOOTSTRAP_TOKEN:test-bootstrap',
-      '--var',
       'RESEND_API_KEY:test-email-key',
       '--var',
       'EMAIL_FROM:Test <test@example.test>',
     ]);
+
+    vi.clearAllMocks();
+    mocks.spawn.mockImplementation(() => {
+      const child = { pid: 200, on: vi.fn() };
+      children.push(child);
+      return child;
+    });
+    mocks.process.env = {
+      BETTER_AUTH_SECRET: 'configured-secret',
+      BETTER_AUTH_URL: 'https://dev.example.test',
+      BOOTSTRAP_TOKEN: 'explicit-bootstrap-token-16',
+    };
+    startDev('worker');
+    expect(mocks.spawn.mock.calls[0]?.[1]).toContain('BOOTSTRAP_TOKEN:explicit-bootstrap-token-16');
   });
 
   it('does not overwrite an existing frontend bundle or pass absent optional bindings', () => {

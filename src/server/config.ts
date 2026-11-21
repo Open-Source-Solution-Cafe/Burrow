@@ -48,7 +48,7 @@ const configSchema = z.object({
   LOCAL_STORAGE_PATH: z.string().min(1).default('./data/uploads'),
   BETTER_AUTH_SECRET: z.string().min(1).default(() => generateAuthSecret()),
   BETTER_AUTH_URL: z.string().min(1).default('http://localhost:3005'),
-  BOOTSTRAP_TOKEN: z.string().default(() => generateBootstrapToken()),
+  BOOTSTRAP_TOKEN: z.string().default(''),
   ALLOW_LOCAL_DOCKER_EVAL: z.enum(['true', 'false']).default('false'),
   DATABASE_URL: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
@@ -140,9 +140,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
         'BETTER_AUTH_SECRET must be set to a stable, securely generated string of at least 32 characters in production and persistent Docker deployments',
       );
     }
-    if (!rawBootstrap || KNOWN_BOOTSTRAP_PLACEHOLDERS.has(rawBootstrap) || rawBootstrap.length < 16) {
+    if (
+      rawBootstrap &&
+      (KNOWN_BOOTSTRAP_PLACEHOLDERS.has(rawBootstrap) || rawBootstrap.length < 16)
+    ) {
       throw new Error(
-        'BOOTSTRAP_TOKEN must be set to a stable, securely generated string of at least 16 characters in production and persistent Docker deployments',
+        'BOOTSTRAP_TOKEN must be set to a unique, securely generated string of at least 16 characters when configured in production',
       );
     }
     if (env.DATABASE_URL?.includes(':burrowpassword@')) {
@@ -171,9 +174,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     authSecret = generateAuthSecret();
   }
 
-  let bootstrapToken = rawBootstrap;
-  if (!bootstrapToken || (!isProd && KNOWN_BOOTSTRAP_PLACEHOLDERS.has(bootstrapToken))) {
-    bootstrapToken = generateBootstrapToken();
+  let bootstrapToken = rawBootstrap ?? '';
+  if (
+    !isProd &&
+    (!bootstrapToken ||
+      KNOWN_BOOTSTRAP_PLACEHOLDERS.has(bootstrapToken) ||
+      bootstrapToken.length < 16)
+  ) {
+    bootstrapToken = '';
   }
 
   return configSchema.parse({

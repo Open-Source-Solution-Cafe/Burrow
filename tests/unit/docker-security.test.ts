@@ -54,7 +54,8 @@ describe('Docker deployment security defaults and env generator', () => {
     expect(prod.content).toContain('ALLOW_LOCAL_DOCKER_EVAL=false');
     expect(prod.content).toContain('BIND_HOST=127.0.0.1');
     expect(prod.content).toContain('BETTER_AUTH_URL=https://notes.example.com');
-    expect(prod.bootstrapToken.length).toBeGreaterThanOrEqual(32);
+    expect(prod.bootstrapToken).toBe('');
+    expect(prod.content).toContain('# BOOTSTRAP_TOKEN=');
 
     const evalEnv = buildDockerEnvContent({ localEval: true });
     expect(evalEnv.localEval).toBe(true);
@@ -62,6 +63,19 @@ describe('Docker deployment security defaults and env generator', () => {
     expect(evalEnv.content).toContain('ALLOW_LOCAL_DOCKER_EVAL=true');
     expect(evalEnv.content).toContain('BIND_HOST=127.0.0.1');
     expect(evalEnv.content).toContain('BETTER_AUTH_URL=http://localhost:3005');
-    expect(evalEnv.bootstrapToken).not.toBe(prod.bootstrapToken);
+    expect(evalEnv.bootstrapToken).toBe('');
+
+    const gatedProd = buildDockerEnvContent({
+      localEval: false,
+      url: 'https://notes.example.com',
+      withBootstrapToken: true,
+    });
+    const gatedEval = buildDockerEnvContent({
+      localEval: true,
+      withBootstrapToken: true,
+    });
+    expect(gatedProd.bootstrapToken.length).toBeGreaterThanOrEqual(32);
+    expect(gatedProd.content).toContain(`BOOTSTRAP_TOKEN=${gatedProd.bootstrapToken}`);
+    expect(gatedEval.bootstrapToken).not.toBe(gatedProd.bootstrapToken);
   });
 });

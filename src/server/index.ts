@@ -25,9 +25,6 @@ if (process.argv.includes('--migrate')) {
   if (!process.env.BETTER_AUTH_URL || process.env.BETTER_AUTH_URL.includes('localhost')) {
     process.env.BETTER_AUTH_URL = 'http://burrow.migration.internal';
   }
-  if (!process.env.BOOTSTRAP_TOKEN) {
-    process.env.BOOTSTRAP_TOKEN = 'migration-bootstrap-token';
-  }
 }
 
 const config = loadConfig();
@@ -133,9 +130,15 @@ const server = serve(
         '  Mode:               Local evaluation (loopback-only) — disable ALLOW_LOCAL_DOCKER_EVAL for public production',
       );
     }
-    console.log(
-      `  BOOTSTRAP_TOKEN:    ${showBootstrapToken ? config.BOOTSTRAP_TOKEN : '[REDACTED in production — read from .env]'}`,
-    );
+    if (config.BOOTSTRAP_TOKEN) {
+      console.log(
+        `  BOOTSTRAP_TOKEN:    ${showBootstrapToken ? config.BOOTSTRAP_TOKEN : '[REDACTED in production — read from .env]'}`,
+      );
+    } else {
+      console.log(
+        '  Initial Owner:      First account registered at /login claims Owner (then locks to invite-only)',
+      );
+    }
     console.log(
       `  Email Delivery:     ${config.RESEND_API_KEY ? `Resend (${config.EMAIL_FROM || 'default'})` : 'Console log fallback'}`,
     );

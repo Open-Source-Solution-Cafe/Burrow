@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { resolveLocalPaths } from '../src/server/database-target.ts';
-import { bin, getBootstrapToken, loadEnv, root, run } from './lib.mjs';
+import { bin, loadEnv, root, run } from './lib.mjs';
 
 /** Start the shared development lifecycle with its Node or Worker backend. */
 export function startDev(runtime) {
@@ -13,7 +13,7 @@ export function startDev(runtime) {
   const auth = {
     BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET || 'dev-secret-change-me-32-bytes-minimum!!',
     BETTER_AUTH_URL: env.BETTER_AUTH_URL || 'http://localhost:3005',
-    BOOTSTRAP_TOKEN: getBootstrapToken(env),
+    BOOTSTRAP_TOKEN: env.BOOTSTRAP_TOKEN?.trim() || '',
   };
   const { sqlitePath, storagePath } = resolveLocalPaths(root, env);
 
@@ -98,7 +98,9 @@ export function startDev(runtime) {
             `  Uploads:            ${storagePath}`,
           ]
         : ['  Miniflare State:    ./data']),
-      `  BOOTSTRAP_TOKEN:    ${auth.BOOTSTRAP_TOKEN}`,
+      auth.BOOTSTRAP_TOKEN
+        ? `  BOOTSTRAP_TOKEN:    ${auth.BOOTSTRAP_TOKEN}`
+        : '  Initial Owner:      First account registered at /login claims Owner',
       `  Email Delivery:     ${env.RESEND_API_KEY ? `Resend (${env.EMAIL_FROM || 'default'})` : 'Console log fallback'}`,
       '======================================================',
       'Press Ctrl+C or "q" at any time to stop\n',

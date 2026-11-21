@@ -233,7 +233,7 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
   });
 
   describe('buildSecretPlan', () => {
-    it('generates all required secrets on fresh install', () => {
+    it('generates required session secret and auth URL on fresh install without forcing BOOTSTRAP_TOKEN unless configured', () => {
       const plan = buildSecretPlan({
         existingSecrets: [],
         env: {},
@@ -241,10 +241,18 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       });
 
       expect(plan.toUpload.BETTER_AUTH_SECRET).toBeTruthy();
-      expect(plan.toUpload.BOOTSTRAP_TOKEN).toBeTruthy();
+      expect(plan.toUpload.BOOTSTRAP_TOKEN).toBeUndefined();
       expect(plan.toUpload.BETTER_AUTH_URL).toBe('https://burrow.example.workers.dev');
-      expect(plan.generatedBootstrapToken).toBe(plan.toUpload.BOOTSTRAP_TOKEN);
+      expect(plan.generatedBootstrapToken).toBeNull();
       expect(plan.preserved).toEqual([]);
+
+      const explicitPlan = buildSecretPlan({
+        existingSecrets: [],
+        env: { BOOTSTRAP_TOKEN: 'explicit-bootstrap-token-1234' },
+        originForAuth: 'https://burrow.example.workers.dev',
+      });
+      expect(explicitPlan.toUpload.BOOTSTRAP_TOKEN).toBe('explicit-bootstrap-token-1234');
+      expect(explicitPlan.generatedBootstrapToken).toBe('explicit-bootstrap-token-1234');
     });
 
     it('preserves existing BETTER_AUTH_SECRET, BOOTSTRAP_TOKEN, and BETTER_AUTH_URL on upgrade/retry', () => {

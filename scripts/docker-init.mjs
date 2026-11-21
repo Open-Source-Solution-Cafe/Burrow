@@ -19,6 +19,7 @@ export function buildDockerEnvContent({
   url,
   port = 3005,
   bindHost = '127.0.0.1',
+  withBootstrapToken = false,
   existing = {},
 } = {}) {
   const normalizedPort = Number(port) || 3005;
@@ -62,7 +63,9 @@ export function buildDockerEnvContent({
   const bootstrapToken =
     existing.BOOTSTRAP_TOKEN && existing.BOOTSTRAP_TOKEN.length >= 16
       ? existing.BOOTSTRAP_TOKEN
-      : crypto.randomBytes(16).toString('hex');
+      : withBootstrapToken
+        ? crypto.randomBytes(16).toString('hex')
+        : '';
   const postgresPassword =
     existing.POSTGRES_PASSWORD && existing.POSTGRES_PASSWORD !== 'burrowpassword'
       ? existing.POSTGRES_PASSWORD
@@ -76,7 +79,7 @@ export function buildDockerEnvContent({
     `ALLOW_LOCAL_DOCKER_EVAL=${localEval ? 'true' : 'false'}`,
     `BETTER_AUTH_URL=${authUrl}`,
     `BETTER_AUTH_SECRET=${authSecret}`,
-    `BOOTSTRAP_TOKEN=${bootstrapToken}`,
+    bootstrapToken ? `BOOTSTRAP_TOKEN=${bootstrapToken}` : '# BOOTSTRAP_TOKEN=',
     `POSTGRES_USER=burrow`,
     `POSTGRES_PASSWORD=${postgresPassword}`,
     `POSTGRES_DB=burrow`,
@@ -95,6 +98,7 @@ export function buildDockerEnvContent({
 function parseArgs(argv) {
   let localEval = false;
   let force = false;
+  let withBootstrapToken = false;
   let url = '';
   let bindHost = '127.0.0.1';
   let port = 3005;
@@ -103,6 +107,7 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === '--local-eval') localEval = true;
     else if (arg === '--force') force = true;
+    else if (arg === '--with-bootstrap-token') withBootstrapToken = true;
     else if (arg === '--url' && argv[i + 1]) url = argv[++i];
     else if (arg.startsWith('--url=')) url = arg.slice(6);
     else if (arg === '--bind' && argv[i + 1]) bindHost = argv[++i];
@@ -112,15 +117,15 @@ function parseArgs(argv) {
     else if (arg === '--help' || arg === '-h') {
       console.log(
         'Usage:\n' +
-          '  node scripts/docker-init.mjs --local-eval\n' +
-          '  node scripts/docker-init.mjs --url https://notes.example.com [--bind 127.0.0.1] [--force]\n',
+          '  node scripts/docker-init.mjs --local-eval [--with-bootstrap-token]\n' +
+          '  node scripts/docker-init.mjs --url https://notes.example.com [--bind 127.0.0.1] [--with-bootstrap-token] [--force]\n',
       );
       process.exit(0);
     } else {
       throw new Error(`Unknown flag: ${arg}`);
     }
   }
-  return { localEval, force, url, bindHost, port };
+  return { localEval, force, withBootstrapToken, url, bindHost, port };
 }
 
 if (
@@ -140,8 +145,14 @@ if (
   console.log(`  Mode:            ${result.localEval ? 'Local evaluation (loopback only)' : 'Production'}`);
   console.log(`  BETTER_AUTH_URL: ${result.authUrl}`);
   console.log(`  Bind Address:    ${result.bindHost}:${opts.port}`);
-  console.log(`  BOOTSTRAP_TOKEN: ${result.bootstrapToken}`);
-  console.log('  Note: BOOTSTRAP_TOKEN is NOT printed in production container logs.');
+  if (result.bootstrapToken) {
+    console.log(`  BOOTSTRAP_TOKEN: ${result.bootstrapToken}`);
+    console.log('  Note: BOOTSTRAP_TOKEN is NOT printed in production container logs.');
+  } else {
+    console.log(
+      '  Initial Owner:   First account registered at /login claims Owner (pass --with-bootstrap-token to require a token)',
+    );
+  }
   console.log('  Next: docker compose up -d --build');
   console.log('======================================================\n');
 }

@@ -832,22 +832,25 @@ describe('Security Contract Suite', () => {
       ).toThrow(/BOOTSTRAP_TOKEN/);
     });
 
-    it('generates a unique random key when BOOTSTRAP_TOKEN is omitted or a default placeholder in development', () => {
+    it('defaults BOOTSTRAP_TOKEN to empty string (first-user Owner claim) when omitted or a placeholder in development, while preserving explicit valid tokens', () => {
       const config1 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: undefined });
-      const config2 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: undefined });
-      const config3 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'dev-bootstrap-token' });
-      const config4 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'test-bootstrap-token' });
+      const config2 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'dev-bootstrap-token' });
+      const config3 = loadConfig({ NODE_ENV: 'development', BOOTSTRAP_TOKEN: 'test-bootstrap-token' });
+      const configProd = loadConfig({
+        NODE_ENV: 'production',
+        BETTER_AUTH_URL: 'https://notes.example.com',
+        BETTER_AUTH_SECRET: 'a-sufficiently-long-and-secure-secret-32-chars!!',
+      });
+      const configCustom = loadConfig({
+        NODE_ENV: 'development',
+        BOOTSTRAP_TOKEN: 'custom-valid-bootstrap-token-16',
+      });
 
-      expect(config1.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
-      expect(config2.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
-      expect(config3.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
-      expect(config4.BOOTSTRAP_TOKEN.length).toBeGreaterThanOrEqual(16);
-      expect(config1.BOOTSTRAP_TOKEN).not.toBe('dev-bootstrap-token');
-      expect(config3.BOOTSTRAP_TOKEN).not.toBe('dev-bootstrap-token');
-      expect(config4.BOOTSTRAP_TOKEN).not.toBe('test-bootstrap-token');
-      // Each generated token should be unique
-      expect(config1.BOOTSTRAP_TOKEN).not.toBe(config2.BOOTSTRAP_TOKEN);
-      expect(config1.BOOTSTRAP_TOKEN).not.toBe(config3.BOOTSTRAP_TOKEN);
+      expect(config1.BOOTSTRAP_TOKEN).toBe('');
+      expect(config2.BOOTSTRAP_TOKEN).toBe('');
+      expect(config3.BOOTSTRAP_TOKEN).toBe('');
+      expect(configProd.BOOTSTRAP_TOKEN).toBe('');
+      expect(configCustom.BOOTSTRAP_TOKEN).toBe('custom-valid-bootstrap-token-16');
     });
 
     it('throws in production when BETTER_AUTH_URL is missing, invalid, or points to localhost', () => {

@@ -25,7 +25,7 @@ Burrow focuses on doing three things cleanly—**rich block notepads, multi-view
 
 - **Zero per-seat caps:** Invite your whole team (`owner`, `editor`, `viewer` roles) with unlimited seats, workspaces, and projects out of the box (unlike AppFlowy's 1-seat limit and AFFiNE's 10-seat cap on free self-hosted tiers).
 - **Uncapped Kanban, List & Calendar views:** Switch freely between drag-and-drop Kanban boards (with WIP limits), tabular List view, and drag-and-drop Calendar view in the core AGPL-3.0 release (unlike Docmost's paid tier for Kanban).
-- **Native email & password auth:** Boots ready with built-in email/password authentication via [Better Auth](https://www.better-auth.com/) and zero-trust `BOOTSTRAP_TOKEN` owner claiming—no external Keycloak, Authentik, or OIDC server required (unlike Outline). Optional Magic Link (`RESEND_API_KEY`) and Google/GitHub OAuth stay hidden unless configured.
+- **Native email & password auth:** Boots ready with built-in email/password authentication via [Better Auth](https://www.better-auth.com/), where the first registered account claims workspace Owner and locks public sign-ups to invite-only (with optional `BOOTSTRAP_TOKEN` gating)—no external Keycloak, Authentik, or OIDC server required (unlike Outline). Optional Magic Link (`RESEND_API_KEY`) and Google/GitHub OAuth stay hidden unless configured.
 - **Lightweight Cloudflare or Docker hosting:** Deploy serverless inside Cloudflare's free-tier limits (**Workers + D1 + R2**), run **Docker Compose + PostgreSQL 17**, or develop locally on **SQLite** with zero telemetry.
 
 > **Honest scope:** Burrow is a focused team workspace for notepads, Kanban/List/Calendar boards, and files—it does **not** include Notion-style relational databases or simultaneous CRDT real-time co-editing (notepads use lease-based edit locking so teammates take turns safely without conflicting overwrites).
@@ -89,7 +89,7 @@ pnpm install
 pnpm run setup -r
 ```
 
-The interactive 10-stage setup verifies your environment, authenticates Wrangler, provisions D1 and R2 if missing, applies SQL migrations safely, deploys the Worker + SPA, configures Worker secrets, verifies live health/auth endpoints, and displays your **Production URL** alongside a one-time **`BOOTSTRAP_TOKEN`** printed only on initial setup so you can register the first Owner account (`BETTER_AUTH_SECRET` is never printed to logs or stdout).
+The interactive 10-stage setup verifies your environment, authenticates Wrangler, provisions D1 and R2 if missing, applies SQL migrations safely, deploys the Worker + SPA, configures Worker secrets, verifies live health/auth endpoints, and displays your **Production URL** so you can register the first Owner account at `/login` (`BETTER_AUTH_SECRET` is never printed to logs or stdout; set `BOOTSTRAP_TOKEN` in `.env` beforehand or pass `--rotate-bootstrap-token` if you want an extra pre-setup passphrase gate).
 
 ### Try Locally in Development
 
@@ -125,7 +125,7 @@ pnpm run docker:init -- --local-eval
 docker compose up -d --build
 ```
 
-> `pnpm run docker:init -- --local-eval` generates unique stable `.env` secrets and displays your one-time `BOOTSTRAP_TOKEN` cleanly without printing secrets into production container logs.
+> `pnpm run docker:init -- --local-eval` generates unique stable `.env` secrets so the first user at `/login` claims workspace Owner before locking public sign-ups to invite-only (pass `--with-bootstrap-token` if you want a pre-setup passphrase gate).
 
 **Production Docker deployment (internet-accessible):**
 

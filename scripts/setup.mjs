@@ -21,10 +21,10 @@ import {
   bin,
   buildSecretPlan,
   collectAccounts,
-  getBootstrapToken,
   getDatabaseTarget,
   getWranglerConfigArgs,
   hasFlag,
+  KNOWN_BOOTSTRAP_PLACEHOLDERS,
   loadEnv,
   migrateDatabase,
   parseFirstJson,
@@ -78,7 +78,11 @@ async function main() {
   if (!isRemote) {
     step('Apply migrations to the selected local database');
     await migrateDatabase(target, { dryRun });
-    const localBootstrapToken = getBootstrapToken();
+    const rawBootstrap = process.env.BOOTSTRAP_TOKEN?.trim() || '';
+    const explicitBootstrap =
+      rawBootstrap.length >= 16 && !KNOWN_BOOTSTRAP_PLACEHOLDERS.has(rawBootstrap)
+        ? rawBootstrap
+        : '';
     const localUrl = process.env.BETTER_AUTH_URL || 'http://localhost:3005';
     console.log('\n======================================================');
     console.log('✅ Local setup complete!');
@@ -86,7 +90,11 @@ async function main() {
     console.log('  Local Backend API:  http://127.0.0.1:8787');
     console.log(`  BETTER_AUTH_URL:    ${localUrl}`);
     console.log('  BETTER_AUTH_SECRET: [configured]');
-    console.log(`  BOOTSTRAP_TOKEN:    ${localBootstrapToken}`);
+    console.log(
+      explicitBootstrap
+        ? `  BOOTSTRAP_TOKEN:    ${explicitBootstrap}`
+        : '  Initial Owner:      First account registered at /login claims Owner (then locks to invite-only)',
+    );
     console.log('======================================================');
     console.log(
       `\nRun \`pnpm ${target.kind === 'worker' ? 'dev:worker' : 'dev'}\` to start development.`,
@@ -330,9 +338,13 @@ async function main() {
   );
   if (secretPlan.generatedBootstrapToken) {
     console.log(`  BOOTSTRAP_TOKEN:    ${secretPlan.generatedBootstrapToken}`);
-  } else {
+  } else if (secretPlan.preserved.includes('BOOTSTRAP_TOKEN')) {
     console.log(
       '  BOOTSTRAP_TOKEN:    [preserved existing secret on Worker — pass --rotate-bootstrap-token to rotate]',
+    );
+  } else {
+    console.log(
+      '  Initial Owner:      First account registered at /login claims Owner (then locks to invite-only)',
     );
   }
   console.log('======================================================\n');
@@ -340,8 +352,12 @@ async function main() {
     console.log(
       'Next step: Open the Production URL above and register the initial Owner account with BOOTSTRAP_TOKEN.',
     );
-  } else {
+  } else if (secretPlan.preserved.includes('BOOTSTRAP_TOKEN')) {
     console.log('Next step: Open the Production URL above to verify your upgraded instance.');
+  } else {
+    console.log(
+      'Next step: Open the Production URL above and create your account at /login to claim Owner access.',
+    );
   }
 }
 

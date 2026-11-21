@@ -1016,10 +1016,20 @@ export function buildSecretPlan({
 
   if (existingSet.has('BOOTSTRAP_TOKEN') && !rotateBootstrapToken) {
     preserved.push('BOOTSTRAP_TOKEN');
-  } else {
+  } else if (rotateBootstrapToken) {
     const token = getBootstrapToken(env);
     toUpload.BOOTSTRAP_TOKEN = token;
     generatedBootstrapToken = token;
+  } else {
+    const explicitToken = env.BOOTSTRAP_TOKEN?.trim();
+    if (
+      explicitToken &&
+      explicitToken.length >= 16 &&
+      !KNOWN_BOOTSTRAP_PLACEHOLDERS.has(explicitToken)
+    ) {
+      toUpload.BOOTSTRAP_TOKEN = explicitToken;
+      generatedBootstrapToken = explicitToken;
+    }
   }
 
   if (existingSet.has('BETTER_AUTH_URL') && !updateAuthUrl) {
