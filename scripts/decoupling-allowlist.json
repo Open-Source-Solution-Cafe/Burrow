@@ -38,5 +38,25 @@
     "path": "tests/unit/check-decoupling.test.ts",
     "pattern": ".*",
     "reason": "Unit tests verifying decoupling guard behavior with forbidden vocabulary fixtures"
+  },
+  {
+    "path": "docs/plugin-architecture/PLAN.md",
+    "pattern": ".*",
+    "reason": "Plugin architecture implementation plan documenting downstream consumer integration and decoupling constraints"
+  },
+  {
+    "path": "docs/plugin-architecture/PROGRESS.md",
+    "pattern": ".*",
+    "reason": "Plugin architecture implementation progress log tracking downstream branch status"
+  },
+  {
+    "path": "docs/plugin-architecture/DECISIONS.md",
+    "pattern": ".*",
+    "reason": "Plugin architecture decision log recording licensing, tenancy topology, and trust model assumptions"
+  },
+  {
+    "path": "docs/plugin-architecture/AUDIT.md",
+    "pattern": ".*",
+    "reason": "Plugin architecture feasibility audit summarizing baseline decoupling and seam findings"
   }
 ]
