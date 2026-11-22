@@ -8,11 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Modular Plugin Architecture & Workspace Packages (`packages/sdk`, `packages/core`, `packages/web`, `packages/worker`, `packages/plugins`)**: Split Burrow into pnpm workspace packages with a zero-dependency MIT-licensed `@burrow/sdk` contract (`BurrowServerPlugin`, `BurrowWebPlugin`, `PluginManifest`, typed `PluginEventBus`, `PluginDb`, `MentionSourceRegistry`), added `createApp({ plugins, adapters, policy })` and `mountBurrowWeb({ plugins })`, added `AuthProvider.getPublicConfig()`, and introduced `plugin_migrations` with SQL table-prefix enforcement (`plugin_<id>_*`).
-- **Extensible Slash Commands, `@` Mentions, Card Types & UI Slots (`src/shared/slash.ts`, `src/shared/blocks.ts`, `KanbanView.tsx`, `CardPanel.tsx`, `Sidebar.tsx`, `SettingsView.tsx`, `NotepadEditor.tsx`, `QuickAddCard.tsx`)**: Opened `@` mention sources for `plugin:<id>:<type>` without modifying `notepad_links`, added `openModal`-capable plugin slash commands, added Kanban tile/panel render slots, and added Sidebar panel and Settings section contribution slots.
-  - *Migration Note*: Added `cards.card_type` (`TEXT NOT NULL DEFAULT 'task'`) via additive `migrations/0006_add_card_type.sql`, `migrations/postgres/0006_add_card_type.sql`, and synced `src/worker/d1-migrations.ts`. Forward SQLite and PostgreSQL upgrade paths preserve existing rows and satisfy schema invariants.
-- **First-Party Dogfooded & Showcase Plugins (`packages/plugins/*`, `docs/plugin-architecture/*`)**: Extracted `public-sharing` and `workspace-export` as default-registered first-party plugins, added the `hello` example plugin, starter `_template`, and full-stack `estimation` showcase plugin (`/estimate`, `estimate` card type, sprint `@`-mentions, and `plugin_estimation_points` FK cascade), alongside `AUTHORING.md` and `UNTRUSTED.md`.
-- **Automated GitHub Releases (`.github/workflows/release.yml`, `scripts/extract-release-notes.mjs`)**: Added an automatic GitHub Actions release workflow on `master` that auto-tags and publishes a GitHub Release with notes extracted from `CHANGELOG.md` whenever `package.json` introduces a new version.
 
 ### Changed
 
@@ -24,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.5.0] - 2026-11-22
+
+### Added
+- **Modular Plugin Architecture & Workspace Packages (`packages/sdk`, `packages/core`, `packages/web`, `packages/worker`, `packages/plugins`)**: Split Burrow into pnpm workspace packages with a zero-dependency MIT-licensed `@burrow/sdk` contract (`BurrowServerPlugin`, `BurrowWebPlugin`, `PluginManifest`, typed `PluginEventBus`, `PluginDb`, `MentionSourceRegistry`), added `createApp({ plugins, adapters, policy })` and `mountBurrowWeb({ plugins })`, added `AuthProvider.getPublicConfig()`, and introduced `plugin_migrations` with SQL table-prefix enforcement (`plugin_<id>_*`).
+- **Extensible Slash Commands, `@` Mentions, Card Types & UI Slots (`src/shared/slash.ts`, `src/shared/blocks.ts`, `KanbanView.tsx`, `CardPanel.tsx`, `Sidebar.tsx`, `SettingsView.tsx`, `NotepadEditor.tsx`, `QuickAddCard.tsx`)**: Opened `@` mention sources for `plugin:<id>:<type>` without modifying `notepad_links`, added `openModal`-capable plugin slash commands, added Kanban tile/panel render slots, and added Sidebar panel and Settings section contribution slots.
+  - *Migration Note*: Added `cards.card_type` (`TEXT NOT NULL DEFAULT 'task'`) via additive `migrations/0006_add_card_type.sql`, `migrations/postgres/0006_add_card_type.sql`, and synced `src/worker/d1-migrations.ts`. Forward SQLite and PostgreSQL upgrade paths preserve existing rows and satisfy schema invariants.
+- **First-Party Dogfooded & Showcase Plugins (`packages/plugins/*`, `docs/plugin-architecture/*`)**: Extracted `public-sharing` and `workspace-export` as default-registered first-party plugins, added the `hello` example plugin, starter `_template`, and full-stack `estimation` showcase plugin (`/estimate`, `estimate` card type, sprint `@`-mentions, and `plugin_estimation_points` FK cascade), alongside `AUTHORING.md` and `UNTRUSTED.md`.
+- **Automated GitHub Releases (`.github/workflows/release.yml`, `scripts/extract-release-notes.mjs`)**: Added an automatic GitHub Actions release workflow on `master` that auto-tags and publishes a GitHub Release with notes extracted from `CHANGELOG.md` whenever `package.json` introduces a new version.
 ## [0.4.0] - 2026-11-22
 
 ### Added
