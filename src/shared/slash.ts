@@ -1,3 +1,5 @@
+import type { SlashCommandContribution } from '@burrow/sdk';
+
 export type SlashContext = 'notepad' | 'card' | 'quickadd';
 
 export type SlashActionType =
@@ -14,16 +16,19 @@ export type SlashActionType =
   | 'tag'
   | 'move'
   | 'date'
-  | 'mention';
+  | 'mention'
+  | 'plugin';
 
 export interface SlashCommand {
   id: string;
   label: string;
+  description?: string;
   aliases: string[];
-  group: 'Basic' | 'Lists' | 'Structural' | 'Links & References' | 'Task & Metadata';
+  group: 'Basic' | 'Lists' | 'Structural' | 'Links & References' | 'Task & Metadata' | (string & {});
   contexts: SlashContext[];
   action: SlashActionType;
   icon?: string;
+  pluginExecute?: SlashCommandContribution['execute'];
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -227,13 +232,33 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-export function getSlashCommandsForContext(context: SlashContext, query = ''): SlashCommand[] {
+export function getSlashCommandsForContext(
+  context: SlashContext,
+  query = '',
+  pluginCommands: ReadonlyArray<SlashCommandContribution> = [],
+): SlashCommand[] {
+  const mappedPlugins: SlashCommand[] = pluginCommands
+    .filter((cmd) => cmd.contexts.includes(context))
+    .map((cmd) => ({
+      id: cmd.id,
+      label: cmd.label,
+      description: cmd.description,
+      aliases: cmd.aliases ?? [],
+      group: cmd.group ?? 'Plugins',
+      contexts: [...cmd.contexts],
+      action: 'plugin' as const,
+      icon: cmd.icon ?? 'Plug',
+      pluginExecute: cmd.execute,
+    }));
+
   const q = query.toLowerCase().trim();
-  return SLASH_COMMANDS.filter((cmd) => {
+  return [...SLASH_COMMANDS, ...mappedPlugins].filter((cmd) => {
     if (!cmd.contexts.includes(context)) return false;
     if (!q) return true;
     return (
       cmd.label.toLowerCase().includes(q) ||
+      cmd.id.toLowerCase().includes(q) ||
+      (cmd.description?.toLowerCase().includes(q) ?? false) ||
       cmd.aliases.some((alias) => alias.toLowerCase().includes(q))
     );
   });

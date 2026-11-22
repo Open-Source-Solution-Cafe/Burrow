@@ -1,8 +1,9 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, type ReactNode } from 'react';
 import * as chrono from 'chrono-node';
-import { Calendar, FileText, Flag, Plus, Tag, User, X } from 'lucide-react';
+import { Calendar, FileText, Flag, Plug, Plus, Tag, User, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCreateCard, useCreateTag, useMembers, useProjectTags } from '../../lib/queries';
+import { useWebPlugins } from '../../plugins/registry';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -34,6 +35,8 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
 
   const [dateInputOpen, setDateInputOpen] = useState(false);
   const [dateInputValue, setDateInputValue] = useState('');
+  const [pluginModalRender, setPluginModalRender] = useState<((close: () => void) => ReactNode) | null>(null);
+  const webPlugins = useWebPlugins();
 
   const inputRef = useRef<HTMLInputElement>(null);
   const createCardMutation = useCreateCard();
@@ -193,8 +196,32 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
           inputRef.current?.focus();
         },
       },
+      ...webPlugins.slashCommands
+        .filter((cmd) => cmd.contexts.includes('quickadd'))
+        .map((cmd) => ({
+          id: cmd.id,
+          label: `/${cmd.id}`,
+          desc: cmd.description ?? cmd.label,
+          icon: Plug,
+          action: () => {
+            setTitle(cleanLastTrigger(title));
+            setMenuMode('none');
+            void cmd.execute({
+              context: 'quickadd',
+              workspaceId,
+              projectId,
+              insertText: (txt: string) => {
+                setTitle((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}${txt}`);
+                inputRef.current?.focus();
+              },
+              openModal: (render) => {
+                setPluginModalRender(() => render as (close: () => void) => ReactNode);
+              },
+            });
+          },
+        })),
     ],
-    [title, t],
+    [title, t, webPlugins.slashCommands, workspaceId, projectId],
   );
 
   const filteredSlashCommands = useMemo(() => {
@@ -739,6 +766,8 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
           </button>
         </div>
       )}
+
+      {pluginModalRender && pluginModalRender(() => setPluginModalRender(null))}
 
       {/* Footer controls: Submit & Hints */}
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] pt-1 border-t border-[var(--hair)] gap-2">

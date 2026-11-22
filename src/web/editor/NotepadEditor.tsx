@@ -43,6 +43,7 @@ import {
   getHashMenuSuggestions,
   type SuggestionDialogState,
 } from './suggestionItems';
+import { useWebPlugins } from '../plugins/registry';
 import { NotepadPickerModal, TaskPickerModal, BoardPickerModal } from './ReferenceDialogs';
 import { TemplatePickerModal } from './TemplatePicker';
 import { DocumentOutline } from './DocumentOutline';
@@ -228,6 +229,7 @@ function NotepadEditorInner({
   const [conflictBanner, setConflictBanner] = useState(false);
   const [showBacklinks, setShowBacklinks] = useState(true);
   const [dialogState, setDialogState] = useState<SuggestionDialogState>({ type: null });
+  const webPlugins = useWebPlugins();
   const [isBlank, setIsBlank] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -1376,6 +1378,10 @@ function NotepadEditorInner({
             data.kind === 'card' ? 'card' : 'notepad',
             data.projectId || '',
             setDialogState,
+            {
+              workspaceId: data.workspaceId,
+              pluginCommands: webPlugins.slashCommands,
+            },
           );
           const all = [mediaItem, ...customItems, ...defaultItems];
           const q = query.toLowerCase();
@@ -1564,6 +1570,8 @@ function NotepadEditorInner({
           }}
         />
       )}
+      {dialogState.type === 'plugin-modal' &&
+        (dialogState.render?.(() => setDialogState({ type: null })) as import('react').ReactNode)}
     </>
   );
 

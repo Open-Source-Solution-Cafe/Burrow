@@ -1,6 +1,8 @@
 import * as chrono from 'chrono-node';
+import type { ReactNode } from 'react';
 import type { DefaultReactSuggestionItem } from '@blocknote/react';
 import type { BlockNoteEditor } from '@blocknote/core';
+import type { SlashCommandContribution } from '@burrow/sdk';
 import {
   Calendar,
   CheckSquare,
@@ -8,24 +10,30 @@ import {
   Kanban,
   Layout,
   LayoutTemplate,
+  Plug,
   Plus,
   Tag,
   User,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { SlashContext } from '../../shared/slash';
+import { getSlashCommandsForContext, type SlashContext } from '../../shared/slash';
 import { projectApiPath } from '../lib/workspaceRoutes';
 
 export interface SuggestionDialogState {
-  type: 'notepad' | 'task' | 'template' | 'board' | null;
+  type: 'notepad' | 'task' | 'template' | 'board' | 'plugin-modal' | null;
   blockToReplace?: any;
+  render?: (close: () => void) => unknown;
 }
 
 export function getCustomSlashItems(
   editor: BlockNoteEditor<any, any, any>,
   context: SlashContext,
-  _projectId: string,
+  projectId: string,
   onOpenDialog: (state: SuggestionDialogState) => void,
+  options?: {
+    workspaceId?: string;
+    pluginCommands?: ReadonlyArray<SlashCommandContribution>;
+  },
 ): DefaultReactSuggestionItem[] {
   const items: DefaultReactSuggestionItem[] = [];
 
@@ -121,6 +129,33 @@ export function getCustomSlashItems(
       ]);
     },
   });
+
+  const pluginSlash = getSlashCommandsForContext(context, '', options?.pluginCommands).filter(
+    (cmd) => cmd.action === 'plugin' && cmd.pluginExecute,
+  );
+  for (const cmd of pluginSlash) {
+    items.push({
+      title: cmd.label,
+      subtext: cmd.description || 'Plugin command',
+      aliases: cmd.aliases,
+      group: cmd.group || 'Plugins',
+      icon: <Plug className="w-4 h-4 text-[var(--accent)]" />,
+      onItemClick: () => {
+        void cmd.pluginExecute?.({
+          context,
+          workspaceId: options?.workspaceId ?? '',
+          projectId,
+          editor,
+          insertText: (text: string) => {
+            editor.insertInlineContent([{ type: 'text', text, styles: {} }]);
+          },
+          openModal: (render) => {
+            onOpenDialog({ type: 'plugin-modal', render: render as (close: () => void) => ReactNode });
+          },
+        });
+      },
+    });
+  }
 
   return items;
 }
