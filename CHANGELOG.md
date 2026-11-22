@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
-- **Canonical `PLUGINS_DISABLED` Kill Switch & Consent Summary Formatting (`runtime-state.ts`, `app.ts`, `packages/sdk/src/index.ts`, `DECISIONS.md`, `HANDOFF.md`)**: Standardized `PLUGINS_DISABLED` (CSV or `*` wildcard, plus string constructor shorthand) while retaining `DISABLED_PLUGINS` as a deprecated alias that logs a deprecation warning; restored `"<Name> (<id>) — This plugin can: ..."` wording in `formatPluginConsentSummary`; scoped per-plugin rate-limit buckets by both identity and client IP; documented branch lineage (`audit/plugin-readiness` vs canonical `feat/plugin-hardening`) and non-squash upstream sync workflow in `DECISIONS.md` and `HANDOFF.md`.
 
 ### Deprecated
 
@@ -19,9 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.6.1] - 2026-11-22
+
+### Changed
+- **Canonical `PLUGINS_DISABLED` Kill Switch & Consent Summary Formatting (`runtime-state.ts`, `app.ts`, `packages/sdk/src/index.ts`, `DECISIONS.md`, `HANDOFF.md`)**: Standardized `PLUGINS_DISABLED` (CSV or `*` wildcard, plus string constructor shorthand) while retaining `DISABLED_PLUGINS` as a deprecated alias that logs a deprecation warning; restored `"<Name> (<id>) — This plugin can: ..."` wording in `formatPluginConsentSummary`; scoped per-plugin rate-limit buckets by both identity and client IP; documented branch lineage (`audit/plugin-readiness` vs canonical `feat/plugin-hardening`) and non-squash upstream sync workflow in `DECISIONS.md` and `HANDOFF.md`.
+
+### Security
 - **Database-Enforced PostgreSQL Plugin Isolation (`src/core/plugins/postgres-isolation.ts`, `migrations.ts`, `plugin-db.ts`)**: Provisioned isolated `NOLOGIN NOSUPERUSER` `plugin_<id>_role` and `plugin_<id>` schema ownership per plugin with cross-plugin and core `REVOKE ALL`, selective foreign-key `REFERENCES (id)`, column-level `invites` read grants excluding `token_hash`, explicit `manifest.coreTables` allowlist enforcement, DDL event triggers blocking plugin functions/triggers/extensions and foreign schema DDL, restricted utility wrapper blocking `LISTEN`/`UNLISTEN`/`NOTIFY`, transactional `SET LOCAL ROLE` + pinned `search_path`, and migration execution under `plugin_<id>_role` before revoking `CREATE`; verified via raw-driver breakout and malicious-migration tests in `tests/adapters/plugin-postgres-node.test.ts`.
 - **SQLite/D1 Tripwire Hardening & Adversarial Test Restorations (`plugin-db.ts`, `manifest.ts`, `loader.ts`, `plugin-isolation-adversarial.test.ts`, `packages/plugins/estimation`)**: Marked the SQLite/D1 lexer as a best-effort tripwire across code comments and `docs/plugin-architecture/audit/READINESS-v2.md`; rejected `$$...$$` dollar-quoting, unparameterized `WHERE` literals, and undeclared core-table reads on SQLite `PluginDb`; default-empty `coreTables` in `loadServerPlugins` (`plugins/estimation` declares `['cards', 'boards', 'projects']`); restored all dropped adversarial assertions and documented the full test diff audit in `docs/plugin-architecture/audit/TEST-INTEGRITY.md`.
-
 ## [0.6.0] - 2026-11-22
 
 ### Added
