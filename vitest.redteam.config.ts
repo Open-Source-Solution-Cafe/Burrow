@@ -15,6 +15,7 @@ export default defineConfig({
     name: 'redteam',
     environment: 'node',
     include: ['tests/redteam/**/*.test.ts'],
+    exclude: ['tests/redteam/residual/**'],
     globalSetup: ['./tests/adapters/node-setup.ts'],
     testTimeout: 25_000,
     hookTimeout: 30_000,

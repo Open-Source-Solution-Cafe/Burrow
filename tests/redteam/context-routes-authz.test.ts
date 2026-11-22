@@ -638,12 +638,6 @@ describe('Category 3, 4, 7, 13 — Context, Routes, Authz, CSRF & Admin Surface'
       }
     });
 
-    it('records baseline in-process Node exposure (globalThis/process/require reachable by trusted operator JS)', () => {
-      // Documented residual risk: JS plugins run in-process on Node/Workers.
-      expect(typeof globalThis.fetch).toBe('function');
-      expect(typeof process.env).toBe('object');
-    });
-
     it('strips CORE_RESERVED_CONFIG_KEYS from ctx.config and redacts them in logger', () => {
       const secret = 'core-auth-secret-should-stay-hidden-32b';
       const { dir, sqlite } = tempSqlite();

@@ -73,6 +73,7 @@ function createStubInfra(
         ),
         count: vi.fn().mockResolvedValue(1),
         findById: vi.fn().mockImplementation(async (id: string) => ({ id, name: id, slug: id })),
+        isInstanceOwner: vi.fn().mockImplementation(async (uid: string) => uid === 'u_owner'),
       } as any,
       members: {
         findByUserId: vi.fn().mockImplementation(async (wsId: string, userId: string) => {
@@ -949,8 +950,8 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
         })).status,
       ).toBe(200);
 
-      // Per-plugin rate limit (120 req/min cap -> isolated burst client: 120 pass, 121st returns 429)
-      for (let i = 0; i < 120; i++) {
+      // Per-plugin rate limit (120 req/min cap -> line 914's /slow consumed 1 req; 119 more pass, 121st returns 429)
+      for (let i = 0; i < 119; i++) {
         const res = await app.request('http://localhost/api/plugins/quota/ping', {
           headers: { 'x-forwarded-for': '203.0.113.99' },
         });
