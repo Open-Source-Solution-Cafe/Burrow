@@ -104,4 +104,23 @@ export {
 } from './middleware/session';
 
 // Re-export app factory
-export { createCoreApp } from './app';
+export { createCoreApp, type CreateCoreAppOptions } from './app';
+
+// Re-export plugin primitives
+export { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
+export { MentionSourceRegistry, PLUGIN_MENTION_KIND_RE } from './plugins/mention-registry';
+export {
+  validatePluginManifest,
+  pluginTablePrefix,
+  PluginManifestError,
+  PLUGIN_ID_RE,
+  VALID_PLUGIN_PERMISSIONS,
+} from './plugins/manifest';
+export {
+  createPluginDb,
+  assertPluginSqlAllowed,
+  splitPluginSqlStatements,
+  PluginSqlAccessError,
+} from './plugins/plugin-db';
+export { runPluginMigrations } from './plugins/migrations';
+export { loadServerPlugins } from './plugins/loader';

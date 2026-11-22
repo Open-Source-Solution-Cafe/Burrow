@@ -8,6 +8,8 @@ import type { ContentReferenceKind, ReferencePreview } from '../../shared/refere
 import type { BurrowRuntime } from '../../shared/uploadPolicy';
 import type { FeatureFlagMap } from '../../shared/featureFlags';
 
+import type { AuthPublicConfigPatch } from '@burrow/sdk';
+
 /**
  * Minimal auth provider interface for the core app factory.
  * Implementations (e.g. BetterAuth) live in the platform layer.
@@ -19,6 +21,8 @@ export interface AuthProvider {
   ): Promise<{ userId: string; email?: string; name?: string; image?: string | null } | null>;
   /** Hono handler for auth endpoints (sign-in, sign-up, etc.). */
   handler(req: Request): Promise<Response>;
+  /** Optional auth config extension merged into GET /api/auth/config. */
+  getPublicConfig?(): AuthPublicConfigPatch | Promise<AuthPublicConfigPatch>;
 }
 
 /**
@@ -56,6 +60,7 @@ export interface Infrastructure {
   runtime?: BurrowRuntime;
   appUrl?: string;
   env?: Record<string, any>;
+  db?: unknown;
 }
 
 /** Explicit project boundary for repository traversal and resource relationships. */

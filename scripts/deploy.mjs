@@ -31,6 +31,77 @@ export function isWorkersCiBuild(env = process.env) {
   return flag === '1' || flag === 'true';
 }
 
+/**
+ * Apply disk-based plugin SQL migrations (`migrations/plugins/<pluginId>/*.sql`)
+ * against the target D1 database via `plugin_migrations` before `wrangler deploy`.
+ * Plugins declaring TypeScript-bundled migrations also auto-migrate idempotently on Worker boot.
+ */
+export async function applyPluginMigrationsBeforeDeploy({
+  databaseName,
+  configArgs = [],
+  pluginMigrationsDir = path.join(root, 'migrations', 'plugins'),
+  runFn = run,
+  dryRun = false,
+} = {}) {
+  if (!fs.existsSync(pluginMigrationsDir)) {
+    return [];
+  }
+  const pluginDirs = fs
+    .readdirSync(pluginMigrationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (pluginDirs.length === 0) return [];
+
+  const targetArgs = [...configArgs, '--remote'];
+  const createLedgerSql =
+    'CREATE TABLE IF NOT EXISTS plugin_migrations (plugin_id TEXT NOT NULL, name TEXT NOT NULL, applied_at INTEGER NOT NULL, PRIMARY KEY (plugin_id, name));';
+  runFn(bin('wrangler'), ['d1', 'execute', databaseName, ...targetArgs, '--command', createLedgerSql], {
+    dryRun,
+    env: { CI: '1' },
+  });
+
+  const applied = new Set();
+  if (!dryRun) {
+    const queryRes = runFn(
+      bin('wrangler'),
+      ['d1', 'execute', databaseName, ...targetArgs, '--command', 'SELECT plugin_id, name FROM plugin_migrations;', '--json'],
+      { capture: true, quiet: true, allowFail: true, env: { CI: '1' } },
+    );
+    if (queryRes.status === 0) {
+      const parsed = parseFirstJson(queryRes.stdout ?? '');
+      const rows = Array.isArray(parsed) ? (parsed[0]?.results ?? []) : [];
+      for (const row of rows) {
+        if (row?.plugin_id && row?.name) {
+          applied.add(`${row.plugin_id}:${row.name}`);
+        }
+      }
+    }
+  }
+
+  const appliedNow = [];
+  for (const pluginId of pluginDirs) {
+    const dir = path.join(pluginMigrationsDir, pluginId);
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+    for (const file of files) {
+      const key = `${pluginId}:${file}`;
+      if (applied.has(key)) continue;
+      const sqlFile = path.join(dir, file);
+      runFn(bin('wrangler'), ['d1', 'execute', databaseName, ...targetArgs, '--file', sqlFile], {
+        dryRun,
+        env: { CI: '1' },
+      });
+      const recordSql = `INSERT OR IGNORE INTO plugin_migrations (plugin_id, name, applied_at) VALUES ('${pluginId.replace(/'/g, "''")}', '${file.replace(/'/g, "''")}', ${Date.now()});`;
+      runFn(bin('wrangler'), ['d1', 'execute', databaseName, ...targetArgs, '--command', recordSql], {
+        dryRun,
+        env: { CI: '1' },
+      });
+      appliedNow.push(key);
+    }
+  }
+  return appliedNow;
+}
+
 export function resolveWorkersCiConfigArgs(
   baseCfg,
   { env = process.env, rootDir = root, runFn = run, wranglerBin = bin('wrangler') } = {},
@@ -212,6 +283,7 @@ async function main() {
     { kind: 'remote' },
     { configArgs, databaseName: dbName, allowPreBaselineReset: false },
   );
+  await applyPluginMigrationsBeforeDeploy({ databaseName: dbName, configArgs });
 
   step('Deploy');
   const deployArgs = [...configArgs, 'deploy', ...WRANGLER_ARGS];

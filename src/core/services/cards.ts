@@ -20,6 +20,7 @@ import type {
 import { notFound, badRequest, conflict, forbidden, rethrowAmbiguousDeleteGroup } from './errors';
 import { positionAfterLast, positionBetween } from './utils/ordering';
 import { extractPlainText } from '../../shared/extract';
+import type { PluginEventBus } from '../plugins/event-bus';
 
 export interface CreateCardInput {
   workspaceId: string;
@@ -52,6 +53,7 @@ export class CardService {
       boards: IBoardRepository;
       notifications: INotificationRepository;
     },
+    private readonly events?: PluginEventBus,
   ) {}
 
   async createCard(input: CreateCardInput): Promise<CreatedCard> {
@@ -141,9 +143,24 @@ export class CardService {
       now: Date.now(),
     };
 
+    const createdPayload = {
+      workspaceId: plan.workspaceId,
+      projectId: plan.projectId,
+      boardId: plan.boardId,
+      columnId: plan.columnId,
+      cardId: plan.cardId,
+      notepadId: plan.notepadId,
+      title: plan.title,
+      actorId: plan.actorId,
+      cardType: 'task',
+    };
+    await this.events?.emitBefore('task.created', createdPayload);
+
     if (!(await this.repos.cards.createFromPlan(plan))) {
       throw forbidden('forbidden', 'Editor access changed while creating the card');
     }
+
+    await this.events?.emitAfter('task.created', createdPayload);
 
     return {
       cardId: plan.cardId,
@@ -259,6 +276,13 @@ export class CardService {
     if (updates.dueDate !== undefined) cardUpdates.dueDate = updates.dueDate ?? null;
 
     const newTitle = updates.title === undefined ? undefined : updates.title.trim() || 'Untitled';
+    const updatedPayload = {
+      workspaceId,
+      projectId: card.projectId,
+      cardId,
+      actorId,
+    };
+    await this.events?.emitBefore('task.updated', updatedPayload);
     const written = await this.repos.cards.updateGuarded({
       cardId,
       scope: { workspaceId, actorUserId: actorId, minimumRole: 'editor' },
@@ -276,6 +300,7 @@ export class CardService {
     });
     if (!written) throw forbidden('forbidden', 'Editor access changed while updating the card');
 
+    await this.events?.emitAfter('task.updated', updatedPayload);
     return { ok: true, cardId };
   }
 
@@ -285,6 +310,14 @@ export class CardService {
       throw notFound('not_found', 'Card not found');
     }
 
+    const deletedPayload = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      cardId,
+      actorId,
+    };
+    await this.events?.emitBefore('task.deleted', deletedPayload);
+
     const now = Date.now();
     // Invariant I5: Card and its notepad always have the same soft-delete state
     const deleted = await this.repos.notepads.softDelete(card.notepadId, now, {
@@ -292,6 +325,7 @@ export class CardService {
     });
     if (!deleted) throw forbidden('forbidden', 'Editor access changed while deleting the card');
 
+    await this.events?.emitAfter('task.deleted', deletedPayload);
     return { ok: true, cardId };
   }
 

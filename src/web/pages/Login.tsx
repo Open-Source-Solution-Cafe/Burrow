@@ -14,7 +14,8 @@ import { APP_VERSION } from '../../core/version';
 interface OAuthProviderConfig {
   id: string;
   name: string;
-  kind: 'social';
+  kind: 'social' | 'oidc' | 'saml';
+  authUrl?: string;
 }
 
 interface AuthConfig {
@@ -250,14 +251,18 @@ export function Login() {
     }
   };
 
-  const handleOAuthSignIn = async (providerId: string) => {
+  const handleOAuthSignIn = async (provider: OAuthProviderConfig) => {
     setError(null);
     setLoading(true);
     try {
+      if (provider.authUrl) {
+        window.location.href = provider.authUrl;
+        return;
+      }
       const res = await fetch('/api/auth/sign-in/social', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: providerId, callbackURL: '/' }),
+        body: JSON.stringify({ provider: provider.id, callbackURL: '/' }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
@@ -493,7 +498,8 @@ export function Login() {
               </div>
             )}
 
-            {useMagicLink && !isSignUp ? (
+            {authConfig.emailPasswordEnabled !== false &&
+              (useMagicLink && !isSignUp ? (
               <form onSubmit={handleMagicLinkSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-[var(--text)] mb-1">
@@ -627,20 +633,22 @@ export function Login() {
                   {loading ? t('common.pleaseWait') : isSignUp ? t('login.signUp') : t('login.signIn')}
                 </Button>
               </form>
-            )}
+            ))}
 
             {authConfig.oauthProviders && authConfig.oauthProviders.length > 0 && (
               <div className="space-y-3 pt-2">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-[var(--line)]" />
+                {authConfig.emailPasswordEnabled !== false && (
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-[var(--line)]" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-[var(--surface)] px-2 text-[var(--muted)]">
+                        {t('login.orContinueWith')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-[var(--surface)] px-2 text-[var(--muted)]">
-                      {t('login.orContinueWith')}
-                    </span>
-                  </div>
-                </div>
+                )}
                 <div className="space-y-2">
                   {authConfig.oauthProviders.map((provider) => (
                     <Button
@@ -648,7 +656,7 @@ export function Login() {
                       type="button"
                       variant="secondary"
                       disabled={loading}
-                      onClick={() => void handleOAuthSignIn(provider.id)}
+                      onClick={() => void handleOAuthSignIn(provider)}
                       className="w-full min-h-[44px] flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>{t('login.continueWith', { provider: provider.name })}</span>

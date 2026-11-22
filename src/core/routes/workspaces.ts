@@ -13,6 +13,7 @@ import type { RateLimitStore } from '../adapters/rate-limit';
 import { inviteEmail } from '../services/email-templates';
 import { forbidden } from '../services/errors';
 import type { AccessPolicy } from '../policy';
+import type { PluginEventBus } from '../plugins/event-bus';
 
 const createWorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -38,6 +39,7 @@ export function createWorkspaceRoutes(args: {
   rateLimitStore?: RateLimitStore;
   env?: Record<string, unknown>;
   requirePersistentRateLimitStore?: boolean;
+  events?: PluginEventBus;
 }) {
   const {
     workspaces,
@@ -48,6 +50,7 @@ export function createWorkspaceRoutes(args: {
     rateLimitStore,
     env,
     requirePersistentRateLimitStore,
+    events,
   } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const route = new Hono<Env>();
@@ -84,8 +87,18 @@ export function createWorkspaceRoutes(args: {
     }
 
     await policy?.authorize({ action: 'workspace.create', userId: identity.userId });
+    await events?.emitBefore('workspace.created', {
+      workspaceId,
+      userId: identity.userId,
+      name,
+    });
 
     const workspace = await workspaces.create(plan);
+    await events?.emitAfter('workspace.created', {
+      workspaceId: workspace.id,
+      userId: identity.userId,
+      name: workspace.name,
+    });
     return c.json({ workspace, project: plan.project }, 201);
   });
 

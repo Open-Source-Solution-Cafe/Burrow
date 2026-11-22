@@ -47,6 +47,10 @@ import {
   createPublicShareViewerRoutes,
 } from './routes/public-shares';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
+import type { BurrowServerPlugin } from '@burrow/sdk';
+import { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
+import { MentionSourceRegistry } from './plugins/mention-registry';
+import { loadServerPlugins } from './plugins/loader';
 
 function parseSafeHttpUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -70,24 +74,64 @@ export interface Env {
   };
 }
 
+export interface CreateCoreAppOptions {
+  policy?: AccessPolicy;
+  plugins?: readonly BurrowServerPlugin[];
+  events?: PluginEventBus;
+  mentionRegistry?: MentionSourceRegistry;
+  rawDb?: unknown;
+}
+
 /**
  * Create the core Hono app with all routes registered.
  * This factory can be called from both Worker and Node entrypoints.
  */
 export function createCoreApp(
   infra: Infrastructure,
-  options: { policy?: AccessPolicy } = {},
+  options: CreateCoreAppOptions = {},
 ) {
-  const policy = options.policy ?? new SelfHostedPolicy();
+  const events = options.events ?? new PluginEventBus();
+  const mentionRegistry = options.mentionRegistry ?? new MentionSourceRegistry();
+  const explicitWorkspaceMiddleware = createExplicitWorkspaceMiddleware(infra.repositories.members);
+  let effectiveAuth = infra.auth;
+  const pluginAuthProxy: Infrastructure['auth'] = {
+    getSession: (headers) => effectiveAuth.getSession(headers),
+    handler: (req) => effectiveAuth.handler(req),
+    getPublicConfig: () => effectiveAuth.getPublicConfig?.() ?? {},
+  };
+
+  const loadedPlugins = options.plugins?.length
+    ? loadServerPlugins({
+        plugins: options.plugins,
+        infra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        middleware: {
+          requireIdentity: createIdentityMiddleware(pluginAuthProxy),
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
+
+  const policy = options.policy ?? loadedPlugins.adapterOverrides.policy ?? new SelfHostedPolicy();
+  effectiveAuth = loadedPlugins.adapterOverrides.auth ?? infra.auth;
+  const auth = effectiveAuth;
+  const storage = loadedPlugins.adapterOverrides.storage ?? infra.storage;
+  const emailProvider = loadedPlugins.adapterOverrides.mailer ?? infra.email;
   const {
     repositories,
-    storage,
     search,
     locks,
-    auth,
-    email: emailProvider,
     bootstrapToken,
   } = infra;
+  const effectiveInfra: Infrastructure = {
+    ...infra,
+    auth,
+    storage,
+    email: emailProvider,
+  };
   const trimmedBootstrapToken = bootstrapToken?.trim() ?? '';
   const hasBootstrapToken = trimmedBootstrapToken.length > 0;
   const projects = new ProjectService(
@@ -113,19 +157,23 @@ export function createCoreApp(
     },
     locks,
     storage,
+    events,
   );
   const boards = new BoardService({
     boards: repositories.boards,
     cards: repositories.cards,
     projects: repositories.projects,
   });
-  const cards = new CardService({
-    cards: repositories.cards,
-    notepads: repositories.notepads,
-    tags: repositories.tags,
-    boards: repositories.boards,
-    notifications: repositories.notifications,
-  });
+  const cards = new CardService(
+    {
+      cards: repositories.cards,
+      notepads: repositories.notepads,
+      tags: repositories.tags,
+      boards: repositories.boards,
+      notifications: repositories.notifications,
+    },
+    events,
+  );
   const members = new MemberService({ members: repositories.members });
   const comments = new CommentService({
     cards: repositories.cards,
@@ -156,6 +204,7 @@ export function createCoreApp(
     rateLimitStore: infra.rateLimitStore,
     env: infra.env,
     requirePersistentRateLimitStore,
+    events,
   });
   const projectResourceRoutes = createProjectResourceRoutes({
     repositories,
@@ -205,6 +254,7 @@ export function createCoreApp(
     storage,
     policy,
     env: infra.env,
+    events,
   });
   const shareManagementRoutes = createShareManagementRoutes({
     repositories,
@@ -230,82 +280,114 @@ export function createCoreApp(
   const deleteProjectQuerySchema = z.object({ confirm: z.string().min(1) });
 
   // Build the app
-  return (
-    new Hono<Env>()
-      .use('*', securityHeaders)
-      .use('/api/*', (c, next) => {
-        if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
-          return bodyLimit(maxUploadBytes + 64 * 1024)(c, next);
+  const baseApp = new Hono<Env>()
+    .use('*', async (c, next) => {
+      let waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+      try {
+        const execCtx = c.executionCtx;
+        if (execCtx && typeof execCtx.waitUntil === 'function') {
+          waitUntil = (promise) => execCtx.waitUntil(promise);
         }
-        return bodyLimit()(c, next);
-      })
-      .use('/api/*', csrfProtection)
-      .use('/api/*', createIdentityMiddleware(auth))
-      .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
-      .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
-      .get('/api/auth/config', (c) => {
-        const env = (infra.env ?? (typeof process !== 'undefined' ? process.env : {})) ?? {};
-        const magicLinkEnabled = Boolean(
-          (infra.email && infra.email.provider !== 'console') || env.RESEND_API_KEY,
-        );
-        c.header('Cache-Control', 'no-store');
-        return c.json({
-          signupMode: policy.signupMode(),
-          bootstrapTokenRequired: hasBootstrapToken,
-          emailPasswordEnabled: true,
-          magicLinkEnabled,
-          oauthProviders: [
-            ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
-            ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
-          ],
-          privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
-          termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
-          ...(env.DEMO_MODE === 'true' &&
-          typeof env.DEMO_EMAIL === 'string' &&
-          typeof env.DEMO_PASSWORD === 'string' &&
-          env.DEMO_EMAIL.trim() &&
-          env.DEMO_PASSWORD.trim()
-            ? {
-                demoAccount: {
-                  email: env.DEMO_EMAIL.trim(),
-                  password: env.DEMO_PASSWORD.trim(),
-                },
-              }
-            : {}),
-        });
-      })
+      } catch {
+        // Non-Worker runtimes / unit tests using app.request() have no ExecutionContext.
+      }
+      return runWithEventExecutionContext({ waitUntil }, () => next());
+    })
+    .use('*', securityHeaders)
+    .use('/api/*', (c, next) => {
+      if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
+        return bodyLimit(maxUploadBytes + 64 * 1024)(c, next);
+      }
+      return bodyLimit()(c, next);
+    })
+    .use('/api/*', csrfProtection)
+    .use('/api/*', createIdentityMiddleware(auth))
+    .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
+    .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
+    .get('/api/auth/config', async (c) => {
+      const env = (effectiveInfra.env ?? (typeof process !== 'undefined' ? process.env : {})) ?? {};
+      const defaultMagicLinkEnabled = Boolean(
+        (effectiveInfra.email && effectiveInfra.email.provider !== 'console') || env.RESEND_API_KEY,
+      );
+      const defaultOAuthProviders: Array<{
+        id: string;
+        name: string;
+        kind: 'social' | 'oidc' | 'saml';
+        authUrl?: string;
+      }> = [
+        ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
+        ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
+      ];
+      const authPatch = (await auth.getPublicConfig?.()) ?? {};
+      const oauthProviders = authPatch.oauthProviders
+        ? [...defaultOAuthProviders, ...authPatch.oauthProviders.filter((p) => !defaultOAuthProviders.some((d) => d.id === p.id))]
+        : defaultOAuthProviders;
+      c.header('Cache-Control', 'no-store');
+      return c.json({
+        signupMode: authPatch.signupMode ?? policy.signupMode(),
+        bootstrapTokenRequired: hasBootstrapToken,
+        emailPasswordEnabled: authPatch.emailPasswordEnabled ?? true,
+        magicLinkEnabled: authPatch.magicLinkEnabled ?? defaultMagicLinkEnabled,
+        oauthProviders,
+        privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
+        termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
+        ...(env.DEMO_MODE === 'true' &&
+        typeof env.DEMO_EMAIL === 'string' &&
+        typeof env.DEMO_PASSWORD === 'string' &&
+        env.DEMO_EMAIL.trim() &&
+        env.DEMO_PASSWORD.trim()
+          ? {
+              demoAccount: {
+                email: env.DEMO_EMAIL.trim(),
+                password: env.DEMO_PASSWORD.trim(),
+              },
+            }
+          : {}),
+      });
+    })
 
-      .get('/api/account', async (c) => {
-        const identity = c.get('identity');
-        if (!identity) {
-          return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
-        }
-        let workspaces = await repositories.workspaces.listByUser(identity.userId);
-        if (workspaces.length === 0 && policy.signupMode() === 'open') {
-          await policy.authorize({ action: 'workspace.create', userId: identity.userId });
-          await repositories.workspaces.create(
-            createWorkspacePlan({
-              userId: identity.userId,
-              name: 'My Workspace',
-              workspaceId: nanoid(),
-              projectId: nanoid(),
-              notepadId: nanoid(),
-              now: Date.now(),
-            }),
-          );
-          workspaces = await repositories.workspaces.listByUser(identity.userId);
-        }
-        c.header('Cache-Control', 'private, no-store');
-        return c.json({
-          user: {
-            id: identity.userId,
-            name: identity.name ?? '',
-            email: identity.email ?? '',
-            image: identity.image ?? null,
-          },
-          workspaces,
+    .get('/api/account', async (c) => {
+      const identity = c.get('identity');
+      if (!identity) {
+        return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+      }
+      let workspaces = await repositories.workspaces.listByUser(identity.userId);
+      if (workspaces.length === 0 && policy.signupMode() === 'open') {
+        const wsId = nanoid();
+        await policy.authorize({ action: 'workspace.create', userId: identity.userId });
+        await events.emitBefore('workspace.created', {
+          workspaceId: wsId,
+          userId: identity.userId,
+          name: 'My Workspace',
         });
-      })
+        const createdWs = await repositories.workspaces.create(
+          createWorkspacePlan({
+            userId: identity.userId,
+            name: 'My Workspace',
+            workspaceId: wsId,
+            projectId: nanoid(),
+            notepadId: nanoid(),
+            now: Date.now(),
+          }),
+        );
+        await events.emitAfter('workspace.created', {
+          workspaceId: createdWs.id,
+          userId: identity.userId,
+          name: createdWs.name,
+        });
+        workspaces = await repositories.workspaces.listByUser(identity.userId);
+      }
+      c.header('Cache-Control', 'private, no-store');
+      return c.json({
+        user: {
+          id: identity.userId,
+          name: identity.name ?? '',
+          email: identity.email ?? '',
+          image: identity.image ?? null,
+        },
+        workspaces,
+      });
+    })
 
       .get(
         '/api/account/export',
@@ -426,7 +508,7 @@ export function createCoreApp(
             }
           }
 
-          return c.json({
+          const exportPayload: Record<string, unknown> = {
             schemaVersion: 'burrow-personal-export-v1',
             exportedAt: Date.now(),
             scope: requestedWorkspaceId
@@ -446,7 +528,13 @@ export function createCoreApp(
             assignedTasks: assignedTasksByWs.flat(),
             comments: scopedComments,
             notifications: notificationsByWs.flat(),
+          };
+          await events.emitBefore('account.export', {
+            userId: identity.userId,
+            workspaceId: requestedWorkspaceId,
+            payload: exportPayload,
           });
+          return c.json(exportPayload);
         },
       )
 
@@ -640,18 +728,29 @@ export function createCoreApp(
             throw httpError(500, 'signup_incomplete', 'Account creation could not be completed');
           }
 
+          const wsId = nanoid();
           await policy.authorize({ action: 'workspace.create', userId });
+          await events.emitBefore('workspace.created', {
+            workspaceId: wsId,
+            userId,
+            name: 'My Workspace',
+          });
 
-          await repositories.workspaces.create(
+          const createdWs = await repositories.workspaces.create(
             createWorkspacePlan({
               userId,
               name: 'My Workspace',
-              workspaceId: nanoid(),
+              workspaceId: wsId,
               projectId: nanoid(),
               notepadId: nanoid(),
               now: Date.now(),
             }),
           );
+          await events.emitAfter('workspace.created', {
+            workspaceId: createdWs.id,
+            userId,
+            name: createdWs.name,
+          });
 
           return authRes;
         }
@@ -810,6 +909,14 @@ export function createCoreApp(
           throw httpError(403, 'forbidden', 'Direct sign-up disabled; use bootstrap or invite');
         }
 
+        const deletingUserId =
+          c.req.method.toUpperCase() === 'POST' && path === '/api/auth/delete-user'
+            ? c.get('identity')?.userId ?? null
+            : null;
+        if (deletingUserId) {
+          await events.emitBefore('user.deleted', { userId: deletingUserId });
+        }
+
         // Better-auth attempts to parse JSON body if content-type contains application/json,
         // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
         const req = c.req.raw;
@@ -864,6 +971,9 @@ export function createCoreApp(
             const stampedReq = new Request(req, { headers: stampedHeaders });
             res = await dispatch(stampedReq);
           }
+          if (deletingUserId && res.ok) {
+            await events.emitAfter('user.deleted', { userId: deletingUserId });
+          }
           return res;
         } catch (err: any) {
           if (err && (typeof err.statusCode === 'number' || err.status)) {
@@ -873,15 +983,13 @@ export function createCoreApp(
           }
           throw err;
         }
-      })
+      });
 
-      // ---------------------------------------------------------------------------
-      // Notifications
-      // ---------------------------------------------------------------------------
+  for (const { mountPath, router } of loadedPlugins.pluginRoutes) {
+    baseApp.route(mountPath, router);
+  }
 
-      // ---------------------------------------------------------------------------
-      // Error handling
-      // ---------------------------------------------------------------------------
+  return baseApp
       .onError((err, c) => {
         const exceededLimit = getBodyLimitExceeded(c);
         if (exceededLimit !== null) {
@@ -909,8 +1017,7 @@ export function createCoreApp(
         return c.json({ error: { code: 'internal_error', message: 'Internal server error' } }, 500);
       })
 
-      .notFound((c) => c.json({ error: { code: 'not_found', message: 'Not found' } }, 404))
-  );
+      .notFound((c) => c.json({ error: { code: 'not_found', message: 'Not found' } }, 404));
 }
 
 /** RPC types come from the application both runtimes actually serve. */
