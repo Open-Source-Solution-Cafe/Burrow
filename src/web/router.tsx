@@ -2,6 +2,7 @@ import { useEffect, useState, type ComponentType, type FormEvent, type ReactNode
 import { useQueries } from '@tanstack/react-query';
 import type { BurrowWebPlugin } from '@burrow/sdk';
 import {
+  type AnyRoute,
   createRootRoute,
   createRoute,
   createRouter,
@@ -534,11 +535,44 @@ const publicShareRoute = createRoute({
   component: PublicShareView,
 });
 
-export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
-  const rootPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
-  const shellPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
-  const workspacePluginRoutes: Array<ReturnType<typeof createRoute>> = [];
-  const projectPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
+const baseRouteTree = rootRoute.addChildren([
+  loginRoute,
+  inviteRoute,
+  publicShareRoute,
+  shellRoute.addChildren([
+    homeRoute,
+    workspaceRoute.addChildren([
+      workspaceIndexRoute,
+      projectRoute.addChildren([
+        projectHomeRoute,
+        notepadRoute,
+        boardRoute,
+        trashRoute,
+        libraryRoute,
+      ]),
+      tasksRoute,
+      profileRoute,
+      settingsRoute,
+      membersRoute,
+    ]),
+    legacyProjectRoute,
+    legacyNotepadRoute,
+    legacyBoardRoute,
+    legacyTrashRoute,
+    legacyTasksRoute,
+    legacyProfileRoute,
+    legacySettingsRoute,
+    legacyMembersRoute,
+  ]),
+]);
+
+export const router = createRouter({ routeTree: baseRouteTree });
+
+export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []): typeof router {
+  const rootPluginRoutes: AnyRoute[] = [];
+  const shellPluginRoutes: AnyRoute[] = [];
+  const workspacePluginRoutes: AnyRoute[] = [];
+  const projectPluginRoutes: AnyRoute[] = [];
 
   for (const plugin of plugins) {
     for (const contribution of plugin.routes ?? []) {
@@ -551,7 +585,7 @@ export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
             getParentRoute: () => rootRoute,
             path: contribution.path,
             component: () => <Comp />,
-          }),
+          }) as AnyRoute,
         );
       } else if (parentKind === 'shell') {
         shellPluginRoutes.push(
@@ -559,7 +593,7 @@ export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
             getParentRoute: () => shellRoute,
             path: contribution.path,
             component: () => <Comp />,
-          }),
+          }) as AnyRoute,
         );
       } else if (parentKind === 'project') {
         projectPluginRoutes.push(
@@ -567,7 +601,7 @@ export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
             getParentRoute: () => projectRoute,
             path: contribution.path,
             component: () => <Comp />,
-          }),
+          }) as AnyRoute,
         );
       } else {
         workspacePluginRoutes.push(
@@ -575,51 +609,62 @@ export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
             getParentRoute: () => workspaceRoute,
             path: contribution.path,
             component: () => <Comp />,
-          }),
+          }) as AnyRoute,
         );
       }
     }
   }
 
-  const tree = rootRoute.addChildren([
+  if (
+    rootPluginRoutes.length === 0 &&
+    shellPluginRoutes.length === 0 &&
+    workspacePluginRoutes.length === 0 &&
+    projectPluginRoutes.length === 0
+  ) {
+    return createRouter({ routeTree: baseRouteTree });
+  }
+
+  const projectChildren: AnyRoute[] = [
+    projectHomeRoute,
+    notepadRoute,
+    boardRoute,
+    trashRoute,
+    libraryRoute,
+    ...projectPluginRoutes,
+  ];
+  const workspaceChildren: AnyRoute[] = [
+    workspaceIndexRoute,
+    (projectRoute as AnyRoute).addChildren(projectChildren),
+    tasksRoute,
+    profileRoute,
+    settingsRoute,
+    membersRoute,
+    ...workspacePluginRoutes,
+  ];
+  const shellChildren: AnyRoute[] = [
+    homeRoute,
+    ...shellPluginRoutes,
+    (workspaceRoute as AnyRoute).addChildren(workspaceChildren),
+    legacyProjectRoute,
+    legacyNotepadRoute,
+    legacyBoardRoute,
+    legacyTrashRoute,
+    legacyTasksRoute,
+    legacyProfileRoute,
+    legacySettingsRoute,
+    legacyMembersRoute,
+  ];
+  const rootChildren: AnyRoute[] = [
     loginRoute,
     inviteRoute,
     publicShareRoute,
     ...rootPluginRoutes,
-    shellRoute.addChildren([
-      homeRoute,
-      ...shellPluginRoutes,
-      workspaceRoute.addChildren([
-        workspaceIndexRoute,
-        projectRoute.addChildren([
-          projectHomeRoute,
-          notepadRoute,
-          boardRoute,
-          trashRoute,
-          libraryRoute,
-          ...projectPluginRoutes,
-        ]),
-        tasksRoute,
-        profileRoute,
-        settingsRoute,
-        membersRoute,
-        ...workspacePluginRoutes,
-      ]),
-      legacyProjectRoute,
-      legacyNotepadRoute,
-      legacyBoardRoute,
-      legacyTrashRoute,
-      legacyTasksRoute,
-      legacyProfileRoute,
-      legacySettingsRoute,
-      legacyMembersRoute,
-    ]),
-  ]);
+    (shellRoute as AnyRoute).addChildren(shellChildren),
+  ];
 
+  const tree = (rootRoute as AnyRoute).addChildren(rootChildren) as unknown as typeof baseRouteTree;
   return createRouter({ routeTree: tree });
 }
-
-export const router = createBurrowRouter();
 
 declare module '@tanstack/react-router' {
   interface Register {
