@@ -434,7 +434,7 @@ export interface INotepadRepository {
   ): Promise<{ id: string; title: string; icon: string | null }[]>;
 }
 
-/** Actor and tenant scope required by every note/tree/content write command. */
+/** Actor and workspace scope required by every note/tree/content write command. */
 export interface NotepadMutationScope {
   workspaceId: string;
   projectId: string;
@@ -442,7 +442,7 @@ export interface NotepadMutationScope {
   minimumRole: 'editor' | 'owner';
 }
 
-/** Explicit tenant and actor scope for project tag mutations. */
+/** Explicit workspace and actor scope for project tag mutations. */
 export type TagMutationScope = NotepadMutationScope;
 
 export interface ITagRepository {

@@ -25,6 +25,7 @@ interface AuthConfig {
   oauthProviders: OAuthProviderConfig[];
   privacyPolicyUrl?: string | null;
   termsOfServiceUrl?: string | null;
+  demoAccount?: { email: string; password: string } | null;
 }
 
 async function hasAccountSession(signal?: AbortSignal): Promise<boolean> {
@@ -61,26 +62,13 @@ export function Login() {
   const queryEmail = searchParams?.get('email') || '';
   const queryMode = searchParams?.get('mode');
 
-  const isDemoHost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'burrow.osscafe.com' ||
-      window.location.hostname === 'osscafe.com' ||
-      window.location.search.includes('demo=true'));
-
   const [isSignUp, setIsSignUp] = useState(() =>
     queryMode ? queryMode === 'signup' : Boolean(queryInviteToken),
   );
   const [useMagicLink, setUseMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [email, setEmail] = useState(() => {
-    if (queryEmail) return queryEmail;
-    if (isDemoHost && !queryInviteToken) return 'demo@osscafe.com';
-    return '';
-  });
-  const [password, setPassword] = useState(() => {
-    if (isDemoHost && !queryInviteToken) return 'demopassword123';
-    return '';
-  });
+  const [email, setEmail] = useState(() => queryEmail || '');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
@@ -90,6 +78,7 @@ export function Login() {
     emailPasswordEnabled: true,
     magicLinkEnabled: false,
     oauthProviders: [],
+    demoAccount: null,
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,12 +98,17 @@ export function Login() {
             oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
             privacyPolicyUrl: data.privacyPolicyUrl ?? null,
             termsOfServiceUrl: data.termsOfServiceUrl ?? null,
+            demoAccount: data.demoAccount ?? null,
           });
+          if (data.demoAccount && !queryInviteToken && !queryEmail) {
+            setEmail((prev) => prev || data.demoAccount!.email);
+            setPassword((prev) => prev || data.demoAccount!.password);
+          }
         }
       })
       .catch(() => {});
     return () => controller.abort();
-  }, []);
+  }, [queryEmail, queryInviteToken]);
 
   // Redirect to app if already authenticated
   useEffect(() => {
@@ -347,7 +341,7 @@ export function Login() {
           </p>
         </div>
 
-        {isDemoHost && !withoutWorkspace && (
+        {authConfig.demoAccount && !withoutWorkspace && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--accent)] space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-[var(--text)] flex items-center gap-1.5">
@@ -356,8 +350,8 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('demo@osscafe.com');
-                  setPassword('demopassword123');
+                  setEmail(authConfig.demoAccount!.email);
+                  setPassword(authConfig.demoAccount!.password);
                   setIsSignUp(false);
                   setUseMagicLink(false);
                   setError(null);
@@ -370,11 +364,11 @@ export function Login() {
             <div className="space-y-0.5 text-[var(--muted)] font-mono text-[11px]">
               <div>
                 <span className="text-[var(--text)] font-sans">{t('login.email')}:</span>{' '}
-                demo@osscafe.com
+                {authConfig.demoAccount.email}
               </div>
               <div>
                 <span className="text-[var(--text)] font-sans">{t('login.password')}:</span>{' '}
-                demopassword123
+                {authConfig.demoAccount.password}
               </div>
             </div>
             <p className="text-[10px] text-[var(--muted)]">{t('login.demoNotice')}</p>

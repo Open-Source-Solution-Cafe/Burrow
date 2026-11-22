@@ -260,6 +260,18 @@ export function createCoreApp(
           ],
           privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
           termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
+          ...(env.DEMO_MODE === 'true' &&
+          typeof env.DEMO_EMAIL === 'string' &&
+          typeof env.DEMO_PASSWORD === 'string' &&
+          env.DEMO_EMAIL.trim() &&
+          env.DEMO_PASSWORD.trim()
+            ? {
+                demoAccount: {
+                  email: env.DEMO_EMAIL.trim(),
+                  password: env.DEMO_PASSWORD.trim(),
+                },
+              }
+            : {}),
         });
       })
 

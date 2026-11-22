@@ -1,10 +1,5 @@
 [
   {
-    "path": "src/core/infrastructure/types.ts",
-    "pattern": "tenant",
-    "reason": "Infrastructure interface documentation referring to generic actor and tenant scope"
-  },
-  {
     "path": "tests/api/d1-atomicity.test.ts",
     "pattern": "tenant",
     "reason": "Test comments discussing tenant-scope trigger isolation"

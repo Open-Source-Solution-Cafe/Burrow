@@ -629,7 +629,7 @@ export function createWorkspaceExportRoutes(args: {
     },
   );
 
-  // 4. Instance Migration Bundle Import (Self-Hosted -> Remote / Cloud)
+  // 4. Instance Migration Bundle Import (Source Instance -> Target Instance)
   route.post('/import-bundle', zValidator('json', bundleImportSchema), async (c) => {
     const identity = c.get('identity');
     if (!identity) throw httpError(401, 'unauthorized', 'Authentication required');
