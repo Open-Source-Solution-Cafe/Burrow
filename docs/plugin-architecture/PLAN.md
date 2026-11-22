@@ -24,7 +24,7 @@
 ## Phase 1: Core Seams and Monorepo Split (`Burrow`)
 - [x] **1.1** Clean cloud/demo leaks (`policy.ts`, `infrastructure/types.ts`, `decoupling-allowlist.json`, `workspace-export.ts`, `Login.tsx`, update `check-decoupling.mjs` to scan `packages/`).
 - [x] **1.2** Split into pnpm workspace packages: `packages/sdk`, `packages/core`, `packages/web`, `packages/worker`, `packages/plugins` while keeping root build, Vitest, and `pnpm deploy` working.
-- [x] **1.3** Implement `packages/sdk` (`@burrow/sdk`, zero runtime dependencies, MIT license field, types & manifest interfaces).
+- [x] **1.3** Implement `packages/sdk` (`@burrow/sdk`, zero runtime deps, MIT license field, types & manifest interfaces).
 - [x] **1.4** Add typed event bus (`PluginEventBus`) in core with synchronous `before*` guards and post-commit `after*` handlers dispatched via `ctx.waitUntil` (`task.created`, `task.updated`, `task.deleted`, `notepad.saved`, `workspace.created`, `workspace.deleted`, `user.deleted`, `account.export`).
 - [x] **1.5** Implement `createApp({ plugins, adapters, policy })` in `worker/index.ts` and `core/app.ts`; pass `ExecutionContext`; mount plugin routes at `/api/plugins/:id` with identity, workspace, and role middleware helpers.
 - [x] **1.6** Add `AuthProvider.getPublicConfig()` for `/api/auth/config` composition and widen `oauthProviders[].kind` in `Login.tsx` (`'social' | 'oidc' | 'saml'`).
@@ -33,25 +33,25 @@
 - [x] **1.9** Add Phase 1 tests (events, migrations, `PluginDb`, manifest validation, route mounting, `AuthProvider.getPublicConfig`) and `packages/plugins/hello` example plugin; verify local Wrangler dev / dry-run and OSS deploy unchanged.
 
 ## Phase 2: `burrow-cloud` on Workers + D1 as Plugins
-- [ ] **2.1** Export `mountBurrowWeb({ plugins })` and `createBurrowRouter(plugins)` from `@burrow/web`; consume `@burrow/*` from `burrow-cloud` via pinned `vendor/burrow` submodule.
-- [ ] **2.2** Port tenancy, Stripe billing, D1 quota enforcement (single conditional `UPDATE ... RETURNING` inside `db.batch()`), and OIDC/SAML SSO to `BurrowServerPlugin` modules using `plugin_cloud_*` D1 tables.
-- [ ] **2.3** Replace HTTP-path sniffing in `burrow-cloud/src/app.ts` with event handlers (`workspace.deleted`, `user.deleted`, `account.export`) and policy hooks; replace raw-HTML admin UI with plugin routes and web plugins.
-- [ ] **2.4** Configure `burrow-cloud` Vite build composing `@burrow/web` with private `BurrowWebPlugin` modules (billing settings + admin UI).
-- [ ] **2.5** Add `burrow-cloud/src/worker.ts`, `wrangler.jsonc`, and `pnpm deploy`; archive superseded Node/Postgres code in `burrow-cloud/legacy/` with `README.md`; verify tests + `vite build` + `wrangler deploy --dry-run`.
+- [x] **2.1** Export `mountBurrowWeb({ plugins })` and `createBurrowRouter(plugins)` from `@burrow/web`; consume `@burrow/*` from `burrow-cloud` via pinned `vendor/burrow` submodule.
+- [x] **2.2** Port tenancy, Stripe billing, D1 quota enforcement (single conditional `UPDATE ... RETURNING` inside D1 atomic flow), and OIDC/SAML SSO to `BurrowServerPlugin` modules using `plugin_cloud_*` D1 tables.
+- [x] **2.3** Replace HTTP-path sniffing in `burrow-cloud/src/app.ts` with event handlers (`workspace.deleted`, `user.deleted`, `account.export`) and policy hooks; replace raw-HTML admin UI with plugin routes and web plugins.
+- [x] **2.4** Configure `burrow-cloud` Vite build composing `@burrow/web` with private `BurrowWebPlugin` modules (billing settings + admin UI).
+- [x] **2.5** Add `burrow-cloud/src/worker.ts`, `wrangler.jsonc`, and `pnpm deploy`; archive superseded Node/Postgres code in `burrow-cloud/legacy/` with `README.md`; verify tests + `vite build` + `wrangler deploy --dry-run`.
 
 ## Phase 3: Authoring and UI Extension Points (`Burrow`)
-- [ ] **3.1** Unify slash commands (`src/shared/slash.ts` single source used by `NotepadEditor` and `QuickAddCard`; plugins register commands for `['notepad', 'card', 'quickadd']`).
-- [ ] **3.2** Open `@` mention kinds (`plugin:<id>:<type>`), pluggable `/suggest` & `/reference`, and plugin-owned link tables without modifying `notepad_links`.
-- [ ] **3.3** Add `cards.card_type` (default `'task'`) via new core migration (`0006_add_card_type.sql` + Postgres parity + `db:sync-d1`), plugin metadata FKs to `cards(id) ON DELETE CASCADE`, and `renderTile`/`renderPanel` slots in `KanbanView` and `CardPanel`.
-- [ ] **3.4** Add Sidebar rail panel slots and Settings section slots (replace closed `RailTab` union with extensible registry).
-- [ ] **3.5** Dogfood: extract `publicSharing` and `workspaceExport` into `packages/plugins/` using the public SDK surface.
-- [ ] **3.6** Write `docs/plugin-architecture/AUTHORING.md`, create `packages/plugins/_template`, and build a third showcase plugin (`packages/plugins/estimation`) adding a slash command, card type, `@` mention source, and sidebar panel without modifying core.
+- [x] **3.1** Unify slash commands (`src/shared/slash.ts` canonical registry consumed by `NotepadEditor` and `QuickAddCard`; plugins register commands for `['notepad', 'card', 'quickadd']` with `insertText` & `openModal`).
+- [x] **3.2** Open `@` mention kinds (`plugin:<id>:<type>`), pluggable `/suggest` & `/references`, and editor rendering without modifying `notepad_links`.
+- [x] **3.3** Add `cards.card_type` (default `'task'`) via new core migration (`0006_add_card_type.sql` + Postgres parity + `db:sync-d1`), plugin metadata FKs to `cards(id) ON DELETE CASCADE`, and `renderTileBadge`/`renderTileFooter`/`renderPanelSection` slots in `KanbanView` and `CardPanel`.
+- [x] **3.4** Add Sidebar rail panel slots and Settings section slots (widen `RailTab` union + render `sidebarPanels` and `settingsSections`).
+- [x] **3.5** Dogfood: extract `publicSharing` and `workspaceExport` into `packages/plugins/` using the public SDK surface.
+- [x] **3.6** Write `docs/plugin-architecture/AUTHORING.md`, create `packages/plugins/_template`, and build `packages/plugins/estimation` showcase plugin adding a slash command, card type, `@` mention source, and sidebar panel without modifying core.
 
 ## Phase 4: Untrusted Plugin Design (`DOCS ONLY`)
-- [ ] **4.1** Write `docs/plugin-architecture/UNTRUSTED.md` covering the curated PR catalog process, Cloudflare Workers for Platforms (dispatch namespaces, per-invocation limits, Outbound Worker, RPC façade, verified pricing/limits), and sandboxed `<iframe>` UI bridge.
+- [x] **4.1** Write `docs/plugin-architecture/UNTRUSTED.md` covering the curated PR catalog process, Cloudflare Workers for Platforms (dispatch namespaces, per-invocation limits, Outbound Worker, RPC façade, verified pricing/limits), and sandboxed `<iframe>` UI bridge.
 
 ## Finish
-- [ ] Run full quality gate in both repos (`tsc`, `vitest`, `check-decoupling`, `check-licenses`, `check-basalt`, `check-sync`, `eslint`, `vite build`, `wrangler deploy --dry-run`).
-- [ ] Update `CHANGELOG.md` and run version bump parity checks in both repos.
-- [ ] Write `docs/plugin-architecture/HANDOFF.md` and finalize `PLAN.md` / `PROGRESS.md` / `DECISIONS.md`.
-- [ ] Verify clean git state, untouched `master`/`main`, and push `feat/plugin-architecture` in both repos.
+- [x] Run full quality gate in both repos (`tsc`, `vitest`, `check-decoupling`, `check-licenses`, `check-basalt`, `check-sync`, `eslint`, `vite build`, `wrangler deploy --dry-run`).
+- [x] Update `CHANGELOG.md` and run version bump parity checks in both repos.
+- [x] Write `docs/plugin-architecture/HANDOFF.md` and finalize `PLAN.md` / `PROGRESS.md` / `DECISIONS.md`.
+- [x] Verify clean git state, untouched `master`/`main`, and push `feat/plugin-architecture` in both repos.
