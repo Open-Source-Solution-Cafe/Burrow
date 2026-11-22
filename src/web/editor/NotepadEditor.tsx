@@ -51,7 +51,12 @@ import { BasaltSuggestionMenu } from './BasaltSuggestionMenu';
 import { Avatar } from '../components/ui/Avatar';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import { useAccount, useProjectTags } from '../lib/queries';
+import {
+  invalidateProjectNotepads,
+  projectResourceKey,
+  useAccount,
+  useProjectTags,
+} from '../lib/queries';
 import { projectPath, projectTarget, projectApiPath } from '../lib/workspaceRoutes';
 import { SaveConflictError, SaveLockController, type EditorScope } from './saveLockController';
 import { useTheme } from '../lib/theme';
@@ -707,7 +712,12 @@ function NotepadEditorInner({
     const next = !data.isFavorite;
     setData((prev) => ({ ...prev, isFavorite: next }));
     queryClient.setQueryData<Array<{ id: string; isFavorite: boolean }>>(
-      ['notepads', initialData.workspaceId, initialData.projectId],
+      projectResourceKey(
+        'notepads',
+        account?.user.id,
+        initialData.workspaceId,
+        initialData.projectId,
+      ),
       (old) =>
         old ? old.map((n) => (n.id === initialData.id ? { ...n, isFavorite: next } : n)) : old,
     );
@@ -728,14 +738,20 @@ function NotepadEditorInner({
         const err = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(err?.error?.message || 'Failed to update favorite');
       }
-      queryClient.invalidateQueries({
-        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
-      });
+      invalidateProjectNotepads(
+        queryClient,
+        account?.user.id,
+        initialData.workspaceId,
+        initialData.projectId,
+      );
     } catch (err) {
       setData((prev) => ({ ...prev, isFavorite: !next }));
-      queryClient.invalidateQueries({
-        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
-      });
+      invalidateProjectNotepads(
+        queryClient,
+        account?.user.id,
+        initialData.workspaceId,
+        initialData.projectId,
+      );
       const msg = err instanceof Error ? err.message : 'Failed to update favorite';
       console.error(msg, err);
       toast.error(msg);
@@ -766,7 +782,12 @@ function NotepadEditorInner({
           throw new Error(err?.error?.message || 'Failed to save title');
         }
         queryClient.setQueryData<Array<{ id: string; title: string } & Record<string, unknown>>>(
-          ['notepads', account?.user.id, initialData.workspaceId, initialData.projectId],
+          projectResourceKey(
+            'notepads',
+            account?.user.id,
+            initialData.workspaceId,
+            initialData.projectId,
+          ),
           (old) =>
             old
               ? old.map((n) =>
@@ -801,8 +822,19 @@ function NotepadEditorInner({
         throw new Error(err?.error?.message || 'Failed to delete notepad');
       }
       setConfirmDeleteOpen(false);
-      queryClient.invalidateQueries({
-        queryKey: ['notepads', initialData.workspaceId, initialData.projectId],
+      invalidateProjectNotepads(
+        queryClient,
+        account?.user.id,
+        initialData.workspaceId,
+        initialData.projectId,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: projectResourceKey(
+          'trash',
+          account?.user.id,
+          initialData.workspaceId,
+          initialData.projectId,
+        ),
       });
       navigate(projectTarget(initialData.workspaceId, initialData.projectId));
     } catch (err) {
@@ -1048,7 +1080,9 @@ function NotepadEditorInner({
         throw new Error(errJson.error?.message || errJson.message || 'Failed to create tag');
       }
       const newTag = (await res.json()) as { id: string; name: string };
-      await queryClient.invalidateQueries({ queryKey: ['tags', data.workspaceId, data.projectId] });
+      await queryClient.invalidateQueries({
+        queryKey: projectResourceKey('tags', account?.user.id, data.workspaceId, data.projectId),
+      });
       toast.success(`Tag #${newTag.name} created`);
       await addTag(newTag.id);
       setShowTagMenu(false);

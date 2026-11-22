@@ -46,6 +46,40 @@ function projectJson(method: string, body?: unknown): RequestInit {
   };
 }
 
+export type ProjectResourceKind =
+  | 'notepads'
+  | 'recent-notepads'
+  | 'boards'
+  | 'tags'
+  | 'trash';
+
+/** Builds an account-, workspace-, and project-scoped TanStack Query cache key. */
+export function projectResourceKey(
+  resource: ProjectResourceKind,
+  accountId: string | undefined,
+  workspaceId: string | undefined,
+  projectId: string | undefined,
+) {
+  return [resource, accountId, workspaceId, projectId] as const;
+}
+
+/** Invalidates both notepad tree and recent-notepad caches for a single account/workspace/project. */
+export function invalidateProjectNotepads(
+  queryClient: {
+    invalidateQueries: (filters: { queryKey: readonly unknown[] }) => Promise<void> | void;
+  },
+  accountId: string | undefined,
+  workspaceId: string,
+  projectId: string,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: projectResourceKey('notepads', accountId, workspaceId, projectId),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: projectResourceKey('recent-notepads', accountId, workspaceId, projectId),
+  });
+}
+
 const resourceAccountId = Symbol('resourceAccountId');
 type AccountBoundInput<T> = T & { [resourceAccountId]: string | null };
 
@@ -650,7 +684,7 @@ export function useBoards(workspaceId: string | undefined, projectId: string | u
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['boards', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('boards', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<Board[]>(workspaceId, projectId, 'boards');
@@ -1493,7 +1527,7 @@ export function useTrash(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['trash', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('trash', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return { notepads: [], boards: [] };
       return projectRequest<{ notepads: TrashedNotepad[]; boards: TrashedBoard[] }>(
@@ -1612,7 +1646,7 @@ export function useRecentNotepads(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['recent-notepads', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('recent-notepads', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<Array<{
@@ -1643,7 +1677,7 @@ export function useNotepads(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery<NotepadNode[]>({
-    queryKey: ['notepads', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('notepads', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<NotepadNode[]>(workspaceId, projectId, 'notepads');
@@ -1733,7 +1767,7 @@ export function useProjectTags(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['tags', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('tags', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<TagItem[]>(workspaceId, projectId, 'tags');

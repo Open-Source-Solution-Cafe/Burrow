@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- **Account-Scoped Cache Invalidation for Notepads, Boards & Tags (`queries.ts`, `Sidebar.tsx`, `NotepadTree.tsx`, `ProjectHome.tsx`, `NotepadEditor.tsx`, `ReferenceDialogs.tsx`, `DataPortabilitySection.tsx`)**: Added `projectResourceKey` and `invalidateProjectNotepads` helpers including `accountId` in invalidation keys so creating, favoriting, deleting, or importing notepads updates the sidebar tree and recent notepads immediately without requiring a page reload.
 
 ### Security
 

@@ -3,7 +3,14 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { FileText, Kanban, Plus } from 'lucide-react';
 import { toast } from 'sonner';
-import { useBoards, useCreateBoard, useProjects, useRecentNotepads } from '../lib/queries';
+import {
+  invalidateProjectNotepads,
+  useAccount,
+  useBoards,
+  useCreateBoard,
+  useProjects,
+  useRecentNotepads,
+} from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { PromptDialog } from '../components/ui/PromptDialog';
@@ -19,6 +26,7 @@ export function ProjectHome() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const { data: account } = useAccount();
   const { workspaceId, projectId } = useParams({ strict: false }) as {
     workspaceId?: string;
     projectId?: string;
@@ -68,10 +76,7 @@ export function ProjectHome() {
         throw new Error(t('common.error'));
       }
       const data = (await res.json()) as { id: string };
-      queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, currentProjectId] });
-      queryClient.invalidateQueries({
-        queryKey: ['recent-notepads', workspaceId, currentProjectId],
-      });
+      invalidateProjectNotepads(queryClient, account?.user.id, workspaceId, currentProjectId);
       toast.success(t('project.notepadCreated'));
       navigate(notepadTarget(workspaceId, currentProjectId, data.id));
     } catch (err: any) {

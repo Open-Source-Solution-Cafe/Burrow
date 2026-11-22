@@ -13,6 +13,8 @@ import {
 import { toast } from 'sonner';
 import {
   fetchWorkspaceFeatureFlags,
+  invalidateProjectNotepads,
+  projectResourceKey,
   useAccount,
   useFeatureFlags,
   useProjects,
@@ -392,8 +394,10 @@ export function DataPortabilitySection({
         if (!res.ok) throw new Error(out.error?.message || 'Notion import failed');
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, targetProjectId] });
-      await queryClient.invalidateQueries({ queryKey: ['boards', workspaceId, targetProjectId] });
+      invalidateProjectNotepads(queryClient, account?.user.id, workspaceId, targetProjectId);
+      await queryClient.invalidateQueries({
+        queryKey: projectResourceKey('boards', account?.user.id, workspaceId, targetProjectId),
+      });
       toast.success('Import completed successfully');
       setAnalysis(null);
     } catch (err) {

@@ -32,6 +32,7 @@ import { Avatar } from '../ui/Avatar';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PromptDialog } from '../ui/PromptDialog';
 import {
+  invalidateProjectNotepads,
   useBoards,
   useCreateBoard,
   useDeleteBoard,
@@ -269,7 +270,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   };
 
   const createRootNotepad = useMutation({
-    mutationFn: async ({ workspaceId, projectId }: { workspaceId: string; projectId: string }) => {
+    mutationFn: async ({
+      workspaceId,
+      projectId,
+    }: {
+      accountId?: string;
+      workspaceId: string;
+      projectId: string;
+    }) => {
       const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -279,7 +287,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       return res.json();
     },
     onSuccess: (data: { id: string }, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] });
+      invalidateProjectNotepads(queryClient, vars.accountId, vars.workspaceId, vars.projectId);
       if (data.id) {
         navigate({
           ...notepadTarget(vars.workspaceId, vars.projectId, data.id),
@@ -293,7 +301,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
   const createRootNotepadNow = () => {
     if (!workspaceId || !currentProjectId) return;
-    createRootNotepad.mutate({ workspaceId, projectId: currentProjectId });
+    createRootNotepad.mutate({
+      accountId: account?.user.id,
+      workspaceId,
+      projectId: currentProjectId,
+    });
   };
 
   const openPalette = (query?: string) => {
