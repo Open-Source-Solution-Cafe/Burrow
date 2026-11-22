@@ -22,6 +22,15 @@ export function createPluginAdminRoutes(args: {
     if (!identity) {
       return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
     }
+    const isInstanceAdmin = workspaces.isInstanceOwner
+      ? await workspaces.isInstanceOwner(identity.userId)
+      : false;
+    if (!isInstanceAdmin) {
+      return c.json(
+        { error: { code: 'forbidden', message: 'Instance owner privileges required to view plugins' } },
+        403,
+      );
+    }
     c.header('Cache-Control', 'private, no-store');
     return c.json({ plugins: runtimeRegistry.listViews() });
   });
@@ -54,13 +63,10 @@ export function createPluginAdminRoutes(args: {
       ? await workspaces.isInstanceOwner(identity.userId)
       : false;
     if (!isInstanceAdmin) {
-      const owned = await workspaces.listByUser(identity.userId);
-      if (!owned.some((ws) => ws.role === 'owner')) {
-        return c.json(
-          { error: { code: 'forbidden', message: 'Owner privileges required to toggle plugins' } },
-          403,
-        );
-      }
+      return c.json(
+        { error: { code: 'forbidden', message: 'Instance owner privileges required to toggle plugins' } },
+        403,
+      );
     }
 
     const body = c.req.valid('json');

@@ -95,14 +95,23 @@ export class PluginRuntimeRegistry {
     return this.wildcardDisabled || this.envDisabled.has(pluginId);
   }
 
-  register(manifest: PluginManifest, opts: { firstPartyCore?: boolean } = {}): RegisteredPluginRecord {
+  isKillSwitched(pluginId: string): boolean {
+    return this.isKillSwitchedByEnv(pluginId);
+  }
+
+  register(
+    manifest: PluginManifest,
+    opts: { firstPartyCore?: boolean; consented?: boolean } = {},
+  ): RegisteredPluginRecord {
     const killSwitched = this.isKillSwitchedByEnv(manifest.id);
+    const firstPartyCore = Boolean(opts.firstPartyCore);
+    const consented = Boolean(opts.consented);
     const record: RegisteredPluginRecord = {
       manifest,
-      enabled: !killSwitched,
+      enabled: !killSwitched && (firstPartyCore || consented),
       killSwitched,
-      firstPartyCore: Boolean(opts.firstPartyCore),
-      instanceManaged: this.instanceManaged || Boolean(opts.firstPartyCore),
+      firstPartyCore,
+      instanceManaged: this.instanceManaged || firstPartyCore,
     };
     this.records.set(manifest.id, record);
     return record;
