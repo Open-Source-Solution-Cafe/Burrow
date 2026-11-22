@@ -506,7 +506,7 @@ export function DataPortabilitySection({
                                 hash="features"
                                 className="text-[11px] text-[var(--accent)] underline hover:opacity-80 shrink-0"
                               >
-                                Enable in Settings → Features &amp; Labs
+                                Enable in Workspace Settings → Features &amp; Labs
                               </Link>
                             )
                           )}

@@ -22,7 +22,8 @@ import { ProjectMediaLibrary } from './components/media/ProjectMediaLibrary';
 import { MembersSettings } from './pages/MembersSettings';
 import { MyTasksView } from './pages/MyTasksView';
 import { ProfileView } from './pages/ProfileView';
-import { SettingsView } from './pages/SettingsView';
+import { ProjectSettings } from './pages/ProjectSettings';
+import { WorkspaceSettings } from './pages/WorkspaceSettings';
 import { PublicShareView } from './pages/PublicShareView';
 import { StatusDiamond } from './components/ui/StatusDiamond';
 import { useTranslation, t } from './lib/i18n';
@@ -440,6 +441,11 @@ const libraryRoute = createRoute({
     );
   },
 });
+const projectSettingsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: 'settings',
+  component: ProjectSettings,
+});
 const tasksRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'tasks',
@@ -453,7 +459,7 @@ const profileRoute = createRoute({
 const settingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings',
-  component: SettingsView,
+  component: WorkspaceSettings,
 });
 const membersRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -549,6 +555,7 @@ const baseRouteTree = rootRoute.addChildren([
         boardRoute,
         trashRoute,
         libraryRoute,
+        projectSettingsRoute,
       ]),
       tasksRoute,
       profileRoute,
@@ -630,6 +637,7 @@ export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []): ty
     boardRoute,
     trashRoute,
     libraryRoute,
+    projectSettingsRoute,
     ...projectPluginRoutes,
   ];
   const workspaceChildren: AnyRoute[] = [

@@ -506,7 +506,12 @@ export const es: TranslationDictionary = {
   },
   settings: {
     title: 'Configuración',
-    subtitle: 'Administra el espacio de trabajo, preferencias del proyecto, funciones y sistema.',
+    subtitle: 'Administra el espacio de trabajo, funciones y opciones del sistema.',
+    workspaceSettingsTitle: 'Configuración del espacio de trabajo',
+    workspaceSettingsSubtitle:
+      'Administra el espacio de trabajo, accesos a proyectos, funciones y sistema.',
+    projectSettingsSubtitle:
+      'Administra los detalles, subida de archivos, etiquetas y ciclo de vida del proyecto.',
     profileAndAccount: 'Perfil y Cuenta',
     workspaceRole: 'Rol en el espacio:',
     logOut: 'Cerrar sesión',
@@ -516,8 +521,14 @@ export const es: TranslationDictionary = {
     leaveWorkspace: 'Abandonar espacio de trabajo',
     leaveWorkspaceNotice:
       'Un propietario debe nombrar a otro propietario antes de salir si es el único restante.',
+    projectsInWorkspaceTitle: 'Proyectos',
+    projectsInWorkspaceDesc:
+      'Abre la configuración de un proyecto para cambiar su nombre, configurar subidas, gestionar etiquetas o archivarlo y eliminarlo.',
+    openProjectSettings: 'Configuración del proyecto →',
+    openProjectOverview: 'Resumen del proyecto',
+    openWorkspaceSettings: 'Configuración del espacio de trabajo',
+    openWorkspaceMembers: 'Gestionar miembros →',
     projectSettingsTitle: 'Configuración del proyecto',
-    configuringProject: 'Configurando:',
     selectProjectPlaceholder: 'Selecciona un proyecto',
     projectNameLabel: 'Nombre del proyecto',
     projectIconLabel: 'Icono del proyecto',
@@ -526,7 +537,11 @@ export const es: TranslationDictionary = {
     dangerZone: 'Zona de peligro',
     archiveProject: 'Archivar proyecto',
     unarchiveProject: 'Desarchivar proyecto',
+    archiveProjectNamed: 'Archivar "{name}"',
+    unarchiveProjectNamed: 'Desarchivar "{name}"',
     deleteProject: 'Eliminar proyecto…',
+    deleteProjectNamed: 'Eliminar "{name}"…',
+    deleteProjectConfirmAction: 'Eliminar "{name}"',
     tagManagementTitle: 'Gestión de etiquetas',
     tagManagementDesc:
       'Etiquetas para {projectName}. Úsalas en tarjetas kanban para agrupar y filtrar tareas.',
@@ -555,6 +570,7 @@ export const es: TranslationDictionary = {
     unableToLoadProjectSettings: 'No se pudo cargar la configuración del proyecto.',
     selectAvailableProject: 'Selecciona un proyecto disponible.',
     noProjectsAvailableDesc: 'No hay proyectos disponibles.',
+    redirectingToProjectSettings: 'Abriendo configuración del proyecto…',
     tagCreated: 'Etiqueta creada',
     tagDeleted: 'Etiqueta eliminada',
   },

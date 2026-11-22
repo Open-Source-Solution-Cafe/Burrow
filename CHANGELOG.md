@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- **Dedicated Project Settings Route & Split Settings Scope (`WorkspaceSettings.tsx`, `ProjectSettings.tsx`, `Sidebar.tsx`, `ProjectSwitcher.tsx`)**: Split `SettingsView` into separate workspace-scoped (`WorkspaceSettings` at `/w/:workspaceId/settings`) and project-scoped (`ProjectSettings` at `/w/:workspaceId/p/$projectId/settings`) pages sharing UI primitives in `src/web/components/settings/`. Redirected legacy project-scoped `#project` / `#uploads` / `#tags` / `#danger-zone` hashes to the active/last project's settings route, kept the sidebar project tree and switcher active on Project Settings, removed the in-page `Configuring:` `<Select>` in favor of the sidebar `ProjectSwitcher`, unified `"Workspace Settings"` vs `"Project Settings"` labels across navigation, added per-project `Project Settings →` links in Workspace Settings, and required explicit project-named destructive buttons and type-to-confirm deletion.
 
 ### Deprecated
 

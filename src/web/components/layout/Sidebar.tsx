@@ -52,9 +52,12 @@ import { NotificationsBell } from './NotificationsBell';
 import { useWebPlugins } from '../../plugins/registry';
 import {
   boardTarget,
+  isProjectSettingsPath,
+  isWorkspaceSettingsPath,
   notepadTarget,
   projectTarget,
   projectLibraryTarget,
+  projectSettingsTarget,
   trashTarget,
   workspaceMembersTarget,
   workspaceProfileTarget,
@@ -98,6 +101,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const currentProjectId = params.projectId;
   const workspaceRole = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role;
   const libraryActive = pathname.endsWith('/library');
+  const projectSettingsActive = isProjectSettingsPath(pathname);
   const projectLibraryLink = workspaceId && currentProjectId && (
     <Link
       {...projectLibraryTarget(workspaceId, currentProjectId)}
@@ -110,6 +114,20 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
     >
       <Library className="h-4 w-4 shrink-0" />
       <span>{t('sidebar.projectLibrary')}</span>
+    </Link>
+  );
+  const projectSettingsLink = workspaceId && currentProjectId && (
+    <Link
+      {...projectSettingsTarget(workspaceId, currentProjectId)}
+      onClick={() => {
+        setActiveRailTab('overview');
+        onCloseMobile?.();
+      }}
+      aria-current={projectSettingsActive ? 'page' : undefined}
+      className={`flex items-center gap-2.5 px-2.5 py-2 text-sm theme-radius-md ${projectSettingsActive ? 'bg-hi text-hi-ink font-semibold' : 'text-muted hover:bg-hi hover:text-text'}`}
+    >
+      <Settings className="h-4 w-4 shrink-0" />
+      <span>{t('sidebar.projectSettings')}</span>
     </Link>
   );
   const currentBoardId = params.boardId;
@@ -152,7 +170,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   // Active rail tab selection state
   const getInitialRailTab = (): RailTab => {
     if (pathname.endsWith('/tasks')) return 'tasks';
-    if (pathname.includes('/settings')) return 'members';
+    if (isWorkspaceSettingsPath(pathname)) return 'members';
     if (currentProjectId && pathname.startsWith(`/w/${workspaceId}/p/${currentProjectId}/trash`))
       return 'trash';
     if (currentBoardId) return 'boards';
@@ -168,7 +186,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   useEffect(() => {
     if (pathname.endsWith('/tasks')) {
       setActiveRailTab('tasks');
-    } else if (pathname.includes('/settings')) {
+    } else if (isWorkspaceSettingsPath(pathname)) {
       setActiveRailTab('members');
     } else if (
       currentProjectId &&
@@ -179,7 +197,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       setActiveRailTab('boards');
     } else if (currentNotepadId) {
       setActiveRailTab('notepads');
-    } else if (isOverviewActive) {
+    } else if (isOverviewActive || isProjectSettingsPath(pathname)) {
       setActiveRailTab('overview');
     }
   }, [pathname, workspaceId, currentProjectId, currentBoardId, currentNotepadId, isOverviewActive]);
@@ -535,6 +553,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
             <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
             {projectLibraryLink}
+            {projectSettingsLink}
           </div>
 
           {/* Scrollable sections */}
@@ -1044,6 +1063,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
               <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
               {projectLibraryLink}
+              {projectSettingsLink}
             </div>
 
             {/* ------------------------------------------------------------- */}
@@ -1591,13 +1611,13 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         ? workspaceSettingsTarget(workspaceId)
                         : { to: '/' as const })}
                       className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
-                        pathname.endsWith('/settings')
+                        isWorkspaceSettingsPath(pathname) && !pathname.endsWith('/members')
                           ? 'bg-hi text-hi-ink font-bold'
                           : 'text-ink-muted font-medium hover:bg-hi hover:text-side-text'
                       }`}
                     >
                       <Settings className="w-4 h-4 shrink-0" />
-                      <span>{t('sidebar.projectSettings')}</span>
+                      <span>{t('sidebar.workspaceSettings')}</span>
                     </Link>
                   </div>
 

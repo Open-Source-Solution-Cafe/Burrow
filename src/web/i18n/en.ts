@@ -486,6 +486,9 @@ export interface TranslationDictionary {
   settings: {
     title: string;
     subtitle: string;
+    workspaceSettingsTitle: string;
+    workspaceSettingsSubtitle: string;
+    projectSettingsSubtitle: string;
     profileAndAccount: string;
     workspaceRole: string;
     logOut: string;
@@ -494,8 +497,13 @@ export interface TranslationDictionary {
     saveWorkspaceName: string;
     leaveWorkspace: string;
     leaveWorkspaceNotice: string;
+    projectsInWorkspaceTitle: string;
+    projectsInWorkspaceDesc: string;
+    openProjectSettings: string;
+    openProjectOverview: string;
+    openWorkspaceSettings: string;
+    openWorkspaceMembers: string;
     projectSettingsTitle: string;
-    configuringProject: string;
     selectProjectPlaceholder: string;
     projectNameLabel: string;
     projectIconLabel: string;
@@ -504,7 +512,11 @@ export interface TranslationDictionary {
     dangerZone: string;
     archiveProject: string;
     unarchiveProject: string;
+    archiveProjectNamed: string;
+    unarchiveProjectNamed: string;
     deleteProject: string;
+    deleteProjectNamed: string;
+    deleteProjectConfirmAction: string;
     tagManagementTitle: string;
     tagManagementDesc: string;
     newTagNamePlaceholder: string;
@@ -528,6 +540,7 @@ export interface TranslationDictionary {
     unableToLoadProjectSettings: string;
     selectAvailableProject: string;
     noProjectsAvailableDesc: string;
+    redirectingToProjectSettings: string;
     tagCreated: string;
     tagDeleted: string;
   };
@@ -893,7 +906,7 @@ export const en: TranslationDictionary = {
     account: 'Account',
     openSidebar: 'Open sidebar',
     resizePanel: 'Resize sidebar panel',
-    workspaceSettings: 'Workspace settings',
+    workspaceSettings: 'Workspace Settings',
   },
   project: {
     overview: 'Project Overview',
@@ -1141,7 +1154,12 @@ export const en: TranslationDictionary = {
   },
   settings: {
     title: 'Settings',
-    subtitle: 'Manage workspace preferences, project settings, feature flags, and system options.',
+    subtitle: 'Manage workspace preferences, feature flags, and system options.',
+    workspaceSettingsTitle: 'Workspace Settings',
+    workspaceSettingsSubtitle:
+      'Manage workspace preferences, project shortcuts, feature flags, and system options.',
+    projectSettingsSubtitle:
+      'Manage project details, file uploads, tags, and lifecycle actions.',
     profileAndAccount: 'Profile & Account',
     workspaceRole: 'Workspace Role:',
     logOut: 'Log out',
@@ -1151,8 +1169,14 @@ export const en: TranslationDictionary = {
     leaveWorkspace: 'Leave workspace',
     leaveWorkspaceNotice:
       'A workspace owner must promote another owner before leaving if they are the last owner.',
+    projectsInWorkspaceTitle: 'Projects',
+    projectsInWorkspaceDesc:
+      'Open Project Settings to rename a project, configure uploads, manage tags, or archive and delete it.',
+    openProjectSettings: 'Project Settings →',
+    openProjectOverview: 'Project Overview',
+    openWorkspaceSettings: 'Workspace Settings',
+    openWorkspaceMembers: 'Manage Members →',
     projectSettingsTitle: 'Project Settings',
-    configuringProject: 'Configuring:',
     selectProjectPlaceholder: 'Select a project',
     projectNameLabel: 'Project Name',
     projectIconLabel: 'Project Icon',
@@ -1161,7 +1185,11 @@ export const en: TranslationDictionary = {
     dangerZone: 'Danger Zone',
     archiveProject: 'Archive Project',
     unarchiveProject: 'Unarchive Project',
+    archiveProjectNamed: 'Archive "{name}"',
+    unarchiveProjectNamed: 'Unarchive "{name}"',
     deleteProject: 'Delete Project…',
+    deleteProjectNamed: 'Delete "{name}"…',
+    deleteProjectConfirmAction: 'Delete "{name}"',
     tagManagementTitle: 'Tag Management',
     tagManagementDesc:
       'Tags scoped to {projectName}. Use tags on kanban cards to group tasks and filter work.',
@@ -1189,6 +1217,7 @@ export const en: TranslationDictionary = {
     unableToLoadProjectSettings: 'Unable to load project settings.',
     selectAvailableProject: 'Select an available project.',
     noProjectsAvailableDesc: 'No projects available.',
+    redirectingToProjectSettings: 'Opening Project Settings…',
     tagCreated: 'Tag created',
     tagDeleted: 'Tag deleted',
   },

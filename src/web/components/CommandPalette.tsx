@@ -6,6 +6,7 @@ import { useBoards, useProjects, useRecentNotepads, useSearch, useSignOut } from
 import {
   boardTarget,
   notepadTarget,
+  projectSettingsTarget,
   projectTarget,
   trashTarget,
   workspaceMembersTarget,
@@ -312,6 +313,22 @@ export function CommandPalette() {
                       <span>{t('settings.profileAndAccount')}</span>
                     </Command.Item>
 
+                    {currentProjectId && (
+                      <Command.Item
+                        onSelect={() =>
+                          handleSelect(() => {
+                            if (workspaceId) {
+                              navigate(projectSettingsTarget(workspaceId, currentProjectId));
+                            }
+                          })
+                        }
+                        className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
+                      >
+                        <Settings className="w-4 h-4 text-[var(--muted)] shrink-0" />
+                        <span>{t('sidebar.projectSettings')}</span>
+                      </Command.Item>
+                    )}
+
                     <Command.Item
                       onSelect={() =>
                         handleSelect(() => {
@@ -321,7 +338,7 @@ export function CommandPalette() {
                       className="flex items-center gap-2.5 px-3 py-2 min-h-0 text-xs text-[var(--text)] cursor-pointer select-none border border-transparent data-[selected=true]:bg-[var(--surface2)] data-[selected=true]:border-[var(--accent)]"
                     >
                       <Settings className="w-4 h-4 text-[var(--muted)] shrink-0" />
-                      <span>{t('commandPalette.settings')}</span>
+                      <span>{t('sidebar.workspaceSettings')}</span>
                     </Command.Item>
 
                     <Command.Item
