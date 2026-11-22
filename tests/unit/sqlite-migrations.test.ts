@@ -234,6 +234,7 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
         '0003_add_workspace_feature_flags.sql',
         '0004_add_public_shares.sql',
         '0005_add_public_share_enabled.sql',
+        '0006_add_card_type.sql',
       ]);
 
       const roles = sqliteUpgraded
@@ -414,6 +415,7 @@ describe('database upgrade migration preservation (SQLite & PostgreSQL)', () => 
           '0003_add_workspace_feature_flags.sql',
           '0004_add_public_shares.sql',
           '0005_add_public_share_enabled.sql',
+          '0006_add_card_type.sql',
         ]);
 
         const roles = await client<{ user_id: string; role: string }[]>`

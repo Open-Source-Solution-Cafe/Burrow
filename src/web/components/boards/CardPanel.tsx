@@ -21,6 +21,7 @@ import { Avatar } from '../ui/Avatar';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { useTranslation } from '../../lib/i18n';
+import { useWebPlugins } from '../../plugins/registry';
 
 interface CardPanelProps {
   workspaceId: string;
@@ -41,6 +42,7 @@ const PRIORITIES = [
 
 export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, onClose }: CardPanelProps) {
   const { t } = useTranslation();
+  const { cardTypes } = useWebPlugins();
   const { data: card, isLoading } = useCard(workspaceId, projectId, cardId);
   const { data: members = [] } = useMembers(workspaceId);
   const { data: projectTags = [] } = useProjectTags(workspaceId, projectId);
@@ -125,6 +127,17 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
   const assignees = (card as any).assignees || [];
   const tags = (card as any).tags || [];
   const subtasks = (card as any).subtasks || [];
+  const cardTypeContribution = cardTypes.find(
+    (entry) => entry.type === ((card as any).cardType ?? 'task'),
+  );
+  const CardTypePanelSection = cardTypeContribution?.renderPanelSection as
+    | import('react').ComponentType<{
+        card: Record<string, unknown>;
+        workspaceId: string;
+        projectId: string;
+        boardId: string;
+      }>
+    | undefined;
 
   const toggleAssignee = (userId: string) => {
     const current = assignees.map((a: any) => a.userId);
@@ -449,6 +462,16 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
             </div>
           </div>
         </div>
+
+        {/* Plugin Card Type Section */}
+        {CardTypePanelSection && (
+          <CardTypePanelSection
+            card={card as unknown as Record<string, unknown>}
+            workspaceId={workspaceId}
+            projectId={projectId}
+            boardId={boardId}
+          />
+        )}
 
         {/* Subtasks / Checklist */}
         <SubtasksSection workspaceId={workspaceId} projectId={projectId} cardId={cardId} boardId={boardId} subtasks={subtasks} />

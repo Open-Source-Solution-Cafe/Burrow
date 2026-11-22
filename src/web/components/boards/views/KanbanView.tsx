@@ -55,6 +55,7 @@ import { AssignPickerModal, PriorityPickerModal, QuickPeekModal } from './BoardQ
 import { COMPLETED_COLUMN_RE, PRIORITY_BADGES, type CardItem, type ColumnItem } from './types';
 import { computeCardDropTarget, computeColumnDropTarget } from '../kanbanReorder';
 import { useTranslation } from '../../../lib/i18n';
+import { useWebPlugins } from '../../../plugins/registry';
 
 interface KanbanViewProps {
   workspaceId: string;
@@ -104,15 +105,27 @@ function CountPill({ count, wipLimit }: { count: number; wipLimit?: number | nul
 
 function CardTile({
   card,
+  workspaceId = '',
+  projectId = '',
   onClick,
   isOverlay = false,
   focused = false,
 }: {
   card: CardItem;
+  workspaceId?: string;
+  projectId?: string;
   onClick?: () => void;
   isOverlay?: boolean;
   focused?: boolean;
 }) {
+  const { cardTypes } = useWebPlugins();
+  const cardTypeContribution = cardTypes.find((entry) => entry.type === (card.cardType ?? 'task'));
+  const TileBadge = cardTypeContribution?.renderTileBadge as
+    | import('react').ComponentType<{ card: Record<string, unknown>; workspaceId: string; projectId: string }>
+    | undefined;
+  const TileFooter = cardTypeContribution?.renderTileFooter as
+    | import('react').ComponentType<{ card: Record<string, unknown>; workspaceId: string; projectId: string }>
+    | undefined;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
     data: { type: 'card', card, columnId: card.columnId },
@@ -151,6 +164,14 @@ function CardTile({
           {card.title || 'Untitled'}
         </div>
 
+        {TileBadge && (
+          <TileBadge
+            card={card as unknown as Record<string, unknown>}
+            workspaceId={workspaceId}
+            projectId={projectId}
+          />
+        )}
+
         {card.priority && PRIORITY_BADGES[card.priority] && (
           <Badge tone={priorityBadgeTone(card.priority)} className="shrink-0 mt-0.5">
             <StatusDiamond color={priorityStatusColor(card.priority)} size={6} />
@@ -177,10 +198,20 @@ function CardTile({
         </div>
       )}
 
-      {/* Footer: Due date, subtask progress & Assignees */}
-      {(formattedDueDate || (card.totalSubtasks ?? 0) > 0 || (card.assignees || []).length > 0) && (
+      {/* Footer: Due date, subtask progress, plugin slot & Assignees */}
+      {(formattedDueDate ||
+        (card.totalSubtasks ?? 0) > 0 ||
+        (card.assignees || []).length > 0 ||
+        Boolean(TileFooter)) && (
         <div className="flex items-center justify-between gap-2 pt-2 border-t border-[var(--hair)] text-[11px] text-[var(--ink-muted)]">
           <div className="flex items-center gap-2 min-w-0">
+            {TileFooter && (
+              <TileFooter
+                card={card as unknown as Record<string, unknown>}
+                workspaceId={workspaceId}
+                projectId={projectId}
+              />
+            )}
             {formattedDueDate && (
               <div
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[11px] font-medium theme-radius-xs ${
@@ -467,6 +498,8 @@ function ColumnComponent({
             <CardTile
               key={card.id}
               card={card}
+              workspaceId={workspaceId}
+              projectId={projectId}
               focused={card.id === focusedCardId}
               onClick={() => onCardClick(card.id)}
             />
@@ -805,7 +838,9 @@ export function KanbanView({
           </SortableContext>
 
           <DragOverlay>
-            {activeCard ? <CardTile card={activeCard} isOverlay /> : null}
+            {activeCard ? (
+              <CardTile card={activeCard} workspaceId={workspaceId} projectId={projectId} isOverlay />
+            ) : null}
           </DragOverlay>
         </DndContext>
 

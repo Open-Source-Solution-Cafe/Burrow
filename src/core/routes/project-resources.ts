@@ -50,6 +50,7 @@ const updateColumnSchema = z.object({
 const moveColumnSchema = z.object({ afterId: z.string().optional().nullable() });
 const quickAddCardSchema = z.object({
   title: z.string().min(1),
+  cardType: z.string().trim().min(1).max(40).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional().nullable(),
   dueDate: z.number().int().optional().nullable(),
   assigneeIds: z.array(z.string()).optional(),
@@ -63,6 +64,7 @@ const quickAddCardSchema = z.object({
 });
 const updateCardSchema = z.object({
   title: z.string().min(1).optional(),
+  cardType: z.string().trim().min(1).max(40).optional(),
   priority: z.enum(['low', 'medium', 'high', 'urgent']).optional().nullable(),
   dueDate: z.number().int().optional().nullable(),
   assigneeIds: z.array(z.string()).optional(),
@@ -547,6 +549,7 @@ const notepadLifecycle = (action: 'delete' | 'restore' | 'permanent') => async (
       boardId: column.boardId,
       columnId: column.id,
       title: body.title,
+      cardType: body.cardType,
       priority: body.priority,
       dueDate: body.dueDate,
       assigneeIds: body.assigneeIds,

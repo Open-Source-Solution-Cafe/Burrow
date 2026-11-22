@@ -666,6 +666,7 @@ export interface BoardWithDetails extends Board {
         notepadId: string;
         title: string;
         position: string;
+        cardType?: string;
         priority: CardPriority | null;
         dueDate: number | null;
         createdAt: number;
@@ -698,6 +699,7 @@ export interface Card {
   boardId: string;
   columnId: string;
   notepadId: string;
+  cardType?: string;
   position: string;
   priority: CardPriority | null;
   dueDate: number | null;
@@ -732,6 +734,7 @@ export interface CardPlan {
   actorId: string;
   cardId: string;
   notepadId: string;
+  cardType?: string;
   title: string;
   content: string;
   plainText: string;
@@ -748,6 +751,7 @@ export interface CardPlan {
 export interface UpdateCardData {
   columnId?: string;
   position?: string;
+  cardType?: string;
   priority?: CardPriority | null;
   dueDate?: number | null;
 }

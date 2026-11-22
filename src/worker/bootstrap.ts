@@ -109,6 +109,7 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
   let publicShareCols = tables.has('public_shares')
     ? await listTableColumns(db, 'public_shares')
     : new Set<string>();
+  let cardCols = tables.has('cards') ? await listTableColumns(db, 'cards') : new Set<string>();
 
   for (const migration of D1_MIGRATIONS) {
     if (applied.has(migration.name)) continue;
@@ -130,6 +131,8 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
       migration.name === '0005_add_public_share_enabled.sql' &&
       publicShareCols.has('enabled')
     ) {
+      alreadyPresent = true;
+    } else if (migration.name === '0006_add_card_type.sql' && cardCols.has('card_type')) {
       alreadyPresent = true;
     }
 
@@ -153,6 +156,7 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
     if (migration.name === '0000_baseline.sql') {
       tables.add('workspaces');
       workspaceCols = await listTableColumns(db, 'workspaces');
+      cardCols = await listTableColumns(db, 'cards');
     } else if (migration.name === '0004_add_public_shares.sql') {
       tables.add('public_shares');
       publicShareCols = await listTableColumns(db, 'public_shares');

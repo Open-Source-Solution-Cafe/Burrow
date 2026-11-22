@@ -29,6 +29,7 @@ export interface CreateCardInput {
   boardId: string;
   columnId: string;
   title: string;
+  cardType?: string;
   priority?: CardPriority | null;
   dueDate?: number | null;
   assigneeIds?: string[];
@@ -117,6 +118,7 @@ export class CardService {
     }
 
     const title = input.title.trim() || 'Untitled';
+    const cardType = input.cardType?.trim() || 'task';
     const plan: CardPlan = {
       workspaceId: input.workspaceId,
       projectId: board.projectId,
@@ -125,6 +127,7 @@ export class CardService {
       actorId: input.actorId,
       cardId: nanoid(),
       notepadId: nanoid(),
+      cardType,
       title,
       content,
       plainText: extractPlainText(content),
@@ -152,7 +155,7 @@ export class CardService {
       notepadId: plan.notepadId,
       title: plan.title,
       actorId: plan.actorId,
-      cardType: 'task',
+      cardType,
     };
     await this.events?.emitBefore('task.created', createdPayload);
 
@@ -229,6 +232,7 @@ export class CardService {
     cardId: string,
     updates: {
       title?: string;
+      cardType?: string;
       priority?: CardPriority | null;
       dueDate?: number | null;
       assigneeIds?: string[];
@@ -270,8 +274,9 @@ export class CardService {
       updates.tagIds = cleanTags;
     }
 
-    // Priority and Due Date
+    // Priority, Card Type, and Due Date
     const cardUpdates: UpdateCardData = {};
+    if (updates.cardType !== undefined) cardUpdates.cardType = updates.cardType.trim() || 'task';
     if (updates.priority !== undefined) cardUpdates.priority = updates.priority ?? null;
     if (updates.dueDate !== undefined) cardUpdates.dueDate = updates.dueDate ?? null;
 

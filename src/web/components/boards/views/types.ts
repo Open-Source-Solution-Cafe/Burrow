@@ -2,6 +2,7 @@ export interface CardItem {
   id: string;
   columnId: string;
   notepadId: string;
+  cardType?: string;
   title: string;
   position: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent' | null;

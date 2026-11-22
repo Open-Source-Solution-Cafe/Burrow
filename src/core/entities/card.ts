@@ -41,6 +41,7 @@ export function cardCreationRows(plan: CardPlan) {
       boardId: plan.boardId,
       columnId: plan.columnId,
       notepadId: plan.notepadId,
+      cardType: plan.cardType ?? 'task',
       position: plan.cardPosition,
       priority: plan.priority,
       dueDate: plan.dueDate,
