@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error untyped local .mjs script
 import * as deployLib from '../../scripts/lib.mjs';
 // @ts-expect-error untyped local .mjs script
+import * as deployScript from '../../scripts/deploy.mjs';
+// @ts-expect-error untyped local .mjs script
 import * as demoResetLib from '../../scripts/demo-reset.mjs';
 
 const {
@@ -21,6 +23,7 @@ const {
   KNOWN_SECRET_PLACEHOLDERS,
   migrateDatabase,
   parseCliArgs,
+  parseJsonc,
   resolveCloudflareAccount,
   resolveDeployProfile,
   resolveRemoteProfile,
@@ -28,6 +31,8 @@ const {
   validateWranglerResourceConfig,
   verifyDeployment,
 } = deployLib as any;
+
+const { isWorkersCiBuild, resolveWorkersCiConfigArgs } = deployScript as any;
 
 const {
   buildDemoSeedSql,
@@ -229,6 +234,21 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       const res = validateWranglerResourceConfig({ name: 'burrow' }, { remoteDbs: [] });
       expect(res.ok).toBe(false);
       expect(res.errors[0]).toContain('d1_databases');
+    });
+
+    it('uses d1_databases[0].database_id from wrangler.jsonc when remote listing is unavailable', () => {
+      const uuid = 'cccccccc-dddd-4eee-8fff-111111111111';
+      const res = validateWranglerResourceConfig(
+        {
+          name: 'burrowgitdeploy',
+          d1_databases: [{ binding: 'DB', database_name: 'burrowgitdeploy', database_id: uuid }],
+          r2_buckets: [{ binding: 'FILES', bucket_name: 'burrowgitdeploy-files' }],
+        },
+        { remoteDbs: [], remoteDbsLoaded: false },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.mode).toBe('existing');
+      expect(res.d1Id).toBe(uuid);
     });
   });
 
@@ -440,7 +460,12 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       }
     });
 
-    it('prints burrow-staging and burrow-staging-files across all 10 stages with --staging --dry-run', () => {
+    it('prints staging worker, D1, and R2 names across all 10 stages with --staging --dry-run', () => {
+      const liveCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
+      const expectedStaging = resolveRemoteProfile(liveCfg, {
+        args: ['-r', '--staging'],
+        env: {},
+      });
       const res = spawnSync(
         process.execPath,
         [path.join(root, 'scripts', 'setup.mjs'), '-r', '--staging', '--dry-run'],
@@ -452,8 +477,9 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       );
 
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain('burrow-staging');
-      expect(res.stdout).toContain('burrow-staging-files');
+      expect(res.stdout).toContain(expectedStaging.workerName);
+      expect(res.stdout).toContain(expectedStaging.dbName);
+      expect(res.stdout).toContain(expectedStaging.bucketName);
       for (let i = 1; i <= 10; i++) {
         expect(res.stdout).toContain(`Stage ${i}/10`);
       }
@@ -507,6 +533,22 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       expect(stagingProfile.effectiveConfig.d1_databases[0].database_name).toBe('burrow-staging');
       expect(stagingProfile.effectiveConfig.r2_buckets[0].bucket_name).toBe('burrow-staging-files');
 
+      const stagingFromProvisionedProd = resolveRemoteProfile(
+        {
+          ...baseConfig,
+          d1_databases: [
+            {
+              binding: 'DB',
+              database_name: 'burrow',
+              database_id: 'prod-provisioned-uuid',
+              migrations_dir: 'migrations',
+            },
+          ],
+        },
+        { args: ['-r', '--staging'], env: {} },
+      );
+      expect(stagingFromProvisionedProd.effectiveConfig.d1_databases[0].database_id).toBeUndefined();
+
       expect(() =>
         resolveRemoteProfile(baseConfig, {
           args: ['-r', '--staging', '--domain', 'burrow.osscafe.com'],
@@ -544,6 +586,16 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
     it('blocks CI=true, --force, missing --demo, and missing target configuration in demo-reset.mjs', () => {
       const demoAccount = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
       const demoDbId = '11111111-1111-4111-8111-111111111111';
+      const demoBaseConfig = {
+        ...baseConfig,
+        env: {
+          demo: {
+            name: 'burrow-demo',
+            d1_databases: [{ binding: 'DB', database_name: 'burrow-demo', migrations_dir: 'migrations' }],
+            r2_buckets: [{ binding: 'FILES', bucket_name: 'burrow-demo-files' }],
+          },
+        },
+      };
       const validDemoEnv = {
         DEMO_CLOUDFLARE_ACCOUNT_ID: demoAccount,
         DEMO_WORKER_NAME: 'burrow-demo',
@@ -571,6 +623,7 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
           args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW'],
           env: { ...validDemoEnv, CI: 'true' },
           isInteractive: false,
+          baseConfig: demoBaseConfig,
         }),
       ).toThrow(/without explicit --demo flag/i);
 
@@ -580,6 +633,7 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
           args: ['--remote', '--demo', '--force'],
           env: { ...validDemoEnv, CI: 'true', BURROW_ALLOW_DEMO_RESET: 'true' },
           isInteractive: false,
+          baseConfig: demoBaseConfig,
         }),
       ).toThrow('Refusing remote demo reset');
 
@@ -589,6 +643,7 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
           args: ['--remote', '--demo', '--confirm-demo-reset=RESET-DEMO-BURROW'],
           env: { BURROW_ALLOW_DEMO_RESET: 'true' },
           isInteractive: false,
+          baseConfig: demoBaseConfig,
         }),
       ).toThrow(/DEMO_CLOUDFLARE_ACCOUNT_ID/);
 
@@ -596,6 +651,7 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
         args: ['--remote', '--demo', '--confirm-demo-reset=RESET-DEMO-BURROW'],
         env: validDemoEnv,
         isInteractive: false,
+        baseConfig: demoBaseConfig,
       });
       expect(authorized.isRemote).toBe(true);
       expect(authorized.profile.isDemo).toBe(true);
@@ -608,16 +664,28 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
         args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW', '--confirm=burrow'],
         env: { BURROW_ALLOW_DEMO_RESET: 'true' },
         isInteractive: false,
+        baseConfig: demoBaseConfig,
       });
       expect(confirmedPrimary.isRemote).toBe(true);
       expect(confirmedPrimary.profile.workerName).toBe('burrow');
       expect(confirmedPrimary.expectedTarget).toBeNull();
+
+      // Cloned repos renamed by Cloudflare's Deploy button match their configured Worker name.
+      const renamedBaseConfig = { ...demoBaseConfig, name: 'burrowgitdeploy' };
+      const confirmedRenamed = resolveDemoResetContext({
+        args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW', '--confirm=burrowgitdeploy'],
+        env: { BURROW_ALLOW_DEMO_RESET: 'true' },
+        isInteractive: false,
+        baseConfig: renamedBaseConfig,
+      });
+      expect(confirmedRenamed.profile.workerName).toBe('burrowgitdeploy');
 
       expect(() =>
         resolveDemoResetContext({
           args: ['--remote', '--confirm-demo-reset=RESET-DEMO-BURROW', '--confirm=wrong-worker'],
           env: { BURROW_ALLOW_DEMO_RESET: 'true' },
           isInteractive: false,
+          baseConfig: demoBaseConfig,
         }),
       ).toThrow(/does not match target Worker/);
     });
@@ -781,7 +849,30 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       const createMockDemoWorkspace = (scenario: Record<string, unknown>) => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-demo-e2e-'));
         fs.cpSync(path.join(root, 'scripts'), path.join(tmpDir, 'scripts'), { recursive: true });
-        fs.copyFileSync(path.join(root, 'wrangler.jsonc'), path.join(tmpDir, 'wrangler.jsonc'));
+        fs.writeFileSync(
+          path.join(tmpDir, 'wrangler.jsonc'),
+          JSON.stringify(
+            {
+              name: 'burrow',
+              main: 'src/worker/index.ts',
+              compatibility_date: '2025-01-01',
+              compatibility_flags: ['nodejs_compat'],
+              d1_databases: [{ binding: 'DB', database_name: 'burrow', migrations_dir: 'migrations' }],
+              r2_buckets: [{ binding: 'FILES', bucket_name: 'burrow-files' }],
+              env: {
+                demo: {
+                  name: 'burrow-demo',
+                  d1_databases: [
+                    { binding: 'DB', database_name: 'burrow-demo', migrations_dir: 'migrations' },
+                  ],
+                  r2_buckets: [{ binding: 'FILES', bucket_name: 'burrow-demo-files' }],
+                },
+              },
+            },
+            null,
+            2,
+          ),
+        );
         fs.copyFileSync(path.join(root, 'package.json'), path.join(tmpDir, 'package.json'));
         fs.symlinkSync(path.join(root, 'src'), path.join(tmpDir, 'src'), 'junction');
         fs.symlinkSync(path.join(root, 'migrations'), path.join(tmpDir, 'migrations'), 'junction');
@@ -1020,6 +1111,143 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
         expect(isNodeScript(shebangScript)).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('Cloudflare Workers Builds (WORKERS_CI) one-click deploy', () => {
+    it('detects WORKERS_CI build environments accurately', () => {
+      expect(isWorkersCiBuild({ WORKERS_CI: '1' })).toBe(true);
+      expect(isWorkersCiBuild({ WORKERS_CI: 'true' })).toBe(true);
+      expect(isWorkersCiBuild({ WORKERS_CI: '0' })).toBe(false);
+      expect(isWorkersCiBuild({ CI: 'true' })).toBe(false);
+      expect(isWorkersCiBuild({})).toBe(false);
+    });
+
+    it('uses wrangler.jsonc directly when database_id is present and resolves D1 UUID when absent', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-workers-ci-cfg-'));
+      try {
+        const provisionedArgs = resolveWorkersCiConfigArgs(
+          {
+            name: 'burrowgitdeploy',
+            d1_databases: [
+              {
+                binding: 'DB',
+                database_name: 'burrowgitdeploy',
+                database_id: '11111111-1111-4111-8111-111111111111',
+              },
+            ],
+          },
+          { env: {}, rootDir: tmpDir, wranglerBin: 'mock-wrangler' },
+        );
+        expect(provisionedArgs).toEqual([]);
+        expect(fs.existsSync(path.join(tmpDir, 'wrangler.local.jsonc'))).toBe(false);
+
+        const discoveredArgs = resolveWorkersCiConfigArgs(
+          {
+            name: 'my-team-demo',
+            d1_databases: [{ binding: 'DB', database_name: 'my-team-demo-db' }],
+          },
+          {
+            env: {},
+            rootDir: tmpDir,
+            wranglerBin: 'mock-wrangler',
+            runFn: () => ({
+              status: 0,
+              stdout: JSON.stringify([
+                { name: 'my-team-demo-db', uuid: '22222222-2222-4222-8222-222222222222' },
+              ]),
+              stderr: '',
+            }),
+          },
+        );
+        expect(discoveredArgs).toEqual(['--config', 'wrangler.local.jsonc']);
+        const generated = JSON.parse(
+          fs.readFileSync(path.join(tmpDir, 'wrangler.local.jsonc'), 'utf8'),
+        );
+        expect(generated.name).toBe('my-team-demo');
+        expect(generated.d1_databases[0].database_id).toBe('22222222-2222-4222-8222-222222222222');
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('deploys cloned repos with any custom Worker name and no .github/ under WORKERS_CI=1', () => {
+      for (const customWorkerName of ['burrowgitdeploy', 'acme-team-demo', 'notes-staging']) {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-workers-ci-e2e-'));
+        try {
+          fs.cpSync(path.join(root, 'scripts'), path.join(tmpDir, 'scripts'), { recursive: true });
+          fs.symlinkSync(path.join(root, 'src'), path.join(tmpDir, 'src'), 'junction');
+          fs.mkdirSync(path.join(tmpDir, 'dist', 'web'), { recursive: true });
+          fs.writeFileSync(path.join(tmpDir, 'dist', 'web', 'index.html'), '<!doctype html>');
+          fs.writeFileSync(
+            path.join(tmpDir, 'package.json'),
+            JSON.stringify({ name: customWorkerName, version: '0.3.0', type: 'module' }),
+          );
+          fs.writeFileSync(
+            path.join(tmpDir, 'wrangler.jsonc'),
+            JSON.stringify(
+              {
+                name: customWorkerName,
+                main: 'src/worker/index.ts',
+                d1_databases: [
+                  {
+                    binding: 'DB',
+                    database_name: customWorkerName,
+                    database_id: '33333333-3333-4333-8333-333333333333',
+                  },
+                ],
+                r2_buckets: [{ binding: 'FILES', bucket_name: `${customWorkerName}-files` }],
+              },
+              null,
+              2,
+            ),
+          );
+
+          const logFile = path.join(tmpDir, 'wrangler-calls.jsonl');
+          const wranglerDir = path.join(tmpDir, 'node_modules', 'wrangler');
+          fs.mkdirSync(path.join(wranglerDir, 'bin'), { recursive: true });
+          fs.writeFileSync(
+            path.join(wranglerDir, 'package.json'),
+            JSON.stringify({
+              name: 'wrangler',
+              version: '0.0.0-mock',
+              bin: { wrangler: 'bin/wrangler.mjs' },
+            }),
+          );
+          fs.writeFileSync(
+            path.join(wranglerDir, 'bin', 'wrangler.mjs'),
+            `
+              import fs from 'node:fs';
+              fs.appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+              process.stdout.write('Published https://${customWorkerName}.example.workers.dev\\n');
+            `,
+          );
+
+          const res = spawnSync(
+            process.execPath,
+            [path.join(tmpDir, 'scripts', 'deploy.mjs')],
+            {
+              cwd: tmpDir,
+              encoding: 'utf8',
+              env: { ...process.env, WORKERS_CI: '1', CI: 'true' },
+            },
+          );
+
+          expect(res.status, res.stderr + res.stdout).toBe(0);
+          expect(res.stdout).toContain('Cloudflare Workers Builds detected (WORKERS_CI=1)');
+          expect(res.stdout).toContain(`worker: ${customWorkerName}`);
+          expect(res.stdout).not.toContain('scripts/check.mjs');
+
+          const calls = fs
+            .readFileSync(logFile, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line));
+          expect(calls).toEqual([['deploy']]);
+        } finally {
+          fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
       }
     });
   });

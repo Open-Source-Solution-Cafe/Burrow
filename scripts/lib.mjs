@@ -307,6 +307,9 @@ export function resolveRemoteProfile(
   effectiveConfig.name = workerName;
   if (Array.isArray(effectiveConfig.d1_databases) && effectiveConfig.d1_databases[0]) {
     effectiveConfig.d1_databases[0].database_name = dbName;
+    if (isStaging || isDemo) {
+      delete effectiveConfig.d1_databases[0].database_id;
+    }
   }
   if (Array.isArray(effectiveConfig.r2_buckets) && effectiveConfig.r2_buckets[0]) {
     effectiveConfig.r2_buckets[0].bucket_name = bucketName;
@@ -963,7 +966,8 @@ export function validateWranglerResourceConfig(
     return { ok: false, errors, warnings, workerName, dbName, bucketName };
   }
 
-  const resolvedId = remoteId ?? normalizedEnvId;
+  const configD1Id = d1?.database_id?.trim() || null;
+  const resolvedId = remoteId ?? normalizedEnvId ?? configD1Id;
   const mode = resolvedId ? 'existing' : 'fresh';
 
   return {
@@ -1257,7 +1261,10 @@ export function getWranglerConfigArgs(options = {}) {
   loadEnv();
   const baseConfig = readBaseWranglerConfig();
   const profile = suppliedProfile || resolveRemoteProfile(baseConfig);
-  let d1Id = d1IdOverride || (!ignoreCached ? profile.envD1Id : null);
+  let d1Id =
+    d1IdOverride ||
+    (!ignoreCached ? profile.envD1Id : null) ||
+    (!ignoreCached ? profile.effectiveConfig?.d1_databases?.[0]?.database_id?.trim() || null : null);
   const localConfigPath = path.join(root, profile.localConfigFilename);
 
   if (!d1Id && !ignoreCached && fs.existsSync(localConfigPath)) {

@@ -5,6 +5,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   bin,
   collectAccounts,
@@ -25,15 +26,86 @@ import {
   verifyDeployment,
 } from './lib.mjs';
 
-loadEnv();
-const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
-const profile = resolveRemoteProfile(baseCfg);
-const domain = profile.domain;
-const skipChecks = profile.isStaging && hasFlag('--skip-checks');
-const WRANGLER_ARGS =
-  profile.isStaging || profile.isDemo || hasFlag('--name') ? ['--name', profile.workerName] : [];
+export function isWorkersCiBuild(env = process.env) {
+  const flag = String(env.WORKERS_CI ?? '').trim().toLowerCase();
+  return flag === '1' || flag === 'true';
+}
+
+export function resolveWorkersCiConfigArgs(
+  baseCfg,
+  { env = process.env, rootDir = root, runFn = run, wranglerBin = bin('wrangler') } = {},
+) {
+  const d1Binding = baseCfg?.d1_databases?.[0];
+  if (!d1Binding || d1Binding.database_id?.trim()) {
+    return [];
+  }
+
+  let d1Id = (env.D1_DATABASE_ID || env.CLOUDFLARE_D1_DATABASE_ID)?.trim() || null;
+  if (!d1Id && d1Binding.database_name) {
+    const list = runFn(wranglerBin, ['d1', 'list', '--json'], {
+      capture: true,
+      quiet: true,
+      allowFail: true,
+    });
+    if (list.status === 0) {
+      const dbs = parseFirstJson(list.stdout ?? '') ?? [];
+      const found = dbs.find(
+        (d) => d.database_name === d1Binding.database_name || d.name === d1Binding.database_name,
+      );
+      if (found) {
+        d1Id = found.uuid ?? found.database_id ?? null;
+        if (d1Id) {
+          console.log(`  💡 Auto-discovered remote D1 database "${d1Binding.database_name}" (${d1Id})`);
+        }
+      }
+    }
+  }
+
+  if (!d1Id) {
+    return [];
+  }
+
+  const localConfigFilename = 'wrangler.local.jsonc';
+  const localConfig = JSON.parse(JSON.stringify(baseCfg));
+  localConfig.d1_databases[0].database_id = d1Id;
+  fs.writeFileSync(
+    path.join(rootDir, localConfigFilename),
+    JSON.stringify(localConfig, null, 2) + '\n',
+  );
+  return ['--config', localConfigFilename];
+}
+
+async function runWorkersCiDeploy(baseCfg) {
+  step('Cloudflare Workers Builds detected (WORKERS_CI=1)');
+  console.log(`  worker: ${baseCfg?.name ?? '(wrangler.jsonc default)'}`);
+
+  if (!fs.existsSync(path.join(root, 'dist', 'web', 'index.html'))) {
+    step('Build SPA assets (dist/web missing)');
+    run(bin('vite'), ['build']);
+  }
+
+  const configArgs = resolveWorkersCiConfigArgs(baseCfg);
+  const extraArgs = process.argv.slice(2);
+  step('Deploy Worker via Wrangler');
+  run(bin('wrangler'), [...configArgs, 'deploy', ...extraArgs]);
+  console.log('\ndeploy complete');
+}
 
 async function main() {
+  loadEnv();
+  const baseCfg = parseJsonc(fs.readFileSync(path.join(root, 'wrangler.jsonc'), 'utf8'));
+
+  if (isWorkersCiBuild(process.env)) {
+    await runWorkersCiDeploy(baseCfg);
+    return;
+  }
+
+  const profile = resolveRemoteProfile(baseCfg);
+  const domain = profile.domain;
+  const skipChecks = profile.isStaging && hasFlag('--skip-checks');
+  const WRANGLER_ARGS =
+    profile.isStaging || profile.isDemo || hasFlag('--name') ? ['--name', profile.workerName] : [];
+
   const bannerLabel = profile.isStaging
     ? 'Staging Deploy'
     : profile.isDemo
@@ -165,7 +237,12 @@ async function main() {
   console.log('\ndeploy complete');
 }
 
-main().catch((err) => {
-  console.error('\n❌ Deploy failed:', err instanceof Error ? err.message : err);
-  process.exit(1);
-});
+const isMain =
+  Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isMain) {
+  main().catch((err) => {
+    console.error('\n❌ Deploy failed:', err instanceof Error ? err.message : err);
+    process.exit(1);
+  });
+}

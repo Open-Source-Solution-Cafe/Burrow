@@ -16,7 +16,7 @@ Burrow's Worker entrypoint (`src/worker/index.ts` → `ensureWorkerRuntimeEnv` i
 
 | Requirement | Implementation in Burrow |
 | :--- | :--- |
-| **Worker + Static Assets** | Defined in `wrangler.jsonc` (`main: src/worker/index.ts`, `assets.directory: ./dist/web`, `nodejs_compat`). Cloudflare Workers Builds installs dependencies, builds the SPA (`pnpm run build`), and deploys the Worker + assets. |
+| **Worker + Static Assets** | Defined in `wrangler.jsonc` (`main: src/worker/index.ts`, `assets.directory: ./dist/web`, `nodejs_compat`). Cloudflare Workers Builds installs dependencies, builds the SPA (`pnpm run build`), and runs `pnpm run deploy` — `scripts/deploy.mjs` automatically detects `WORKERS_CI=1`, skips maintainer CI tests and redundant builds, and deploys the renamed `wrangler.jsonc` directly with `wrangler deploy`. |
 | **Zero-Prompt `.env.example`** | All environment variables in `.env.example` are commented out by default so Cloudflare's Deploy to Workers wizard does not prompt for localhost defaults, Docker settings, or static secrets. |
 | **Cloudflare D1 Binding & First-Boot Migrations** | `wrangler.jsonc` declares the `DB` binding (`database_name: "burrow"`). On first request (`ensureWorkerRuntimeEnv`), Burrow checks `sqlite_master` and `d1_migrations`, atomically applies any pending migrations from `src/worker/d1-migrations.ts` (byte-for-byte synced with `migrations/*.sql`), and caches readiness per `DB` binding instance. |
 | **R2 Bucket (`burrow-files`)** | Declared in `wrangler.jsonc` (`r2_buckets[0]`). Requires R2 Object Storage to be enabled once on the target Cloudflare account (free tier available). |

@@ -37,10 +37,17 @@ describe('compareStorageInventory', () => {
 });
 
 describe('resolveInventoryD1Execution (#011)', () => {
+  const defaultBaseConfig = {
+    name: 'burrow',
+    d1_databases: [{ binding: 'DB', database_name: 'burrow', migrations_dir: 'migrations' }],
+    r2_buckets: [{ binding: 'FILES', bucket_name: 'burrow-files' }],
+  };
+
   it('selects burrow-staging and staging config when --remote --staging are passed', () => {
     const execution = resolveInventoryD1Execution({
       args: ['--remote', '--staging'],
       env: {},
+      baseConfig: defaultBaseConfig,
       getConfigArgs: ({ profile }: { profile: { localConfigFilename: string } }) => [
         '--config',
         profile.localConfigFilename,
@@ -56,6 +63,7 @@ describe('resolveInventoryD1Execution (#011)', () => {
     const execution = resolveInventoryD1Execution({
       args: ['--remote'],
       env: {},
+      baseConfig: defaultBaseConfig,
       getConfigArgs: ({ profile }: { profile: { localConfigFilename: string } }) => [
         '--config',
         profile.localConfigFilename,
@@ -65,5 +73,23 @@ describe('resolveInventoryD1Execution (#011)', () => {
     expect(execution.profile?.isStaging).toBe(false);
     expect(execution.databaseName).toBe('burrow');
     expect(execution.d1Args).toEqual(['--config', 'wrangler.local.jsonc', '--remote']);
+  });
+
+  it('respects custom renamed wrangler.jsonc database names on cloned deployments', () => {
+    const execution = resolveInventoryD1Execution({
+      args: ['--remote'],
+      env: {},
+      baseConfig: {
+        name: 'my-team-notes',
+        d1_databases: [{ binding: 'DB', database_name: 'my-team-notes-db' }],
+        r2_buckets: [{ binding: 'FILES', bucket_name: 'my-team-notes-files' }],
+      },
+      getConfigArgs: ({ profile }: { profile: { localConfigFilename: string } }) => [
+        '--config',
+        profile.localConfigFilename,
+      ],
+    });
+    expect(execution.target.kind).toBe('remote');
+    expect(execution.databaseName).toBe('my-team-notes-db');
   });
 });

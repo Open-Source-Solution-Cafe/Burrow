@@ -152,11 +152,13 @@ export function resolveDemoResetContext({
   env = process.env,
   isInteractive = Boolean(process.stdin.isTTY),
   rootDir = root,
+  baseConfig = null,
 } = {}) {
   const parsed = parseCliArgs(args);
   const target = selectDatabaseTarget(args, env, rootDir);
   const isRemote = target.kind === 'remote';
-  const baseCfg = parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
+  const baseCfg =
+    baseConfig ?? parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
 
   let profile = null;
   let expectedTarget = null;

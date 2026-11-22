@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.3.1] - 2026-11-22
+
+### Fixed
+- **One-Click "Deploy to Cloudflare" Custom Repo Name & Workers Builds Support (`scripts/deploy.mjs`, `scripts/lib.mjs`, `scripts/demo-reset.mjs`, `scripts/inventory-storage.mjs`, `tests/unit/cloudflare-deploy.test.ts`, `tests/unit/ci-workflows.test.ts`, `tests/unit/storage-inventory.test.ts`, `docs/CLOUDFLARE_DEPLOY_BUTTON.md`)**: Detected Cloudflare Workers Builds (`WORKERS_CI=1`) in `scripts/deploy.mjs` so one-click deploys skip maintainer check suites and redundant builds and deploy any user-chosen Worker name directly from Cloudflare's provisioned `wrangler.jsonc`; respected `d1_databases[0].database_id` in `wrangler.jsonc` (while stripping production `database_id` from `--staging`/`--demo` profiles); isolated deployment unit tests from live `wrangler.jsonc` renaming and guarded `.github/workflows` tests when cloned to non-GitHub hosts without `.github/`.
 ## [0.3.0] - 2026-11-21
 
 ### Added

@@ -22,6 +22,7 @@ export function resolveInventoryTarget({
   args = process.argv.slice(2),
   env = process.env,
   rootDir = root,
+  baseConfig = null,
 } = {}) {
   parseCliArgs(args);
   const postgresUrl = env.DATABASE_URL;
@@ -35,7 +36,8 @@ export function resolveInventoryTarget({
       ? { kind: 'postgres', url: postgresUrl }
       : selectDatabaseTarget(args, env, rootDir);
   if (target.kind === 'remote') {
-    const baseCfg = parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
+    const baseCfg =
+      baseConfig ?? parseJsonc(fs.readFileSync(path.join(rootDir, 'wrangler.jsonc'), 'utf8'));
     const profile = resolveRemoteProfile(baseCfg, { args, env });
     return { target, profile, databaseName: profile.dbName };
   }
@@ -50,9 +52,15 @@ export function resolveInventoryD1Execution({
   args = process.argv.slice(2),
   env = process.env,
   rootDir = root,
+  baseConfig = null,
   getConfigArgs = getWranglerConfigArgs,
 } = {}) {
-  const { target, profile, databaseName } = resolveInventoryTarget({ args, env, rootDir });
+  const { target, profile, databaseName } = resolveInventoryTarget({
+    args,
+    env,
+    rootDir,
+    baseConfig,
+  });
   if (target.kind === 'remote') {
     const d1Args = [
       ...getConfigArgs({ required: true, purpose: 'read-only storage inventory', profile }),
