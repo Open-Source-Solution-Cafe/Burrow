@@ -18,6 +18,7 @@ import {
   provisionPluginPostgresIsolation,
   withPluginPostgresRole,
 } from './postgres-isolation';
+import { parseDisabledPluginsEnv } from './runtime-state';
 
 interface SqliteLikeDb {
   prepare(sql: string): {
@@ -69,13 +70,16 @@ export interface RunPluginMigrationsOptions {
    * that PostgreSQL role/schema/privilege boundaries reject malicious migrations at the DB level.
    */
   skipLexerForTest?: boolean;
+  /** Canonical kill-switch env value (`PLUGINS_DISABLED`: comma-separated IDs or `*`). */
+  pluginsDisabledEnv?: unknown;
+  /** Deprecated alias (`DISABLED_PLUGINS`). */
+  disabledPluginsEnv?: unknown;
 }
 
 /**
  * Idempotently applies plugin-owned migrations against D1, Node SQLite, or PostgreSQL.
- * - On PostgreSQL: provisions per-plugin schema + NOLOGIN role isolation (`plugin_<id>_role`)
- *   and runs migration DDL under `SET LOCAL ROLE "plugin_<id>_role"` (never superuser), then
- *   revokes `CREATE` on the plugin schema once migrations complete.
+ * - On PostgreSQL: provisions per-plugin schema + isolated LOGIN role (`plugin_<id>_role`)
+ *   under a dedicated non-login schema `_owner` and runs migration DDL via ephemeral `_migrator`.
  * - On SQLite / D1: relies on `assertPluginSqlAllowed` as a best-effort tripwire for
  *   operator-trusted plugins, not an engine-level isolation boundary.
  */
@@ -87,14 +91,36 @@ export async function runPluginMigrations(
   const client = unwrapDbClient(rawDb);
   if (!client) return [];
 
+  const parsedCanonical = parseDisabledPluginsEnv(
+    options.pluginsDisabledEnv ??
+      (typeof process !== 'undefined' ? process.env?.PLUGINS_DISABLED : undefined),
+  );
+  const parsedDeprecated = parseDisabledPluginsEnv(
+    options.disabledPluginsEnv ??
+      (typeof process !== 'undefined' ? process.env?.DISABLED_PLUGINS : undefined),
+  );
+  const activePlugins = plugins.filter(
+    (p) =>
+      !parsedCanonical.wildcardAll &&
+      !parsedDeprecated.wildcardAll &&
+      !parsedCanonical.ids.has(p.manifest.id) &&
+      !parsedDeprecated.ids.has(p.manifest.id),
+  );
+  if (activePlugins.length === 0) return [];
+
   const activeDialect: PluginDialect = isPostgresClient(client) ? 'postgres' : 'sqlite';
 
-  for (const plugin of plugins) {
+  for (const plugin of activePlugins) {
     validatePluginManifest(plugin.manifest);
     assertPluginDialectSupported(plugin.manifest, activeDialect);
+    if ((plugin.migrations?.length ?? 0) > 0 && !plugin.manifest.permissions.includes('db:own')) {
+      throw new Error(
+        `Plugin "${plugin.manifest.id}" has migrations but lacks required permission "db:own"`,
+      );
+    }
   }
 
-  const withMigrations = plugins.filter((p) => (p.migrations?.length ?? 0) > 0);
+  const withMigrations = activePlugins.filter((p) => (p.migrations?.length ?? 0) > 0);
 
   if (isPostgresClient(client)) {
     const newlyApplied: string[] = [];
@@ -111,7 +137,7 @@ export async function runPluginMigrations(
         );
 
         // Provision schema, role, and allowlisted core table grants for plugins without migrations too
-        for (const plugin of plugins) {
+        for (const plugin of activePlugins) {
           if ((plugin.migrations?.length ?? 0) === 0) {
             await provisionPluginPostgresIsolation(runClient, plugin.manifest.id, {
               coreTables: plugin.manifest.coreTables,

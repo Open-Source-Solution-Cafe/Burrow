@@ -227,7 +227,10 @@ export async function ensureWorkerRuntimeEnv(
     }
     let pluginMigrationPromise = perDbMap.get(pluginKey);
     if (!pluginMigrationPromise) {
-      pluginMigrationPromise = runPluginMigrations(env.DB, plugins)
+      pluginMigrationPromise = runPluginMigrations(env.DB, plugins, {
+        pluginsDisabledEnv: env.PLUGINS_DISABLED,
+        disabledPluginsEnv: env.DISABLED_PLUGINS,
+      })
         .then(() => undefined)
         .catch((err) => {
           perDbMap!.delete(pluginKey);

@@ -25,6 +25,8 @@ export interface Env {
     TERMS_OF_SERVICE_URL?: string;
     TRUST_PROXY?: string;
     TRUSTED_PROXIES?: string;
+    PLUGINS_DISABLED?: string;
+    DISABLED_PLUGINS?: string;
   };
   Variables: {
     userId: string;
