@@ -205,6 +205,10 @@ export function assertPluginSqlAllowed(
     for (const [re, label] of dmlPatterns) {
       let match: RegExpExecArray | null;
       while ((match = re.exec(cleaned)) !== null) {
+        // SQLite/Postgres upserts use `ON CONFLICT(...) DO UPDATE SET ...`, which mutates the INSERT target above.
+        if (label === 'UPDATE' && /\bDO\s+$/i.test(cleaned.slice(0, match.index))) {
+          continue;
+        }
         matchedDmlCount++;
         assertIdentifierPrefixed(pluginId, prefix, match[1]!, label);
       }

@@ -99,7 +99,7 @@ describe('PluginDb Table Prefix Guard', () => {
         'CREATE TABLE IF NOT EXISTS plugin_my_plugin_items (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE)',
       );
       await db.execute(
-        'INSERT INTO plugin_my_plugin_items (id, workspace_id) VALUES (?, ?)',
+        'INSERT INTO plugin_my_plugin_items (id, workspace_id) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id',
         ['i_1', 'ws_1'],
       );
       const rows = await db.query<{ id: string }>('SELECT id FROM plugin_my_plugin_items');
