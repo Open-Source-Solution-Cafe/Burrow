@@ -28,6 +28,7 @@ import { useTranslation } from '../lib/i18n';
 import { FeatureFlagsSection } from '../components/settings/FeatureFlagsSection';
 import { SystemUpdateSection } from '../components/settings/SystemUpdateSection';
 import { DataPortabilitySection } from '../components/settings/DataPortabilitySection';
+import { useWebPlugins } from '../plugins/registry';
 
 type SettingsTab = 'workspace' | 'system';
 
@@ -169,6 +170,7 @@ export function SettingsView() {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { settingsSections } = useWebPlugins();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { data: account, isError: accountError } = useAccount();
   const {
@@ -826,6 +828,18 @@ export function SettingsView() {
             )}
           </div>
         </div>
+
+            {workspaceId &&
+              settingsSections.map((section) => {
+                const SectionComponent = section.render as import('react').ComponentType<{
+                  workspaceId: string;
+                }>;
+                return (
+                  <div key={section.id} id={section.id}>
+                    <SectionComponent workspaceId={workspaceId} />
+                  </div>
+                );
+              })}
           </>
         )}
 

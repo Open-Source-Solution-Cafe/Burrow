@@ -10,6 +10,7 @@ import {
   Library,
   Kanban,
   LogOut,
+  Plug,
   Plus,
   Search,
   Settings,
@@ -48,6 +49,7 @@ import { useResizableWidth } from '../../lib/useResizableWidth';
 import { useTranslation } from '../../lib/i18n';
 import { NotepadTree } from '../notepads/NotepadTree';
 import { NotificationsBell } from './NotificationsBell';
+import { useWebPlugins } from '../../plugins/registry';
 import {
   boardTarget,
   notepadTarget,
@@ -66,7 +68,15 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-type RailTab = 'overview' | 'notepads' | 'boards' | 'tasks' | 'members' | 'trash' | 'search';
+type RailTab =
+  | 'overview'
+  | 'notepads'
+  | 'boards'
+  | 'tasks'
+  | 'members'
+  | 'trash'
+  | 'search'
+  | `plugin:${string}`;
 
 const THEME_OPTIONS: BurrowTheme[] = ['modern', 'basalt', 'light'];
 
@@ -76,6 +86,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const pathname = location.pathname;
   const { t } = useTranslation();
   const { isModern, theme, setTheme } = useTheme();
+  const { sidebarPanels } = useWebPlugins();
   const { data: account } = useAccount();
   const params = useParams({ strict: false }) as {
     workspaceId?: string;
@@ -923,6 +934,31 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </button>
             )}
 
+            {/* Plugin Sidebar Panels */}
+            {workspaceId &&
+              sidebarPanels.map((panel) => {
+                const tabKey: RailTab = `plugin:${panel.id}`;
+                const PanelIcon = (panel.icon ?? Plug) as import('react').ComponentType<{
+                  className?: string;
+                }>;
+                return (
+                  <button
+                    key={panel.id}
+                    type="button"
+                    onClick={() => setActiveRailTab(tabKey)}
+                    className={`w-10 h-10 flex items-center justify-center transition cursor-pointer ${
+                      activeRailTab === tabKey
+                        ? 'bg-accent text-accent-ink'
+                        : 'text-ink-muted hover:text-text hover:bg-hi'
+                    }`}
+                    title={panel.label}
+                    aria-label={panel.label}
+                  >
+                    <PanelIcon className="w-[18px] h-[18px]" />
+                  </button>
+                );
+              })}
+
             {/* Update available indicator */}
             {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && workspaceId && (
               <Link
@@ -1688,6 +1724,25 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 )}
               </div>
             )}
+
+            {workspaceId &&
+              sidebarPanels.map((panel) => {
+                if (activeRailTab !== `plugin:${panel.id}`) return null;
+                const PanelBody = panel.render as import('react').ComponentType<{
+                  workspaceId: string;
+                  projectId?: string;
+                  onCloseMobile?: () => void;
+                }>;
+                return (
+                  <div key={panel.id} className="p-3">
+                    <PanelBody
+                      workspaceId={workspaceId}
+                      projectId={currentProjectId}
+                      onCloseMobile={onCloseMobile}
+                    />
+                  </div>
+                );
+              })}
           </div>
         </aside>
       )}
