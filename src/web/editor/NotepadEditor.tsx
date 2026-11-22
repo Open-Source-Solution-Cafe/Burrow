@@ -1398,7 +1398,9 @@ function NotepadEditorInner({
         triggerCharacter="@"
         suggestionMenuComponent={BasaltSuggestionMenu}
         getItems={async (query) => {
-          return getAtMenuSuggestions(query, data.workspaceId, data.projectId || '', editor);
+          return getAtMenuSuggestions(query, data.workspaceId, data.projectId || '', editor, {
+            pluginMentionKinds: webPlugins.mentionKinds,
+          });
         }}
       />
 

@@ -1,7 +1,9 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultProps } from '@blocknote/core';
 import { createReactInlineContentSpec, createReactBlockSpec, ReactImageBlock, ReactVideoBlock, ReactAudioBlock } from '@blocknote/react';
-import { Calendar, FileText, Kanban, Layout, Tag } from 'lucide-react';
-import { referenceHref, type ContentReferenceKind } from '../../shared/references';
+import { Calendar, FileText, Kanban, Layout, Plug, Tag } from 'lucide-react';
+import { isPluginMentionKind } from '../../shared/blocks';
+import { referenceHref } from '../../shared/references';
+import { useWebPlugins } from '../plugins/registry';
 import { useProjectReference } from './referenceScope';
 import { FileMedia } from './FileMedia';
 import { YoutubeMedia } from './YoutubeMedia';
@@ -24,7 +26,6 @@ export const Mention = createReactInlineContentSpec(
     propSchema: {
       kind: {
         default: 'user',
-        values: ['user', 'notepad', 'card', 'date', 'tag'] as const,
       },
       id: { default: '' },
       label: { default: '' },
@@ -75,10 +76,32 @@ export const Mention = createReactInlineContentSpec(
         return <ResourceMention kind={kind} id={id} label={label} />;
       }
 
+      if (isPluginMentionKind(kind)) {
+        return <PluginMentionChip kind={kind} id={id} label={label} />;
+      }
+
       return <span>@{label}</span>;
     },
   },
 );
+
+function PluginMentionChip({ kind, id, label }: { kind: string; id: string; label: string }) {
+  const { mentionKinds } = useWebPlugins();
+  const contribution = mentionKinds.find((entry) => entry.kind === kind);
+  if (contribution?.renderChip) {
+    const CustomChip = contribution.renderChip as import('react').ComponentType<{
+      id: string;
+      label: string;
+    }>;
+    return <CustomChip id={id} label={label} />;
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium theme-radius-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-2 border-l-[var(--accent)] select-none">
+      <Plug className="w-3 h-3 text-[var(--accent)]" />
+      <span>{label || id || kind}</span>
+    </span>
+  );
+}
 
 const referenceStyles = {
   notepad: { Icon: FileText, color: 'text-purple-500', border: 'border-l-[var(--accent)]' },
@@ -120,7 +143,7 @@ function ResourceMention({
 }
 
 /** One scoped metadata preview for all resource-link blocks. */
-function ReferenceBlock({ kind, id }: { kind: ContentReferenceKind; id: string }) {
+function ReferenceBlock({ kind, id }: { kind: 'notepad' | 'card' | 'board'; id: string }) {
   const { data, isLoading } = useProjectReference(kind, id);
   const href = data ? referenceHref(data) : null;
   const { Icon, color, border } = referenceStyles[kind];

@@ -12,6 +12,8 @@ import type { TagService } from '../services/tags';
 import { createExplicitWorkspaceMiddleware, requireRole } from '../middleware/session';
 import { httpError } from '../services/errors';
 import { validateStorageKey } from '../adapters/storage/validation';
+import { isPluginMentionKind, PLUGIN_MENTION_KIND_RE } from '../../shared/blocks';
+import type { MentionSourceRegistry } from '../plugins/mention-registry';
 
 const createNotepadSchema = z.object({
   parentId: z.string().optional().nullable(),
@@ -82,10 +84,13 @@ const updateTagSchema = z.object({
 const summarySchema = z.object({ ids: z.string().default('') });
 const searchSchema = z.object({ q: z.string().default('') });
 const suggestSchema = z.object({
-  type: z.enum(['notepad', 'card', 'tag']),
+  type: z.union([z.enum(['notepad', 'card', 'tag']), z.string().regex(PLUGIN_MENTION_KIND_RE)]),
   q: z.string().optional().default(''),
 });
-const referenceSchema = z.object({ kind: z.enum(['notepad', 'board', 'card']), id: z.string().min(1) });
+const referenceSchema = z.object({
+  kind: z.union([z.enum(['notepad', 'board', 'card']), z.string().regex(PLUGIN_MENTION_KIND_RE)]),
+  id: z.string().min(1),
+});
 
 export function createProjectResourceRoutes(args: {
   repositories: RepositoryContainer;
@@ -95,8 +100,9 @@ export function createProjectResourceRoutes(args: {
   comments: CommentService;
   tags: TagService;
   search: Infrastructure['search'];
+  mentionRegistry?: MentionSourceRegistry;
 }) {
-  const { repositories, notepads, boards, cards, comments, tags, search } = args;
+  const { repositories, notepads, boards, cards, comments, tags, search, mentionRegistry } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(repositories.members);
   const route = new Hono<Env>();
 
@@ -241,6 +247,16 @@ const notepadLifecycle = (action: 'delete' | 'restore' | 'permanent') => async (
     async (c) => {
       const { pid: projectId, kind, id } = c.req.valid('param');
       const scope = { workspaceId: c.get('workspaceId'), projectId };
+      if (isPluginMentionKind(kind)) {
+        const adapter = mentionRegistry?.get(kind);
+        const preview = await adapter?.resolve?.(id, {
+          ...scope,
+          userId: c.get('userId'),
+        });
+        if (!preview) throw missing('Reference unavailable');
+        c.header('Cache-Control', 'private, no-store');
+        return c.json(preview);
+      }
       const preview = await repositories.notepads.resolveReference(scope, kind, id);
       if (!preview) throw missing('Reference unavailable');
       c.header('Cache-Control', 'private, no-store');
@@ -292,6 +308,16 @@ const notepadLifecycle = (action: 'delete' | 'restore' | 'permanent') => async (
 .get('/suggest', zValidator('query', suggestSchema), async (c) => {
     const { type, q } = c.req.valid('query');
     const pattern = q.trim();
+    if (isPluginMentionKind(type)) {
+      const source = mentionRegistry?.get(type);
+      if (!source) return c.json([]);
+      const rows = await source.suggest(pattern, {
+        workspaceId: c.get('workspaceId'),
+        projectId: requireProjectId(c),
+        userId: c.get('userId'),
+      });
+      return c.json(rows.map((row) => ({ ...row, kind: row.kind ?? type })));
+    }
     if (type === 'notepad') {
       const rows = await repositories.notepads.findByPattern(
         { workspaceId: c.get('workspaceId'), projectId: requireProjectId(c) },

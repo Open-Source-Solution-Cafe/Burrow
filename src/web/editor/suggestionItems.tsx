@@ -2,7 +2,7 @@ import * as chrono from 'chrono-node';
 import type { ReactNode } from 'react';
 import type { DefaultReactSuggestionItem } from '@blocknote/react';
 import type { BlockNoteEditor } from '@blocknote/core';
-import type { SlashCommandContribution } from '@burrow/sdk';
+import type { MentionKindContribution, SlashCommandContribution } from '@burrow/sdk';
 import {
   Calendar,
   CheckSquare,
@@ -168,6 +168,9 @@ export async function getAtMenuSuggestions(
   workspaceId: string,
   projectId: string,
   editor: BlockNoteEditor<any, any, any>,
+  options?: {
+    pluginMentionKinds?: ReadonlyArray<MentionKindContribution>;
+  },
 ): Promise<DefaultReactSuggestionItem[]> {
   const items: DefaultReactSuggestionItem[] = [];
   const cleanQ = query.trim();
@@ -325,6 +328,44 @@ export async function getAtMenuSuggestions(
     }
   } catch (err) {
     console.error('Failed to suggest cards', err);
+  }
+
+  // 5. Fetch Plugin Mention Sources
+  for (const mk of options?.pluginMentionKinds ?? []) {
+    try {
+      const pluginRes = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/suggest?type=${encodeURIComponent(mk.kind)}&projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(cleanQ)}`,
+      );
+      if (!pluginRes.ok) continue;
+      const entries = (await pluginRes.json()) as Array<{
+        id: string;
+        label: string;
+        description?: string;
+        kind?: string;
+      }>;
+      for (const entry of entries) {
+        items.push({
+          title: entry.label,
+          subtext: entry.description || mk.group,
+          group: mk.group,
+          icon: <Plug className="w-4 h-4 text-[var(--accent)]" />,
+          onItemClick: () => {
+            editor.insertInlineContent([
+              {
+                type: 'mention',
+                props: {
+                  kind: entry.kind ?? mk.kind,
+                  id: entry.id,
+                  label: entry.label,
+                },
+              },
+            ]);
+          },
+        });
+      }
+    } catch (err) {
+      console.error(`Failed to suggest plugin mentions (${mk.kind})`, err);
+    }
   }
 
   return items;

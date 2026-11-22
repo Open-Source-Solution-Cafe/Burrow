@@ -226,12 +226,14 @@ export function createCoreApp(
     comments,
     tags,
     search,
+    mentionRegistry,
   });
   const workspaceViewRoutes = createWorkspaceViewRoutes({
     repositories,
     cards,
     notifications,
     search,
+    mentionRegistry,
   });
   const runtime = resolveDeploymentRuntime({
     runtime: infra.runtime,

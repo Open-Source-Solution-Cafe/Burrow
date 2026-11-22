@@ -3,6 +3,7 @@ import {
   CARD_LINK_BLOCK,
   MENTION_INLINE,
   NOTEPAD_LINK_BLOCK,
+  isPluginMentionKind,
   type LinkTargetType,
   type MentionKind,
   type MentionProps,
@@ -45,8 +46,16 @@ function parseDoc(content: string): unknown[] {
 function readMentionProps(props: unknown): MentionProps | null {
   if (!isRecord(props)) return null;
   const kind = props.kind;
-  if (kind !== 'user' && kind !== 'notepad' && kind !== 'card' && kind !== 'date' && kind !== 'tag')
+  if (
+    kind !== 'user' &&
+    kind !== 'notepad' &&
+    kind !== 'card' &&
+    kind !== 'date' &&
+    kind !== 'tag' &&
+    !isPluginMentionKind(kind)
+  ) {
     return null;
+  }
   return {
     kind,
     id: typeof props.id === 'string' ? props.id : undefined,
