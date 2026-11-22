@@ -19,6 +19,7 @@ export interface EventHandlerOptions {
   isEnabled?: () => boolean;
   timeoutMs?: number;
   secretValues?: readonly string[];
+  firstPartyCore?: boolean;
 }
 
 interface RegisteredBeforeHandler {
@@ -26,6 +27,7 @@ interface RegisteredBeforeHandler {
   handler: BeforeEventHandler<any>;
   isEnabled?: () => boolean;
   timeoutMs: number;
+  firstPartyCore: boolean;
 }
 
 interface RegisteredAfterHandler {
@@ -38,6 +40,40 @@ interface RegisteredAfterHandler {
 
 const DEFAULT_BEFORE_TIMEOUT_MS = 2_500;
 const DEFAULT_AFTER_TIMEOUT_MS = 5_000;
+const MAX_LISTENERS_PER_EVENT = 50;
+
+function cloneEventValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (value === null || typeof value !== 'object') return value;
+  if (value instanceof Date) return new Date(value.getTime()) as unknown as T;
+  if (seen.has(value as object)) return seen.get(value as object) as T;
+  if (Array.isArray(value)) {
+    const arr: unknown[] = [];
+    seen.set(value, arr);
+    for (const item of value) arr.push(cloneEventValue(item, seen));
+    return arr as unknown as T;
+  }
+  const out: Record<string, unknown> = {};
+  seen.set(value as object, out);
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    out[k] = cloneEventValue(v, seen);
+  }
+  return out as T;
+}
+
+function deepFreezeValue<T>(value: T, seen = new WeakSet<object>()): T {
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value as object)) return value;
+  seen.add(value as object);
+  if (Array.isArray(value)) {
+    for (const item of value) deepFreezeValue(item, seen);
+  } else {
+    for (const val of Object.values(value as Record<string, unknown>)) {
+      deepFreezeValue(val, seen);
+    }
+  }
+  return Object.freeze(value);
+}
 
 const executionContextStorage = new AsyncLocalStorage<EventExecutionContext>();
 
@@ -81,8 +117,14 @@ export class PluginEventBus {
       handler: handler as BeforeEventHandler<any>,
       isEnabled: options.isEnabled,
       timeoutMs: options.timeoutMs ?? DEFAULT_BEFORE_TIMEOUT_MS,
+      firstPartyCore: Boolean(options.firstPartyCore),
     };
     const list = this.beforeHandlers.get(event) ?? [];
+    if (list.length >= MAX_LISTENERS_PER_EVENT) {
+      throw new Error(
+        `Maximum listener limit (${MAX_LISTENERS_PER_EVENT}) exceeded for event "${String(event)}"`,
+      );
+    }
     list.push(entry);
     this.beforeHandlers.set(event, list);
     return () => {
@@ -106,6 +148,11 @@ export class PluginEventBus {
       secretValues: options.secretValues ?? [],
     };
     const list = this.afterHandlers.get(event) ?? [];
+    if (list.length >= MAX_LISTENERS_PER_EVENT) {
+      throw new Error(
+        `Maximum listener limit (${MAX_LISTENERS_PER_EVENT}) exceeded for event "${String(event)}"`,
+      );
+    }
     list.push(entry);
     this.afterHandlers.set(event, list);
     return () => {
@@ -123,10 +170,38 @@ export class PluginEventBus {
   ): Promise<void> {
     const handlers = this.beforeHandlers.get(event);
     if (!handlers || handlers.length === 0) return;
+    let lockedInitialExportKeys = false;
     for (const entry of [...handlers]) {
       if (entry.isEnabled && !entry.isEnabled()) continue;
+      let argPayload: BurrowEventMap[K];
+      if (entry.firstPartyCore) {
+        if (
+          !lockedInitialExportKeys &&
+          payload &&
+          typeof payload === 'object' &&
+          'payload' in payload &&
+          (payload as { payload?: unknown }).payload &&
+          typeof (payload as { payload: unknown }).payload === 'object'
+        ) {
+          const inner = (payload as { payload: Record<string, unknown> }).payload;
+          for (const k of Object.keys(inner)) {
+            const val = inner[k];
+            deepFreezeValue(val);
+            Object.defineProperty(inner, k, {
+              value: val,
+              writable: false,
+              configurable: false,
+              enumerable: true,
+            });
+          }
+          lockedInitialExportKeys = true;
+        }
+        argPayload = payload;
+      } else {
+        argPayload = cloneEventValue(payload);
+      }
       await runWithTimeout(
-        () => entry.handler(payload),
+        () => entry.handler(argPayload),
         entry.timeoutMs,
         `Plugin "${entry.pluginId}" before:${String(event)}`,
       );
@@ -152,7 +227,7 @@ export class PluginEventBus {
       const results = await Promise.allSettled(
         active.map((entry) =>
           runWithTimeout(
-            () => entry.handler(payload),
+            () => entry.handler(deepFreezeValue(cloneEventValue(payload))),
             entry.timeoutMs,
             `Plugin "${entry.pluginId}" after:${String(event)}`,
           ),
