@@ -14,6 +14,7 @@ import {
   type PostgresLikeSql,
 } from './plugin-db';
 import {
+  finalizePluginSchemaPrivileges,
   provisionPluginPostgresIsolation,
   withPluginPostgresRole,
 } from './postgres-isolation';
@@ -97,89 +98,103 @@ export async function runPluginMigrations(
 
   if (isPostgresClient(client)) {
     const newlyApplied: string[] = [];
-    const runPg = async (tx: PostgresLikeSql) => {
-      await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext('burrow:plugin_migrations'))");
-      await tx.unsafe(CREATE_PG_LEDGER_SQL);
+    const runPg = async (lockConn: PostgresLikeSql, runClient: PostgresLikeSql) => {
+      await lockConn.unsafe("SELECT pg_advisory_lock(hashtext('burrow:plugin_migrations'))");
+      try {
+        await runClient.unsafe(CREATE_PG_LEDGER_SQL);
 
-      const existingRows = await tx.unsafe('SELECT plugin_id, name FROM plugin_migrations');
-      const applied = new Set(
-        (existingRows as Array<Record<string, unknown>>).map(
-          (r) => `${String(r.plugin_id)}:${String(r.name)}`,
-        ),
-      );
-
-      // Provision schema, role, and allowlisted core table grants for plugins without migrations too
-      for (const plugin of plugins) {
-        if ((plugin.migrations?.length ?? 0) === 0) {
-          await provisionPluginPostgresIsolation(tx, plugin.manifest.id, {
-            coreTables: plugin.manifest.coreTables,
-            allowSchemaCreate: false,
-          });
-        }
-      }
-
-      for (const plugin of withMigrations) {
-        const pluginId = plugin.manifest.id;
-        const prefix = pluginTablePrefix(pluginId);
-
-        const seenNames = new Set<string>();
-        const migrations = selectMigrationsForDialect(plugin, 'postgres');
-        const pending: PluginMigration[] = [];
-
-        for (const migration of migrations) {
-          if (!migration.name || seenNames.has(migration.name)) {
-            throw new Error(
-              `Plugin "${pluginId}" has duplicate or empty migration name "${migration.name}"`,
-            );
-          }
-          seenNames.add(migration.name);
-          const key = `${pluginId}:${migration.name}`;
-          if (!applied.has(key)) {
-            pending.push(migration);
-          }
-        }
-
-        if (pending.length === 0) {
-          await provisionPluginPostgresIsolation(tx, pluginId, {
-            coreTables: plugin.manifest.coreTables,
-            allowSchemaCreate: false,
-          });
-          continue;
-        }
-
-        // Execute migration DDL under plugin_<id>_role (not superuser) so malicious DDL cannot touch core tables
-        await withPluginPostgresRole(
-          tx,
-          pluginId,
-          async (roleTx) => {
-            for (const migration of pending) {
-              if (!options.skipLexerForTest) {
-                assertPluginSqlAllowed(pluginId, migration.sql, prefix);
-              }
-              const statements = splitPluginSqlStatements(migration.sql);
-              for (const stmt of statements) {
-                await roleTx.unsafe(normalizePostgresMigrationDdl(stmt));
-              }
-            }
-          },
-          { coreTables: plugin.manifest.coreTables, allowMigrationDdl: true },
+        const existingRows = await runClient.unsafe('SELECT plugin_id, name FROM plugin_migrations');
+        const applied = new Set(
+          (existingRows as Array<Record<string, unknown>>).map(
+            (r) => `${String(r.plugin_id)}:${String(r.name)}`,
+          ),
         );
 
-        for (const migration of pending) {
-          const key = `${pluginId}:${migration.name}`;
-          await tx.unsafe(
-            'INSERT INTO plugin_migrations (plugin_id, name, applied_at) VALUES ($1, $2, $3) ON CONFLICT (plugin_id, name) DO NOTHING',
-            [pluginId, migration.name, Date.now()],
-          );
-          applied.add(key);
-          newlyApplied.push(key);
+        // Provision schema, role, and allowlisted core table grants for plugins without migrations too
+        for (const plugin of plugins) {
+          if ((plugin.migrations?.length ?? 0) === 0) {
+            await provisionPluginPostgresIsolation(runClient, plugin.manifest.id, {
+              coreTables: plugin.manifest.coreTables,
+              allowSchemaCreate: false,
+            });
+          }
         }
+
+        for (const plugin of withMigrations) {
+          const pluginId = plugin.manifest.id;
+          const prefix = pluginTablePrefix(pluginId);
+
+          const seenNames = new Set<string>();
+          const migrations = selectMigrationsForDialect(plugin, 'postgres');
+          const pending: PluginMigration[] = [];
+
+          for (const migration of migrations) {
+            if (!migration.name || seenNames.has(migration.name)) {
+              throw new Error(
+                `Plugin "${pluginId}" has duplicate or empty migration name "${migration.name}"`,
+              );
+            }
+            seenNames.add(migration.name);
+            const key = `${pluginId}:${migration.name}`;
+            if (!applied.has(key)) {
+              pending.push(migration);
+            }
+          }
+
+          if (pending.length === 0) {
+            await provisionPluginPostgresIsolation(runClient, pluginId, {
+              coreTables: plugin.manifest.coreTables,
+              allowSchemaCreate: false,
+            });
+            continue;
+          }
+
+          // Execute migration DDL under ephemeral plugin_<id>_migrator LOGIN role, then finalize to _owner + _role
+          await withPluginPostgresRole(
+            runClient,
+            pluginId,
+            async (roleTx) => {
+              for (const migration of pending) {
+                if (!options.skipLexerForTest) {
+                  assertPluginSqlAllowed(pluginId, migration.sql, prefix);
+                }
+                const statements = splitPluginSqlStatements(migration.sql);
+                for (const stmt of statements) {
+                  await roleTx.unsafe(normalizePostgresMigrationDdl(stmt));
+                }
+              }
+            },
+            { coreTables: plugin.manifest.coreTables, allowMigrationDdl: true },
+          );
+          await finalizePluginSchemaPrivileges(runClient, pluginId);
+
+          for (const migration of pending) {
+            const key = `${pluginId}:${migration.name}`;
+            await runClient.unsafe(
+              'INSERT INTO plugin_migrations (plugin_id, name, applied_at) VALUES ($1, $2, $3) ON CONFLICT (plugin_id, name) DO NOTHING',
+              [pluginId, migration.name, Date.now()],
+            );
+            applied.add(key);
+            newlyApplied.push(key);
+          }
+        }
+      } finally {
+        await lockConn.unsafe("SELECT pg_advisory_unlock(hashtext('burrow:plugin_migrations'))").catch(() => {});
       }
     };
-    if (typeof client.begin === 'function') {
-      await client.begin(runPg);
+
+    const reservable = client as PostgresLikeSql & {
+      reserve?: () => Promise<PostgresLikeSql & { release: () => void }>;
+    };
+    if (typeof reservable.reserve === 'function') {
+      const lockConn = await reservable.reserve();
+      try {
+        await runPg(lockConn, client);
+      } finally {
+        lockConn.release();
+      }
     } else {
-      await runPg(client);
+      await runPg(client, client);
     }
     return newlyApplied;
   }

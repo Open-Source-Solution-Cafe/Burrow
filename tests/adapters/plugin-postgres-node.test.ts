@@ -256,14 +256,30 @@ describe.each(['sqlite', 'postgres'] as const)('%s plugin runtime contract', (ki
         'top_secret_sibling',
       ]);
 
-      // Verify schema & role metadata created in PostgreSQL
+      // Verify schema & dedicated LOGIN role + NOLOGIN owner metadata created in PostgreSQL
       const isoSchema = pluginPostgresSchemaName('isolated');
       const isoRole = pluginPostgresRoleName('isolated');
+      const isoOwner = `${isoSchema}_owner`;
       const roleRows = await pgClient.unsafe(
-        'SELECT rolsuper, rolcanlogin FROM pg_roles WHERE rolname = $1',
+        'SELECT rolsuper, rolcanlogin, rolinherit, rolbypassrls FROM pg_roles WHERE rolname = $1',
         [isoRole],
       );
-      expect(roleRows[0]).toEqual({ rolsuper: false, rolcanlogin: false });
+      expect(roleRows[0]).toEqual({
+        rolsuper: false,
+        rolcanlogin: true,
+        rolinherit: false,
+        rolbypassrls: false,
+      });
+      const ownerRows = await pgClient.unsafe(
+        'SELECT rolsuper, rolcanlogin FROM pg_roles WHERE rolname = $1',
+        [isoOwner],
+      );
+      expect(ownerRows[0]).toEqual({ rolsuper: false, rolcanlogin: false });
+      const memberships = await pgClient.unsafe(
+        'SELECT count(*)::int AS cnt FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = $1',
+        [isoRole],
+      );
+      expect(memberships[0]?.cnt).toBe(0);
 
       // Bypass JS lexer completely via raw driver inside `withPluginPostgresRole` AND `enforceLexer: false`
       const bypassedDb = createPluginDb(pgClient, 'isolated', {
@@ -299,12 +315,24 @@ describe.each(['sqlite', 'postgres'] as const)('%s plugin runtime contract', (ki
       expect(safeInviteCols).toEqual([{ id: 'inv_db_1', email: 'invitee@example.com' }]);
       await expect(invBypassedDb.query('SELECT token_hash FROM public.invites')).rejects.toThrow();
 
+      const identityAfterReset = await withPluginPostgresRole(
+        pgClient,
+        'isolated',
+        async (roleTx) => {
+          await roleTx.unsafe('RESET ROLE');
+          const rows = await roleTx.unsafe('SELECT current_user AS cu, session_user AS su');
+          return rows[0];
+        },
+        { coreTables: ['workspaces'] },
+      );
+      expect(identityAfterReset).toEqual({ cu: isoRole, su: isoRole });
+
       // 2-8. Raw driver calls directly inside the plugin role fail at DB level across all breakout vectors
       const rawAttacks: Array<[string, string]> = [
         ['read sibling plugin schema', 'SELECT secret FROM plugin_sibling.plugin_sibling_secrets'],
         ['drop sibling plugin table', 'DROP TABLE plugin_sibling.plugin_sibling_secrets'],
         ['read pg_catalog.pg_authid', 'SELECT rolname, rolpassword FROM pg_catalog.pg_authid'],
-        ['RESET ROLE', 'RESET ROLE'],
+        ['RESET ROLE + query public."user"', 'RESET ROLE; SELECT email FROM public."user"'],
         ['SET ROLE postgres', 'SET ROLE postgres'],
         ['SET SESSION AUTHORIZATION', 'SET SESSION AUTHORIZATION burrow_test'],
         [
@@ -316,10 +344,16 @@ describe.each(['sqlite', 'postgres'] as const)('%s plugin runtime contract', (ki
           'CREATE TRIGGER evil_trig BEFORE DELETE ON public.workspaces FOR EACH ROW EXECUTE FUNCTION public.burrow_enforce_plugin_ddl()',
         ],
         ['COPY ... TO PROGRAM', "COPY (SELECT 1) TO PROGRAM 'id'"],
-        ['LISTEN command', 'LISTEN secret_channel'],
-        ['NOTIFY command', "NOTIFY secret_channel, 'exfil'"],
         ['pg_catalog.pg_notify()', "SELECT pg_catalog.pg_notify('secret_channel', 'exfil')"],
       ];
+
+      // Raw SQL LISTEN / NOTIFY are blocked by PluginDb guard (PostgreSQL has no privilege bit for LISTEN/NOTIFY)
+      await expect(createPluginDb(pgClient, 'isolated').execute('LISTEN secret_channel')).rejects.toThrow(
+        PluginSqlAccessError,
+      );
+      await expect(
+        createPluginDb(pgClient, 'isolated').execute("NOTIFY secret_channel, 'exfil'"),
+      ).rejects.toThrow(PluginSqlAccessError);
 
       for (const [label, sqlText] of rawAttacks) {
         await expect(

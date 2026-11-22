@@ -73,18 +73,20 @@ export default defineConfig({
           include: [
             'tests/unit/**/*.test.ts',
             'tests/audit/**/*.test.ts',
+            'tests/security/**/*.test.ts',
             'tests/adapters/storage-local.test.ts',
             'src/web/**/*.test.ts',
             'src/core/**/*.test.ts',
             'src/shared/**/*.test.ts',
           ],
+          exclude: ['tests/security/**/*-node.test.ts'],
           environment: 'node',
         },
       },
       {
         test: {
           name: 'database',
-          include: ['tests/adapters/*-node.test.ts'],
+          include: ['tests/adapters/*-node.test.ts', 'tests/security/*-node.test.ts'],
           environment: 'node',
           globalSetup: sqliteOnly ? [] : ['./tests/adapters/node-setup.ts'],
           ...(sqliteOnly ? { testNamePattern: 'sqlite' } : {}),
