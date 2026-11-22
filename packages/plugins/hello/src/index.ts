@@ -7,7 +7,7 @@ export const helloPlugin: BurrowServerPlugin = {
     name: 'Hello Example Plugin',
     version: '0.1.0',
     sdkVersion: '^0.4.0',
-    permissions: ['db:own', 'routes:api', 'events:read'],
+    permissions: ['db:own', 'routes:api', 'routes:public', 'events:read'],
     description: 'Reference plugin demonstrating prefixed D1 migrations, events, and API routes.',
   },
   migrations: [
@@ -60,6 +60,6 @@ CREATE INDEX IF NOT EXISTS idx_plugin_hello_logs_ws ON plugin_hello_logs(workspa
       },
     );
 
-    ctx.route(router);
+    ctx.route(router, { public: true });
   },
 };

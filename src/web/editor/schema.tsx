@@ -4,6 +4,7 @@ import { Calendar, FileText, Kanban, Layout, Plug, Tag } from 'lucide-react';
 import { isPluginMentionKind } from '../../shared/blocks';
 import { referenceHref } from '../../shared/references';
 import { useWebPlugins } from '../plugins/registry';
+import { sanitizePluginProps } from '@burrow/sdk';
 import { useProjectReference } from './referenceScope';
 import { FileMedia } from './FileMedia';
 import { YoutubeMedia } from './YoutubeMedia';
@@ -88,17 +89,18 @@ export const Mention = createReactInlineContentSpec(
 function PluginMentionChip({ kind, id, label }: { kind: string; id: string; label: string }) {
   const { mentionKinds } = useWebPlugins();
   const contribution = mentionKinds.find((entry) => entry.kind === kind);
+  const safeProps = sanitizePluginProps({ id, label });
   if (contribution?.renderChip) {
     const CustomChip = contribution.renderChip as import('react').ComponentType<{
       id: string;
       label: string;
     }>;
-    return <CustomChip id={id} label={label} />;
+    return <CustomChip id={safeProps.id} label={safeProps.label} />;
   }
   return (
     <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium theme-radius-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-2 border-l-[var(--accent)] select-none">
       <Plug className="w-3 h-3 text-[var(--accent)]" />
-      <span>{label || id || kind}</span>
+      <span>{safeProps.label || safeProps.id || kind}</span>
     </span>
   );
 }

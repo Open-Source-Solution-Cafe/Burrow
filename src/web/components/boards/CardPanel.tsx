@@ -22,6 +22,7 @@ import { SegmentedControl } from '../ui/SegmentedControl';
 import { StatusDiamond } from '../ui/StatusDiamond';
 import { useTranslation } from '../../lib/i18n';
 import { useWebPlugins } from '../../plugins/registry';
+import { sanitizePluginProps } from '@burrow/sdk';
 
 interface CardPanelProps {
   workspaceId: string;
@@ -263,6 +264,29 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
                 <option value={card.columnId}>{(card as any).columnName || 'Column'}</option>
               )}
             </Select>
+            {cardTypes.length > 0 && (
+              <Select
+                aria-label="Card type"
+                value={(card as any).cardType ?? 'task'}
+                onChange={(e) =>
+                  updateCardMutation.mutate({
+                    workspaceId,
+                    projectId,
+                    cardId,
+                    boardId,
+                    cardType: e.target.value,
+                  })
+                }
+                className="px-2.5 py-1 text-xs font-mono w-auto"
+              >
+                <option value="task">Task</option>
+                {cardTypes.map((ct) => (
+                  <option key={ct.type} value={ct.type}>
+                    {ct.label}
+                  </option>
+                ))}
+              </Select>
+            )}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -466,7 +490,7 @@ export function CardPanel({ workspaceId, cardId, boardId, projectId, columns, on
         {/* Plugin Card Type Section */}
         {CardTypePanelSection && (
           <CardTypePanelSection
-            card={card as unknown as Record<string, unknown>}
+            card={sanitizePluginProps(card as unknown as Record<string, unknown>)}
             workspaceId={workspaceId}
             projectId={projectId}
             boardId={boardId}

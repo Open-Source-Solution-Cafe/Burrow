@@ -28,6 +28,7 @@ interface QuickAddChips {
 export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClose }: QuickAddCardProps) {
   const { t } = useTranslation();
   const [title, setTitle] = useState('');
+  const [cardType, setCardType] = useState('task');
   const [chips, setChips] = useState<QuickAddChips>({ assignees: [], tags: [] });
   const [menuMode, setMenuMode] = useState<'none' | 'slash' | 'at' | 'hash'>('none');
   const [menuQuery, setMenuQuery] = useState('');
@@ -468,6 +469,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         boardId,
         columnId,
         title: cleanTitle,
+        cardType: cardType !== 'task' ? cardType : undefined,
         priority: priority ?? undefined,
         dueDate: dueDate ?? undefined,
         assigneeIds,
@@ -771,9 +773,26 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
 
       {/* Footer controls: Submit & Hints */}
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] pt-1 border-t border-[var(--hair)] gap-2">
-        <span className="truncate">
-          ↵ Enter to save &bull; ⇧↵ to add another &bull; ⌫ clears chips
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          {webPlugins.cardTypes.length > 0 && (
+            <select
+              aria-label="Card type"
+              value={cardType}
+              onChange={(e) => setCardType(e.target.value)}
+              className="border border-[var(--line)] bg-[var(--surface2)] px-1.5 py-0.5 text-[11px] font-mono text-[var(--text)]"
+            >
+              <option value="task">Task</option>
+              {webPlugins.cardTypes.map((ct) => (
+                <option key={ct.type} value={ct.type}>
+                  {ct.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="truncate">
+            ↵ Enter to save &bull; ⇧↵ to add another &bull; ⌫ clears chips
+          </span>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {onClose && (
             <button

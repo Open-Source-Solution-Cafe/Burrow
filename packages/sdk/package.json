@@ -1,12 +1,36 @@
 {
   "name": "@burrow/sdk",
   "version": "0.4.0",
-  "description": "Type-only SDK and manifest contracts for Burrow server and web plugins",
+  "description": "Safe-by-default SDK, sanitizer helpers, and manifest contracts for Burrow server and web plugins",
   "license": "MIT",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
-  "types": "./src/index.ts",
-  "dependencies": {}
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "hono": "^4.0.0",
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "hono": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
 }

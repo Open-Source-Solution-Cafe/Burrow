@@ -42,6 +42,7 @@ import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
 import { createSystemRoutes } from './routes/system';
 import { createFeatureFlagRoutes } from './routes/feature-flags';
+import { createPluginAdminRoutes } from './routes/plugins-admin';
 import { createPublicSharingPlugin } from '../../packages/plugins/public-sharing/src/index';
 import { createWorkspaceExportPlugin } from '../../packages/plugins/workspace-export/src/index';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
@@ -49,6 +50,7 @@ import type { BurrowServerPlugin } from '@burrow/sdk';
 import { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
 import { MentionSourceRegistry } from './plugins/mention-registry';
 import { loadServerPlugins } from './plugins/loader';
+import { PluginRuntimeRegistry } from './plugins/runtime-state';
 
 function parseSafeHttpUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -77,7 +79,12 @@ export interface CreateCoreAppOptions {
   plugins?: readonly BurrowServerPlugin[];
   events?: PluginEventBus;
   mentionRegistry?: MentionSourceRegistry;
+  runtimeRegistry?: PluginRuntimeRegistry;
+  pluginRuntimeRegistry?: PluginRuntimeRegistry;
+  pluginRouteTimeoutMs?: number;
   rawDb?: unknown;
+  /** Plugin IDs composed by the host distribution that may mount custom base paths and wrap core adapters. */
+  firstPartyPluginIds?: readonly string[];
 }
 
 /**
@@ -109,13 +116,31 @@ export function createCoreApp(
     await next();
   });
 
-  const loadedPlugins = options.plugins?.length
+  const envDisabledRaw =
+    infra.env?.DISABLED_PLUGINS ??
+    (typeof process !== 'undefined' ? process.env?.DISABLED_PLUGINS : undefined);
+  const runtimeRegistry =
+    options.pluginRuntimeRegistry ??
+    options.runtimeRegistry ??
+    new PluginRuntimeRegistry({
+      disabledPluginsEnv: envDisabledRaw,
+      instanceManaged: options.policy?.allowSelfUpdate?.() === false,
+    });
+
+  const firstPartySet = new Set(options.firstPartyPluginIds ?? []);
+  const externalPlugins = (options.plugins ?? []).filter((p) => !firstPartySet.has(p.manifest.id));
+  const trustedPlugins = (options.plugins ?? []).filter((p) => firstPartySet.has(p.manifest.id));
+
+  const trustedLoaded = trustedPlugins.length
     ? loadServerPlugins({
-        plugins: options.plugins,
+        plugins: trustedPlugins,
         infra,
         events,
         mentionRegistry,
         rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: true,
+        timeoutMs: options.pluginRouteTimeoutMs,
         middleware: {
           requireIdentity: requireIdentityMiddleware,
           requireWorkspace: explicitWorkspaceMiddleware,
@@ -124,11 +149,33 @@ export function createCoreApp(
       })
     : { pluginRoutes: [], adapterOverrides: {} };
 
-  const policy = options.policy ?? loadedPlugins.adapterOverrides.policy ?? new SelfHostedPolicy();
-  effectiveAuth = loadedPlugins.adapterOverrides.auth ?? infra.auth;
+  const loadedPlugins = externalPlugins.length
+    ? loadServerPlugins({
+        plugins: externalPlugins,
+        infra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: false,
+        timeoutMs: options.pluginRouteTimeoutMs,
+        middleware: {
+          requireIdentity: requireIdentityMiddleware,
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
+
+  const mergedAdapters = {
+    ...trustedLoaded.adapterOverrides,
+    ...loadedPlugins.adapterOverrides,
+  };
+  const policy = options.policy ?? mergedAdapters.policy ?? new SelfHostedPolicy();
+  effectiveAuth = mergedAdapters.auth ?? infra.auth;
   const auth = effectiveAuth;
-  const storage = loadedPlugins.adapterOverrides.storage ?? infra.storage;
-  const emailProvider = loadedPlugins.adapterOverrides.mailer ?? infra.email;
+  const storage = mergedAdapters.storage ?? infra.storage;
+  const emailProvider = mergedAdapters.mailer ?? infra.email;
   const {
     repositories,
     search,
@@ -157,6 +204,8 @@ export function createCoreApp(
         events,
         mentionRegistry,
         rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: true,
         middleware: {
           requireIdentity: requireIdentityMiddleware,
           requireWorkspace: explicitWorkspaceMiddleware,
@@ -998,7 +1047,15 @@ export function createCoreApp(
         }
       });
 
-  for (const { mountPath, router } of [...builtinLoaded.pluginRoutes, ...loadedPlugins.pluginRoutes]) {
+  baseApp.route(
+    '/api/plugins',
+    createPluginAdminRoutes({ runtimeRegistry, workspaces: repositories.workspaces }),
+  );
+  for (const { mountPath, router } of [
+    ...builtinLoaded.pluginRoutes,
+    ...trustedLoaded.pluginRoutes,
+    ...loadedPlugins.pluginRoutes,
+  ]) {
     baseApp.route(mountPath, router);
   }
 

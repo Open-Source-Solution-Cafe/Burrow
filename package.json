@@ -56,6 +56,7 @@
     "hooks:install": "node scripts/install-hooks.mjs",
     "prepare": "node scripts/install-hooks.mjs",
     "inventory:storage": "tsx scripts/inventory-storage.mjs",
+    "plugin:validate": "node scripts/plugin-validate.mjs",
     "test": "vitest run",
     "logs": "wrangler tail --config wrangler.local.jsonc",
     "logs:staging": "wrangler tail --config wrangler.staging.local.jsonc",

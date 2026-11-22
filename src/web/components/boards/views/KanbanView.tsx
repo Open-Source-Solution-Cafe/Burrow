@@ -56,6 +56,7 @@ import { COMPLETED_COLUMN_RE, PRIORITY_BADGES, type CardItem, type ColumnItem } 
 import { computeCardDropTarget, computeColumnDropTarget } from '../kanbanReorder';
 import { useTranslation } from '../../../lib/i18n';
 import { useWebPlugins } from '../../../plugins/registry';
+import { sanitizePluginProps } from '@burrow/sdk';
 
 interface KanbanViewProps {
   workspaceId: string;
@@ -166,7 +167,7 @@ function CardTile({
 
         {TileBadge && (
           <TileBadge
-            card={card as unknown as Record<string, unknown>}
+            card={sanitizePluginProps(card as unknown as Record<string, unknown>)}
             workspaceId={workspaceId}
             projectId={projectId}
           />
@@ -207,7 +208,7 @@ function CardTile({
           <div className="flex items-center gap-2 min-w-0">
             {TileFooter && (
               <TileFooter
-                card={card as unknown as Record<string, unknown>}
+                card={sanitizePluginProps(card as unknown as Record<string, unknown>)}
                 workspaceId={workspaceId}
                 projectId={projectId}
               />

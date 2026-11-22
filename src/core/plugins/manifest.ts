@@ -1,20 +1,25 @@
 import {
   BURROW_SDK_VERSION,
   type Permission,
+  type PluginDialect,
   type PluginManifest,
 } from '@burrow/sdk';
 
 export const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,30}$/;
 const SEMVER_RE = /^v?(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const CONFIG_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const VALID_DIALECTS = new Set<PluginDialect>(['sqlite', 'postgres']);
 
 export const VALID_PLUGIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   'db:own',
   'routes:api',
+  'routes:public',
   'events:read',
   'events:before',
   'policy:override',
   'auth:override',
   'storage:override',
+  'storage:own',
   'mailer:override',
   'mentions:register',
   'cards:register',
@@ -89,6 +94,23 @@ export function satisfiesSdkRange(hostVersion: string, range: string): boolean {
   return exact ? compareSemver(host, exact) === 0 : false;
 }
 
+function isValidNetworkHostEntry(entry: string): boolean {
+  const trimmed = entry.trim().toLowerCase();
+  if (!trimmed || trimmed.includes('*') || trimmed.includes('/') || trimmed.includes(':')) {
+    return false;
+  }
+  if (
+    trimmed === 'localhost' ||
+    trimmed.endsWith('.localhost') ||
+    trimmed.endsWith('.local') ||
+    trimmed.endsWith('.internal') ||
+    /^\d+\.\d+\.\d+\.\d+$/.test(trimmed)
+  ) {
+    return false;
+  }
+  return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(trimmed);
+}
+
 export function validatePluginManifest(
   manifest: PluginManifest,
   hostSdkVersion = BURROW_SDK_VERSION,
@@ -128,5 +150,63 @@ export function validatePluginManifest(
         `unknown permission "${String(perm)}"`,
       );
     }
+  }
+  if (manifest.dialects !== undefined) {
+    if (!Array.isArray(manifest.dialects) || manifest.dialects.length === 0) {
+      throw new PluginManifestError(manifest.id, 'dialects must be a non-empty array when provided');
+    }
+    for (const d of manifest.dialects) {
+      if (!VALID_DIALECTS.has(d)) {
+        throw new PluginManifestError(manifest.id, `unknown dialect "${String(d)}"`);
+      }
+    }
+  }
+  if (manifest.dependencies !== undefined) {
+    if (!Array.isArray(manifest.dependencies)) {
+      throw new PluginManifestError(manifest.id, 'dependencies must be an array');
+    }
+    for (const dep of manifest.dependencies) {
+      if (typeof dep !== 'string' || !PLUGIN_ID_RE.test(dep)) {
+        throw new PluginManifestError(manifest.id, `invalid dependency id "${String(dep)}"`);
+      }
+      if (dep === manifest.id) {
+        throw new PluginManifestError(manifest.id, 'plugin cannot depend on itself');
+      }
+    }
+  }
+  if (manifest.network !== undefined) {
+    if (!Array.isArray(manifest.network)) {
+      throw new PluginManifestError(manifest.id, 'network allowlist must be an array');
+    }
+    for (const host of manifest.network) {
+      if (typeof host !== 'string' || !isValidNetworkHostEntry(host)) {
+        throw new PluginManifestError(
+          manifest.id,
+          `invalid network allowlist hostname "${String(host)}"`,
+        );
+      }
+    }
+  }
+  if (manifest.configKeys !== undefined) {
+    if (!Array.isArray(manifest.configKeys)) {
+      throw new PluginManifestError(manifest.id, 'configKeys must be an array');
+    }
+    for (const key of manifest.configKeys) {
+      if (typeof key !== 'string' || !CONFIG_KEY_RE.test(key)) {
+        throw new PluginManifestError(manifest.id, `invalid configKey "${String(key)}"`);
+      }
+    }
+  }
+}
+
+export function assertPluginDialectSupported(
+  manifest: PluginManifest,
+  activeDialect: PluginDialect,
+): void {
+  if (manifest.dialects && !manifest.dialects.includes(activeDialect)) {
+    throw new PluginManifestError(
+      manifest.id,
+      `does not support active database dialect "${activeDialect}" (supports: ${manifest.dialects.join(', ')})`,
+    );
   }
 }

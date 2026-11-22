@@ -6,24 +6,22 @@ All default assumptions below were adopted so implementation could proceed auton
 
 ## Adopted Default Assumptions
 
-### D1. Postgres Adapter Policy (`Status: Pending Owner`)
-- **Decision**: All plugin architecture features (plugin migrations, `PluginDb`, `plugin_<id>_*` tables, and `burrow-cloud` plugins) target **Cloudflare Workers + D1 (SQLite)** only.
-- **Handling**: The existing Postgres adapter in `Burrow/src/core/adapters/db/postgres/` is left **frozen** (not extended for plugins, not deleted). Minimal parity files (`migrations/postgres/0006_add_card_type.sql` and `postgres/schema.ts` column parity) are maintained only where required by `scripts/check-sync.mjs` and `tests/unit/schema-parity.test.ts`.
-- **Owner Action**: Decide whether to formally deprecate/remove the Node/Postgres runtime in `Burrow` or add Postgres plugin support later.
+### D1. Postgres Adapter Policy (`Status: Updated 2026-11-22`)
+- **Decision**: Hosted cloud runs on **PostgreSQL** (`postgres` driver), while public core keeps **both SQLite/D1 and PostgreSQL** adapters. Plugin runtime infrastructure (`PluginDb`, `runPluginMigrations`, `src/server/index.ts`) must support both SQLite/D1 and PostgreSQL dialects cleanly.
+- **Handling**: Plugins declare supported `dialects?: ('sqlite' | 'postgres')[]` in `PluginManifest`. `PluginDb` translates parameterized queries (`?` → `$1..$n`) and safe portability idioms across dialects, and `runPluginMigrations` executes inside `pg_advisory_xact_lock` on Postgres and `db.batch()` / transactions on D1/SQLite.
 
-### D2. `burrow-cloud` Tenancy Topology on D1 (`Status: Pending Owner`)
-- **Decision**: Port `burrow-cloud` to Cloudflare Workers + D1 plugins using a **single shared D1 database** for initial simplicity, with all cloud data access encapsulated inside plugin repositories/adapters (`plugin_cloud_*`) so migrating to **database-per-tenant** on D1 later only swaps the DB resolver.
-- **Note**: A single D1 database on Workers Paid has a 10 GB maximum database size limit. Multi-tenant production scaling beyond 10 GB will require switching the adapter to D1 database-per-tenant (up to 50,000 D1 databases per account).
-- **Owner Action**: Confirm single shared D1 vs. database-per-tenant provisioning prior to production SaaS launch.
+### D2. `burrow-cloud` Tenancy Topology (`Status: Pending Owner`)
+- **Decision**: `burrow-cloud` runs multi-tenant shared and dedicated deployments on PostgreSQL using `plugin_cloud_*` schema/tables (with `PluginDb` portability for SQLite/D1 testing). Dedicated tenants provision isolated databases and storage buckets.
+- **Owner Action**: Confirm shared-schema vs. per-tenant Postgres database/schema topology prior to production SaaS launch.
 
 ### D3. `@burrow/sdk` Licensing (`Status: Pending Owner / Legal Review`)
 - **Decision**: `packages/sdk/package.json` declares `"license": "MIT"` while the rest of public `Burrow` (`@burrow/core`, `@burrow/web`, `@burrow/worker`, `@burrow/plugins`, root `package.json`) remains `"AGPL-3.0-or-later"`.
 - **Rationale**: Allows community and proprietary plugins (including `burrow-cloud`) to import `@burrow/sdk` TypeScript types and manifest definitions cleanly without copyleft license friction on type contracts.
 - **Owner Action**: Legal / maintainer sign-off on dual/MIT licensing for `packages/sdk`.
 
-### D4. First-Year Community Plugin Trust Model (`Status: Pending Owner`)
-- **Decision**: Year 1 supports **curated build-time plugins** (submitted via PR, reviewed, and bundled into the Worker + Vite build). Runtime untrusted multi-tenant execution (Cloudflare Workers for Platforms + Outbound Workers + sandboxed `<iframe>` UI) is documented in `docs/plugin-architecture/UNTRUSTED.md` (Phase 4) without runtime implementation yet.
-- **Owner Action**: Confirm whether curated build-time plugins are sufficient for initial release or if Phase 4 Workers for Platforms work should be scheduled next.
+### D4. Threat Model & Trust Boundary (`Status: Updated 2026-11-22`)
+- **Decision**: Plugins are installed at the **operator's discretion** (self-hosters choose their own plugins). The platform's job is to make the safe path the default and block common vulnerability classes (SQLi, XSS, SSRF, IDOR, CSRF, path traversal, secret leaks, resource exhaustion, supply-chain risks) even from careless plugin code. A hostile-code V8 isolate sandbox is **not** required for self-hosted installs.
+- **Cloud Boundary**: Shared multi-tenant `burrow-cloud` stays **curated and instance-wide only** (per-workspace installation of arbitrary plugin code on cloud is strictly prohibited). Future untrusted multi-tenant runtime isolation (Workers for Platforms + Outbound Worker + sandboxed `<iframe>` UI) remains documented in `docs/plugin-architecture/UNTRUSTED.md` as a separate later phase.
 
 ### D5. Core Domain Scope & Dogfooding Boundaries (`Status: Pending Owner`)
 - **Decision**: Notepads (`notepads`, `notepads_fts`, `edit_locks`, `notepad_links`) and Core Kanban tables (`boards`, `board_columns`, `cards`) remain in core due to deep transactional and FK coupling (`cards(notepad_id, kind) -> notepads(id, kind)` and `saveContentBatch`). Dogfooding is applied to `burrow-cloud` plugins, `publicSharing`, `workspaceExport`, and the `estimation` showcase plugin (`cards.card_type = 'estimate'`).

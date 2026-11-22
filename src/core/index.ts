@@ -111,6 +111,7 @@ export { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bu
 export { MentionSourceRegistry, PLUGIN_MENTION_KIND_RE } from './plugins/mention-registry';
 export {
   validatePluginManifest,
+  assertPluginDialectSupported,
   pluginTablePrefix,
   PluginManifestError,
   PLUGIN_ID_RE,
@@ -120,7 +121,28 @@ export {
   createPluginDb,
   assertPluginSqlAllowed,
   splitPluginSqlStatements,
+  translateSqlToPostgres,
+  detectPluginDialect,
+  runWithPluginHttpMethod,
   PluginSqlAccessError,
 } from './plugins/plugin-db';
 export { runPluginMigrations } from './plugins/migrations';
-export { loadServerPlugins } from './plugins/loader';
+export { loadServerPlugins, sortPluginsByDependencies } from './plugins/loader';
+export { PluginRuntimeRegistry, type PluginAdminView } from './plugins/runtime-state';
+export {
+  createPluginFetch,
+  isBlockedIpAddress,
+  isBlockedHostname,
+  PluginNetworkAccessError,
+} from './plugins/safe-fetch';
+export {
+  createPluginStorage,
+  sanitizePluginStorageKey,
+  PluginStorageError,
+} from './plugins/plugin-storage';
+export {
+  createPluginLogger,
+  redactSecrets,
+  buildScopedPluginConfig,
+  collectSecretValues,
+} from './plugins/logger';

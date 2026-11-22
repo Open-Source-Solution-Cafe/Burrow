@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { BurrowEventMap } from '@burrow/sdk';
+import { redactSecrets } from './logger';
 
 export type BeforeEventHandler<K extends keyof BurrowEventMap> = (
   payload: BurrowEventMap[K],
@@ -13,6 +14,31 @@ export interface EventExecutionContext {
   waitUntil?: (promise: Promise<unknown>) => void;
 }
 
+export interface EventHandlerOptions {
+  pluginId?: string;
+  isEnabled?: () => boolean;
+  timeoutMs?: number;
+  secretValues?: readonly string[];
+}
+
+interface RegisteredBeforeHandler {
+  pluginId: string;
+  handler: BeforeEventHandler<any>;
+  isEnabled?: () => boolean;
+  timeoutMs: number;
+}
+
+interface RegisteredAfterHandler {
+  pluginId: string;
+  handler: AfterEventHandler<any>;
+  isEnabled?: () => boolean;
+  timeoutMs: number;
+  secretValues: readonly string[];
+}
+
+const DEFAULT_BEFORE_TIMEOUT_MS = 2_500;
+const DEFAULT_AFTER_TIMEOUT_MS = 5_000;
+
 const executionContextStorage = new AsyncLocalStorage<EventExecutionContext>();
 
 export function runWithEventExecutionContext<T>(
@@ -22,60 +48,94 @@ export function runWithEventExecutionContext<T>(
   return executionContextStorage.run(ctx, fn);
 }
 
+async function runWithTimeout<T>(fn: () => Promise<T> | T, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Typed domain event bus separating synchronous pre-action guards (`before*`)
- * from post-commit async handlers (`after*` dispatched via `ExecutionContext.waitUntil`).
+ * from post-commit async handlers (`after*` dispatched off the hot path).
  */
 export class PluginEventBus {
-  private readonly beforeHandlers = new Map<
-    keyof BurrowEventMap,
-    Array<BeforeEventHandler<any>>
-  >();
-  private readonly afterHandlers = new Map<
-    keyof BurrowEventMap,
-    Array<AfterEventHandler<any>>
-  >();
+  private readonly beforeHandlers = new Map<keyof BurrowEventMap, RegisteredBeforeHandler[]>();
+  private readonly afterHandlers = new Map<keyof BurrowEventMap, RegisteredAfterHandler[]>();
   private readonly pendingTasks = new Set<Promise<void>>();
 
-  onBefore<K extends keyof BurrowEventMap>(event: K, handler: BeforeEventHandler<K>): () => void {
+  onBefore<K extends keyof BurrowEventMap>(
+    event: K,
+    handler: BeforeEventHandler<K>,
+    options: EventHandlerOptions = {},
+  ): () => void {
+    const entry: RegisteredBeforeHandler = {
+      pluginId: options.pluginId ?? 'core',
+      handler: handler as BeforeEventHandler<any>,
+      isEnabled: options.isEnabled,
+      timeoutMs: options.timeoutMs ?? DEFAULT_BEFORE_TIMEOUT_MS,
+    };
     const list = this.beforeHandlers.get(event) ?? [];
-    list.push(handler as BeforeEventHandler<any>);
+    list.push(entry);
     this.beforeHandlers.set(event, list);
     return () => {
       const current = this.beforeHandlers.get(event);
       if (!current) return;
-      const idx = current.indexOf(handler as BeforeEventHandler<any>);
+      const idx = current.indexOf(entry);
       if (idx >= 0) current.splice(idx, 1);
     };
   }
 
-  on<K extends keyof BurrowEventMap>(event: K, handler: AfterEventHandler<K>): () => void {
+  on<K extends keyof BurrowEventMap>(
+    event: K,
+    handler: AfterEventHandler<K>,
+    options: EventHandlerOptions = {},
+  ): () => void {
+    const entry: RegisteredAfterHandler = {
+      pluginId: options.pluginId ?? 'core',
+      handler: handler as AfterEventHandler<any>,
+      isEnabled: options.isEnabled,
+      timeoutMs: options.timeoutMs ?? DEFAULT_AFTER_TIMEOUT_MS,
+      secretValues: options.secretValues ?? [],
+    };
     const list = this.afterHandlers.get(event) ?? [];
-    list.push(handler as AfterEventHandler<any>);
+    list.push(entry);
     this.afterHandlers.set(event, list);
     return () => {
       const current = this.afterHandlers.get(event);
       if (!current) return;
-      const idx = current.indexOf(handler as AfterEventHandler<any>);
+      const idx = current.indexOf(entry);
       if (idx >= 0) current.splice(idx, 1);
     };
   }
 
-  /** Run pre-action guards sequentially before the core write executes. Errors abort the request. */
+  /** Run pre-action guards sequentially before the core write executes. Errors or timeouts abort the request. */
   async emitBefore<K extends keyof BurrowEventMap>(
     event: K,
     payload: BurrowEventMap[K],
   ): Promise<void> {
     const handlers = this.beforeHandlers.get(event);
     if (!handlers || handlers.length === 0) return;
-    for (const handler of [...handlers]) {
-      await handler(payload);
+    for (const entry of [...handlers]) {
+      if (entry.isEnabled && !entry.isEnabled()) continue;
+      await runWithTimeout(
+        () => entry.handler(payload),
+        entry.timeoutMs,
+        `Plugin "${entry.pluginId}" before:${String(event)}`,
+      );
     }
   }
 
   /**
-   * Dispatch post-commit listeners without affecting the already-committed operation.
-   * Uses `ctx.waitUntil` when inside a Cloudflare Worker request, or awaits deterministically otherwise.
+   * Dispatch post-commit listeners without blocking or failing the already-committed operation.
+   * Uses `ctx.waitUntil` in Workers or a non-blocking microtask queue in Node/Postgres.
    */
   async emitAfter<K extends keyof BurrowEventMap>(
     event: K,
@@ -85,32 +145,56 @@ export class PluginEventBus {
     const handlers = this.afterHandlers.get(event);
     if (!handlers || handlers.length === 0) return;
 
-    const snapshot = [...handlers];
-    const runPromise = Promise.allSettled(
-      snapshot.map((handler) => Promise.resolve().then(() => handler(payload))),
-    ).then((results) => {
-      for (const result of results) {
-        if (result.status === 'rejected') {
-          console.error(`[plugins:event] "${String(event)}" handler failed:`, result.reason);
-        }
-      }
-    });
+    const active = [...handlers].filter((entry) => !entry.isEnabled || entry.isEnabled());
+    if (active.length === 0) return;
 
-    this.pendingTasks.add(runPromise);
-    const tracked = runPromise.finally(() => {
-      this.pendingTasks.delete(runPromise);
-    });
+    const executeAll = async () => {
+      const results = await Promise.allSettled(
+        active.map((entry) =>
+          runWithTimeout(
+            () => entry.handler(payload),
+            entry.timeoutMs,
+            `Plugin "${entry.pluginId}" after:${String(event)}`,
+          ),
+        ),
+      );
+      results.forEach((result, i) => {
+        if (result.status === 'rejected') {
+          const entry = active[i]!;
+          const rawMsg =
+            result.reason instanceof Error ? result.reason.message : String(result.reason ?? 'error');
+          console.error(
+            `[plugins:event:${entry.pluginId}] "${String(event)}" handler failed:`,
+            redactSecrets(rawMsg, entry.secretValues),
+          );
+        }
+      });
+    };
 
     const waitUntil = explicitWaitUntil ?? executionContextStorage.getStore()?.waitUntil;
     if (waitUntil) {
+      const runPromise = executeAll();
+      this.pendingTasks.add(runPromise);
+      const tracked = runPromise.finally(() => {
+        this.pendingTasks.delete(runPromise);
+      });
       waitUntil(tracked);
       return;
     }
 
-    await tracked;
+    // Off hot path in Node/Postgres runtimes: schedule asynchronously without blocking response
+    const bgPromise = new Promise<void>((resolve) => {
+      queueMicrotask(() => {
+        void executeAll().finally(resolve);
+      });
+    });
+    this.pendingTasks.add(bgPromise);
+    void bgPromise.finally(() => {
+      this.pendingTasks.delete(bgPromise);
+    });
   }
 
-  /** Await any pending background `waitUntil` plugin tasks (primarily for tests). */
+  /** Await any pending background `waitUntil` or microtask plugin jobs (primarily for tests). */
   async flushPending(): Promise<void> {
     while (this.pendingTasks.size > 0) {
       await Promise.allSettled([...this.pendingTasks]);

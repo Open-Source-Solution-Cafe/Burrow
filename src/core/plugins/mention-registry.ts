@@ -1,11 +1,36 @@
 import type { MentionCandidate, MentionPreview, MentionScope, MentionSourceAdapter } from '@burrow/sdk';
 
 export const PLUGIN_MENTION_KIND_RE = /^plugin:([a-z][a-z0-9-]{0,30}):([a-z][a-z0-9-]{0,30})$/;
+const MENTION_TIMEOUT_MS = 2_500;
+
+interface RegisteredMentionSource {
+  pluginId: string;
+  adapter: MentionSourceAdapter;
+  isEnabled?: () => boolean;
+}
+
+async function withTimeout<T>(fn: () => Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Mention source timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export class MentionSourceRegistry {
-  private readonly sources = new Map<string, MentionSourceAdapter>();
+  private readonly sources = new Map<string, RegisteredMentionSource>();
 
-  register(pluginId: string, source: MentionSourceAdapter): void {
+  register(
+    pluginId: string,
+    source: MentionSourceAdapter,
+    options: { isEnabled?: () => boolean } = {},
+  ): void {
     const match = PLUGIN_MENTION_KIND_RE.exec(source.kind);
     if (!match || match[1] !== pluginId) {
       throw new Error(
@@ -15,39 +40,60 @@ export class MentionSourceRegistry {
     if (this.sources.has(source.kind)) {
       throw new Error(`Mention source "${source.kind}" is already registered`);
     }
-    this.sources.set(source.kind, source);
+    this.sources.set(source.kind, {
+      pluginId,
+      adapter: source,
+      isEnabled: options.isEnabled,
+    });
   }
 
   has(kind: string): boolean {
-    return this.sources.has(kind);
+    const entry = this.sources.get(kind);
+    if (!entry) return false;
+    return entry.isEnabled ? entry.isEnabled() : true;
   }
 
   listKinds(): string[] {
-    return [...this.sources.keys()];
+    return [...this.sources.entries()]
+      .filter(([, entry]) => !entry.isEnabled || entry.isEnabled())
+      .map(([kind]) => kind);
   }
 
   async suggest(kind: string, query: string, scope: MentionScope): Promise<MentionCandidate[]> {
-    const source = this.sources.get(kind);
-    if (!source) return [];
-    const items = await source.suggest(query, scope);
-    return items.map((item) => ({ ...item, kind: source.kind }));
+    const entry = this.sources.get(kind);
+    if (!entry || (entry.isEnabled && !entry.isEnabled())) return [];
+    const items = await withTimeout(() => entry.adapter.suggest(query, scope), MENTION_TIMEOUT_MS);
+    return items.map((item) => ({ ...item, kind: entry.adapter.kind }));
   }
 
   async suggestAll(
     query: string,
     scope: MentionScope,
   ): Promise<Array<MentionCandidate & { kind: string; group: string }>> {
+    const active = [...this.sources.values()].filter((entry) => !entry.isEnabled || entry.isEnabled());
+    const settled = await Promise.allSettled(
+      active.map(async (entry) => {
+        const items = await withTimeout(
+          () => entry.adapter.suggest(query, scope),
+          MENTION_TIMEOUT_MS,
+        );
+        return items.map((item) => ({
+          ...item,
+          kind: entry.adapter.kind,
+          group: entry.adapter.label,
+        }));
+      }),
+    );
+
     const results: Array<MentionCandidate & { kind: string; group: string }> = [];
-    for (const source of this.sources.values()) {
-      try {
-        const items = await source.suggest(query, scope);
-        for (const item of items) {
-          results.push({ ...item, kind: source.kind, group: source.label });
-        }
-      } catch (err) {
-        console.error(`[plugins:mentions] suggest failed for ${source.kind}:`, err);
+    settled.forEach((res, idx) => {
+      if (res.status === 'fulfilled') {
+        results.push(...res.value);
+      } else {
+        const entry = active[idx]!;
+        console.error(`[plugins:mentions:${entry.pluginId}] suggest failed for ${entry.adapter.kind}:`, res.reason);
       }
-    }
+    });
     return results;
   }
 
@@ -56,8 +102,8 @@ export class MentionSourceRegistry {
     id: string,
     scope: { workspaceId: string; projectId: string; userId?: string },
   ): Promise<MentionPreview | null> {
-    const source = this.sources.get(kind);
-    if (!source?.resolve) return null;
-    return source.resolve(id, scope);
+    const entry = this.sources.get(kind);
+    if (!entry || (entry.isEnabled && !entry.isEnabled()) || !entry.adapter.resolve) return null;
+    return withTimeout(() => entry.adapter.resolve!(id, scope), MENTION_TIMEOUT_MS);
   }
 }

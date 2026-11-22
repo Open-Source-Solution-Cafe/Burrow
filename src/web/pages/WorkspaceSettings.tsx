@@ -15,6 +15,7 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Input } from '../components/ui/Input';
 import { SegmentedControl } from '../components/ui/SegmentedControl';
 import { FeatureFlagsSection } from '../components/settings/FeatureFlagsSection';
+import { PluginsSection } from '../components/settings/PluginsSection';
 import { SystemUpdateSection } from '../components/settings/SystemUpdateSection';
 import { DataPortabilitySection } from '../components/settings/DataPortabilitySection';
 import {
@@ -33,7 +34,7 @@ import { useWebPlugins } from '../plugins/registry';
 
 type WorkspaceSettingsTab = 'workspace' | 'system';
 
-const SYSTEM_SETTINGS_HASHES = new Set(['features', 'system', 'portability', 'updates']);
+const SYSTEM_SETTINGS_HASHES = new Set(['features', 'plugins', 'system', 'portability', 'updates']);
 
 function normalizeHash(hash?: string): string {
   return (hash ?? '').replace(/^#/, '').toLowerCase();
@@ -353,6 +354,10 @@ export function WorkspaceSettings() {
         <>
           {workspaceId && currentWorkspace && (
             <FeatureFlagsSection workspaceId={workspaceId} isOwner={role === 'owner'} />
+          )}
+
+          {workspaceId && currentWorkspace && (
+            <PluginsSection isOwner={role === 'owner'} />
           )}
 
           {workspaceId && currentWorkspace && (

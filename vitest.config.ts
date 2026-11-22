@@ -72,6 +72,7 @@ export default defineConfig({
           hookTimeout: 25_000,
           include: [
             'tests/unit/**/*.test.ts',
+            'tests/audit/**/*.test.ts',
             'tests/adapters/storage-local.test.ts',
             'src/web/**/*.test.ts',
             'src/core/**/*.test.ts',

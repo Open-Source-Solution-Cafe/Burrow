@@ -1018,6 +1018,7 @@ export function useCreateCard() {
       boardId: _boardId,
       columnId,
       title,
+      cardType,
       priority,
       dueDate,
       assigneeIds,
@@ -1029,6 +1030,7 @@ export function useCreateCard() {
       boardId: string;
       columnId: string;
       title: string;
+      cardType?: string;
       priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
       dueDate?: number | null;
       assigneeIds?: string[];
@@ -1041,6 +1043,7 @@ export function useCreateCard() {
         `columns/${columnId}/cards`,
         projectJson('POST', {
           title,
+          cardType,
           priority: priority ?? undefined,
           dueDate: dueDate ?? undefined,
           assigneeIds,
@@ -1089,6 +1092,7 @@ export function useUpdateCard() {
       cardId: string;
       boardId: string;
       title?: string;
+      cardType?: string;
       priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
       dueDate?: number | null;
       assigneeIds?: string[];
@@ -1914,5 +1918,76 @@ export function useSearch(
       !accountError &&
       Boolean(accountId && workspaceId && query.trim().length > 0) &&
       (scope === 'all' || Boolean(projectId)),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Plugins Admin
+// ---------------------------------------------------------------------------
+
+export interface InstalledPluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  permissions: string[];
+  network: string[];
+  configKeys: string[];
+  dialects: string[];
+  dependencies: string[];
+  enabled: boolean;
+  killSwitched: boolean;
+  instanceManaged: boolean;
+  capabilities: string[];
+  consentSummary: string;
+}
+
+export function useInstalledPlugins() {
+  const { data: account } = useAccount();
+  return useQuery({
+    queryKey: ['plugins', account?.user.id],
+    queryFn: async () => {
+      const res = await fetch('/api/plugins', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load installed plugins');
+      return (await res.json()) as { plugins: InstalledPluginInfo[] };
+    },
+    enabled: Boolean(account?.user.id),
+  });
+}
+
+export function useTogglePlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      pluginId,
+      enabled,
+      consentAccepted,
+    }: {
+      pluginId: string;
+      enabled: boolean;
+      consentAccepted?: boolean;
+    }) => {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/toggle`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled, consentAccepted }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        plugin?: InstalledPluginInfo;
+        error?: { message?: string };
+      };
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to toggle plugin');
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plugins'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to toggle plugin');
+    },
   });
 }

@@ -184,6 +184,8 @@ importers:
 
   packages/core: {}
 
+  packages/eslint-plugin: {}
+
   packages/plugins: {}
 
   packages/plugins/_template:
@@ -216,7 +218,14 @@ importers:
         specifier: workspace:*
         version: link:../../sdk
 
-  packages/sdk: {}
+  packages/sdk:
+    dependencies:
+      hono:
+        specifier: ^4.0.0
+        version: 4.13.19
+      react:
+        specifier: ^18.0.0 || ^19.0.0
+        version: 19.3.0
 
   packages/web: {}
 

@@ -30,6 +30,7 @@ export interface CreateAppOptions {
   plugins?: readonly BurrowServerPlugin[];
   policy?: AccessPolicy;
   adapters?: WorkerAppAdapters;
+  firstPartyPluginIds?: readonly string[];
 }
 
 export interface CreateAppWithEnvOptions extends CreateAppOptions {
@@ -82,6 +83,7 @@ export function createWorkerApp(
   return createCoreApp(infra, {
     policy: options.policy ?? options.adapters?.policy,
     plugins: options.plugins,
+    firstPartyPluginIds: options.firstPartyPluginIds,
     events,
     rawDb: env.DB,
   });
