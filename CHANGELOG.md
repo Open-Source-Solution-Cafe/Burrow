@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.6.0] - 2026-11-22
+
+### Added
 - **Safe-by-Default Plugin SDK & ESLint Package (`packages/sdk`, `packages/eslint-plugin`, `scripts/plugin-validate.mjs`)**: Added publishable `@burrow/sdk` build outputs (`dist/index.{js,d.ts}`), `sql` tagged queries + `db.table()`, `sanitizePluginHtml()` / `sanitizePluginProps()`, `ctx.defineRoute` Zod validation helpers, `ctx.requireRole()`, `ctx.requireWorkspaceAccess()`, `ctx.fetch`, `ctx.storage`, scoped `ctx.config`, redacted `ctx.log`, `@burrow/eslint-plugin` security rules, and offline `pnpm run plugin:validate` supply-chain & static checks.
 - **PostgreSQL Plugin Dialect, Runtime Governance & Admin UI (`src/core/plugins/*`, `src/core/routes/plugins-admin.ts`, `PluginsSection.tsx`, `QuickAddCard.tsx`, `CardPanel.tsx`)**: Enabled dual-dialect (`sqlite` / `postgres`) support in `PluginDb` and `runPluginMigrations()` (`?` -> `$1..$n`, `ON CONFLICT DO NOTHING`, `pg_advisory_xact_lock`, `plugin_<id>` schema provisioning), wired plugin loading and migrations into `src/server/index.ts`, added `GET /api/plugins` + consent-gated `POST /api/plugins/:id/toggle` with `DISABLED_PLUGINS` kill switch, added `PluginsSection` in Workspace Settings and `cardType` UI selection, and documented threat model ([DECISIONS.md](./docs/plugin-architecture/DECISIONS.md)), registry guidelines ([REGISTRY.md](./docs/plugin-architecture/REGISTRY.md)), and security re-audit ([READINESS-v2.md](./docs/plugin-architecture/audit/READINESS-v2.md)) backed by `tests/audit/plugin-isolation-adversarial.test.ts` and `tests/adapters/plugin-postgres-node.test.ts`.
 - **Pending Invite Link Copy & Reissue (`POST /api/workspaces/:wid/invites/:id/link`, `MembersSettings.tsx`)**: Added a `Copy Link` action on each pending invite row in Workspace Members; reuses the in-session link when available or rotates the pending invite token server-side after a reload so owners can recover and copy an active invite link even when email delivery is not configured.
@@ -15,15 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Dedicated Project Settings Route & Split Settings Scope (`WorkspaceSettings.tsx`, `ProjectSettings.tsx`, `Sidebar.tsx`, `ProjectSwitcher.tsx`)**: Split `SettingsView` into separate workspace-scoped (`WorkspaceSettings` at `/w/:workspaceId/settings`) and project-scoped (`ProjectSettings` at `/w/:workspaceId/p/$projectId/settings`) pages sharing UI primitives in `src/web/components/settings/`. Redirected legacy project-scoped `#project` / `#uploads` / `#tags` / `#danger-zone` hashes to the active/last project's settings route, kept the sidebar project tree and switcher active on Project Settings, removed the in-page `Configuring:` `<Select>` in favor of the sidebar `ProjectSwitcher`, unified `"Workspace Settings"` vs `"Project Settings"` labels across navigation, added per-project `Project Settings →` links in Workspace Settings, and required explicit project-named destructive buttons and type-to-confirm deletion.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 - **Account-Scoped Cache Invalidation for Notepads, Boards & Tags (`queries.ts`, `Sidebar.tsx`, `NotepadTree.tsx`, `ProjectHome.tsx`, `NotepadEditor.tsx`, `ReferenceDialogs.tsx`, `DataPortabilitySection.tsx`)**: Added `projectResourceKey` and `invalidateProjectNotepads` helpers including `accountId` in invalidation keys so creating, favoriting, deleting, or importing notepads updates the sidebar tree and recent notepads immediately without requiring a page reload.
-
-### Security
-
 ## [0.5.0] - 2026-11-22
 
 ### Added
