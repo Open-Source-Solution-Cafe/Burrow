@@ -616,6 +616,39 @@ export function useCreateInvite(workspaceId?: string) {
   });
 }
 
+export function useReissueInviteLink(workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!workspaceId) throw new Error('Workspace is required');
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(id)}/link`,
+        {
+          method: 'POST',
+        },
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(err.error?.message || 'Failed to generate invite link');
+      }
+      return res.json() as Promise<{
+        id: string;
+        email: string;
+        role: string;
+        token: string;
+        expiresAt: number;
+        url: string;
+      }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invites'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to generate invite link');
+    },
+  });
+}
+
 export function useRevokeInvite(workspaceId?: string) {
   const queryClient = useQueryClient();
   return useMutation({

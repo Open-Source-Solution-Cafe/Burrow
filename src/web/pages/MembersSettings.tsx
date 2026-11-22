@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import { Copy, Check, Trash2, UserPlus, KeyRound, ExternalLink, X } from 'lucide-react';
-import { useAccount, useMembers, useInvites, useCreateInvite, useRevokeInvite } from '../lib/queries';
+import {
+  useAccount,
+  useMembers,
+  useInvites,
+  useCreateInvite,
+  useReissueInviteLink,
+  useRevokeInvite,
+} from '../lib/queries';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -11,10 +18,23 @@ import { toast } from 'sonner';
 import { useParams } from '@tanstack/react-router';
 import { useTranslation } from '../lib/i18n';
 interface CreatedInviteInfo {
+  id?: string;
   url: string;
   token: string;
   email: string;
   role: string;
+}
+
+async function copyTextToClipboard(value: string): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    return false;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function MembersSettings() {
@@ -24,13 +44,19 @@ export function MembersSettings() {
   const { data: members = [], refetch: refetchMembers } = useMembers(workspaceId);
   const { data: invites = [] } = useInvites(workspaceId);
   const createInvite = useCreateInvite(workspaceId);
+  const reissueInviteLink = useReissueInviteLink(workspaceId);
   const revokeInvite = useRevokeInvite(workspaceId);
 
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'editor' | 'viewer'>('editor');
   const [createdInvite, setCreatedInvite] = useState<CreatedInviteInfo | null>(null);
+  const [sessionInviteLinks, setSessionInviteLinks] = useState<
+    Record<string, { url: string; token: string }>
+  >({});
   const [copiedUrl, setCopiedUrl] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
+  const [copiedInviteId, setCopiedInviteId] = useState<string | null>(null);
+  const [copyingInviteId, setCopyingInviteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -46,8 +72,13 @@ export function MembersSettings() {
       const res = (await createInvite.mutateAsync({
         email: inviteEmail.trim(),
         role: inviteRole,
-      })) as { url: string; token: string; email: string; role: string };
+      })) as { id: string; url: string; token: string; email: string; role: string };
+      setSessionInviteLinks((prev) => ({
+        ...prev,
+        [res.id]: { url: res.url, token: res.token },
+      }));
       setCreatedInvite({
+        id: res.id,
         url: res.url,
         token: res.token,
         email: res.email,
@@ -56,6 +87,64 @@ export function MembersSettings() {
       setInviteEmail('');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create invite');
+    }
+  };
+
+  const handleCopyPendingInviteLink = async (inv: {
+    id: string;
+    email: string;
+    role: string;
+  }) => {
+    const cached = sessionInviteLinks[inv.id];
+    if (cached) {
+      const copied = await copyTextToClipboard(cached.url);
+      if (copied) {
+        setCopiedInviteId(inv.id);
+        toast.success(t('members.inviteLinkCopied'));
+        setTimeout(() => {
+          setCopiedInviteId((current) => (current === inv.id ? null : current));
+        }, 2000);
+      } else {
+        setCreatedInvite({
+          id: inv.id,
+          url: cached.url,
+          token: cached.token,
+          email: inv.email,
+          role: inv.role,
+        });
+        toast.info(t('members.inviteLinkReady'));
+      }
+      return;
+    }
+
+    setCopyingInviteId(inv.id);
+    try {
+      const res = await reissueInviteLink.mutateAsync(inv.id);
+      setSessionInviteLinks((prev) => ({
+        ...prev,
+        [res.id]: { url: res.url, token: res.token },
+      }));
+      const copied = await copyTextToClipboard(res.url);
+      if (copied) {
+        setCopiedInviteId(inv.id);
+        toast.success(t('members.inviteLinkRegeneratedCopied'));
+        setTimeout(() => {
+          setCopiedInviteId((current) => (current === inv.id ? null : current));
+        }, 2000);
+      } else {
+        setCreatedInvite({
+          id: res.id,
+          url: res.url,
+          token: res.token,
+          email: res.email,
+          role: res.role,
+        });
+        toast.info(t('members.inviteLinkReady'));
+      }
+    } catch {
+      /* Mutation handler displays error toast. */
+    } finally {
+      setCopyingInviteId((current) => (current === inv.id ? null : current));
     }
   };
 
@@ -341,25 +430,67 @@ export function MembersSettings() {
               {t('members.pendingInvitesCount', { count: invites.length })}
             </div>
 
-            {invites.map((inv) => (
-              <div key={inv.id} className="px-4 py-2.5 flex items-center justify-between text-xs sm:text-sm">
-                <div>
-                  <span className="font-medium text-[var(--text)]">{inv.email}</span>
-                  <span className="ml-2 text-xs text-[var(--muted)] capitalize">({t(`common.roles.${inv.role as 'owner' | 'editor' | 'viewer'}`)})</span>
-                </div>
-                <button
-                  onClick={() =>
-                    revokeInvite.mutate(inv.id, {
-                      onSuccess: () => toast.success('Invite revoked'),
-                      onError: (err: any) => toast.error(err?.message || 'Failed to revoke invite'),
-                    })
-                  }
-                  className="text-xs text-[var(--danger)] hover:underline cursor-pointer py-1 px-1.5"
+            {invites.map((inv) => {
+              const isCopied = copiedInviteId === inv.id;
+              const isCopying = copyingInviteId === inv.id;
+              return (
+                <div
+                  key={inv.id}
+                  className="px-4 py-2.5 flex items-center justify-between gap-3 text-xs sm:text-sm"
                 >
-                  {t('members.revokeInvite')}
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0 truncate">
+                    <span className="font-medium text-[var(--text)]">{inv.email}</span>
+                    <span className="ml-2 text-xs text-[var(--muted)] capitalize">
+                      ({t(`common.roles.${inv.role as 'owner' | 'editor' | 'viewer'}`)})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      disabled={isCopying}
+                      onClick={() => void handleCopyPendingInviteLink(inv)}
+                      className="inline-flex items-center gap-1.5 px-2 py-1 h-7 border text-xs font-medium bg-[var(--surface2)] border-[var(--line)] hover:bg-[var(--hi)] text-[var(--text)] transition cursor-pointer disabled:opacity-50"
+                    >
+                      {isCopied ? (
+                        <Check className="w-3.5 h-3.5 text-[var(--c4)]" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {isCopying
+                          ? t('members.generatingInviteLink')
+                          : isCopied
+                            ? t('common.copied')
+                            : t('members.copyInviteLink')}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        revokeInvite.mutate(inv.id, {
+                          onSuccess: () => {
+                            setSessionInviteLinks((prev) => {
+                              const next = { ...prev };
+                              delete next[inv.id];
+                              return next;
+                            });
+                            if (createdInvite?.id === inv.id) {
+                              setCreatedInvite(null);
+                            }
+                            toast.success('Invite revoked');
+                          },
+                          onError: (err: any) =>
+                            toast.error(err?.message || 'Failed to revoke invite'),
+                        })
+                      }
+                      className="text-xs text-[var(--danger)] hover:underline cursor-pointer py-1 px-1.5"
+                    >
+                      {t('members.revokeInvite')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 

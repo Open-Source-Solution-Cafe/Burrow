@@ -545,6 +545,13 @@ export interface IInviteRepository {
     workspaceId: string;
     role: 'owner' | 'editor' | 'viewer';
   } | null>;
+  rotatePendingToken(
+    id: string,
+    workspaceId: string,
+    tokenHash: string,
+    expiresAt: number,
+    now: number,
+  ): Promise<Invite | null>;
   delete(id: string, workspaceId: string): Promise<void>;
 }
 

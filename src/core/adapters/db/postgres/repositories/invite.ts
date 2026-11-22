@@ -77,6 +77,28 @@ export class PostgresInviteRepository implements IInviteRepository {
     });
   }
 
+  async rotatePendingToken(
+    id: string,
+    workspaceId: string,
+    tokenHash: string,
+    expiresAt: number,
+    now: number,
+  ): Promise<Invite | null> {
+    const result = await this.db
+      .update(invites)
+      .set({ tokenHash, expiresAt })
+      .where(
+        and(
+          eq(invites.id, id),
+          eq(invites.workspaceId, workspaceId),
+          isNull(invites.acceptedAt),
+          gt(invites.expiresAt, now),
+        ),
+      )
+      .returning();
+    return result[0] ?? null;
+  }
+
   async delete(id: string, workspaceId: string): Promise<void> {
     await this.db
       .delete(invites)

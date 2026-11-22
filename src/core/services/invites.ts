@@ -22,6 +22,18 @@ export class InviteService {
     private readonly policy?: AccessPolicy,
   ) {}
 
+  private async issueTokenMaterial() {
+    const rawToken = nanoid(32);
+    const tokenHash = await hashToken(rawToken);
+    const now = Date.now();
+    return {
+      rawToken,
+      tokenHash,
+      now,
+      expiresAt: now + SEVEN_DAYS_MS,
+    };
+  }
+
   async createInvite(
     workspaceId: string,
     userId: string,
@@ -33,11 +45,8 @@ export class InviteService {
       userId,
       workspaceId,
     });
-    const rawToken = nanoid(32);
-    const tokenHash = await hashToken(rawToken);
+    const { rawToken, tokenHash, now, expiresAt } = await this.issueTokenMaterial();
     const id = nanoid();
-    const now = Date.now();
-    const expiresAt = now + SEVEN_DAYS_MS;
 
     const invite: CreateInviteData = {
       id,
@@ -57,6 +66,30 @@ export class InviteService {
       token: rawToken,
       url: '', // URL constructed by caller with origin
     };
+  }
+
+  async regenerateInviteLink(
+    workspaceId: string,
+    userId: string,
+    inviteId: string,
+  ): Promise<{ invite: Invite; token: string }> {
+    await this.policy?.authorize({
+      action: 'invite.create',
+      userId,
+      workspaceId,
+    });
+    const { rawToken, tokenHash, now, expiresAt } = await this.issueTokenMaterial();
+    const updated = await this.repos.invites.rotatePendingToken(
+      inviteId,
+      workspaceId,
+      tokenHash,
+      expiresAt,
+      now,
+    );
+    if (!updated) {
+      throw notFound('invite_not_found', 'Pending invite not found or expired');
+    }
+    return { invite: updated, token: rawToken };
   }
 
   async listPendingInvites(workspaceId: string): Promise<Invite[]> {

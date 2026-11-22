@@ -560,6 +560,11 @@ export interface TranslationDictionary {
     inviteHelpNotice: string;
     membersCount: string;
     pendingInvitesCount: string;
+    copyInviteLink: string;
+    generatingInviteLink: string;
+    inviteLinkCopied: string;
+    inviteLinkRegeneratedCopied: string;
+    inviteLinkReady: string;
     revokeInvite: string;
     removeMember: string;
     confirmRemoveMemberTitle: string;
@@ -1238,6 +1243,11 @@ export const en: TranslationDictionary = {
       'The recipient can click the link to register instantly, or enter this invite token manually if they are on the sign-up page.',
     membersCount: 'Members ({count})',
     pendingInvitesCount: 'Pending Invites ({count})',
+    copyInviteLink: 'Copy Link',
+    generatingInviteLink: 'Generating…',
+    inviteLinkCopied: 'Invite link copied',
+    inviteLinkRegeneratedCopied: 'New invite link generated and copied',
+    inviteLinkReady: 'New invite link generated — click Copy Link above to copy it',
     revokeInvite: 'Revoke',
     removeMember: 'Remove member',
     confirmRemoveMemberTitle: 'Remove Member',
