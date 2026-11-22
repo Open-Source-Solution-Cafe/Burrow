@@ -1,10 +1,11 @@
 import { isPluginMentionKind, type LinkTargetType, type PluginMentionKind } from './blocks';
 
-export type ContentReferenceKind = Exclude<LinkTargetType, 'user'> | PluginMentionKind;
+export type ContentReferenceKind = Exclude<LinkTargetType, 'user'>;
+export type ReferenceKind = ContentReferenceKind | PluginMentionKind;
 
 /** Read-only preview resolved against the source document's project. */
 export interface ReferencePreview {
-  kind: ContentReferenceKind;
+  kind: ReferenceKind;
   id: string;
   workspaceId: string;
   projectId: string;

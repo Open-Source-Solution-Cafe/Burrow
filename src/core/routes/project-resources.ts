@@ -248,14 +248,18 @@ const notepadLifecycle = (action: 'delete' | 'restore' | 'permanent') => async (
       const { pid: projectId, kind, id } = c.req.valid('param');
       const scope = { workspaceId: c.get('workspaceId'), projectId };
       if (isPluginMentionKind(kind)) {
-        const adapter = mentionRegistry?.get(kind);
-        const preview = await adapter?.resolve?.(id, {
-          ...scope,
-          userId: c.get('userId'),
-        });
+        const preview = mentionRegistry
+          ? await mentionRegistry.resolve(kind, id, {
+              ...scope,
+              userId: c.get('userId'),
+            })
+          : null;
         if (!preview) throw missing('Reference unavailable');
         c.header('Cache-Control', 'private, no-store');
         return c.json(preview);
+      }
+      if (kind !== 'notepad' && kind !== 'board' && kind !== 'card') {
+        throw missing('Reference unavailable');
       }
       const preview = await repositories.notepads.resolveReference(scope, kind, id);
       if (!preview) throw missing('Reference unavailable');
@@ -309,9 +313,8 @@ const notepadLifecycle = (action: 'delete' | 'restore' | 'permanent') => async (
     const { type, q } = c.req.valid('query');
     const pattern = q.trim();
     if (isPluginMentionKind(type)) {
-      const source = mentionRegistry?.get(type);
-      if (!source) return c.json([]);
-      const rows = await source.suggest(pattern, {
+      if (!mentionRegistry) return c.json([]);
+      const rows = await mentionRegistry.suggest(type, pattern, {
         workspaceId: c.get('workspaceId'),
         projectId: requireProjectId(c),
         userId: c.get('userId'),

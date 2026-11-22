@@ -114,9 +114,8 @@ export function createWorkspaceViewRoutes(args: {
     }
     const searchPattern = q.trim();
     if (isPluginMentionKind(type)) {
-      const source = mentionRegistry?.get(type);
-      if (!source) return c.json([]);
-      const rows = await source.suggest(searchPattern, {
+      if (!mentionRegistry) return c.json([]);
+      const rows = await mentionRegistry.suggest(type, searchPattern, {
         workspaceId: c.get('workspaceId'),
         projectId: projectId || undefined,
         userId: c.get('userId'),
