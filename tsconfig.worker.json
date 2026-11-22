@@ -27,7 +27,8 @@
       "@burrow/worker": ["./packages/worker/src/index.ts"],
       "@burrow/worker/*": ["./src/worker/*"],
       "@burrow/plugins": ["./packages/plugins/src/index.ts"],
-      "@burrow/plugins/*": ["./packages/plugins/*"]
+      "@burrow/plugins/*": ["./packages/plugins/*"],
+      "@burrow/plugin-hello": ["./packages/plugins/hello/src/index.ts"]
     }
   },
   "include": [
@@ -38,6 +39,7 @@
     "packages/core/src",
     "packages/worker/src",
     "packages/plugins/src",
+    "packages/plugins/hello/src",
     "tests/api",
     "tests/unit",
     "tests/adapters"

@@ -155,10 +155,10 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
 }
 
 function normalizeIdentifier(raw: string): string {
-  const trimmed = raw.trim().replace(/^[`"\[]|[`"\]]$/g, '');
+  const trimmed = raw.trim().replace(/^[`"[]|[`"\]]$/g, '');
   const parts = trimmed.split('.');
   const table = parts[parts.length - 1] ?? trimmed;
-  return table.replace(/^[`"\[]|[`"\]]$/g, '').toLowerCase();
+  return table.replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
 }
 
 function assertIdentifierPrefixed(pluginId: string, prefix: string, rawTarget: string, op: string): void {
@@ -196,6 +196,7 @@ export function assertPluginSqlAllowed(
     }
 
     // Scan every DML mutation keyword across the entire statement (catches CTEs too)
+    let matchedDmlCount = 0;
     const dmlPatterns: Array<[RegExp, string]> = [
       [/\b(?:INSERT|REPLACE)\s+(?:OR\s+\w+\s+)?INTO\s+([`"[\w.]+)/gi, 'INSERT/REPLACE'],
       [/\bUPDATE\s+(?:OR\s+\w+\s+)?([`"[\w.]+)/gi, 'UPDATE'],
@@ -204,8 +205,18 @@ export function assertPluginSqlAllowed(
     for (const [re, label] of dmlPatterns) {
       let match: RegExpExecArray | null;
       while ((match = re.exec(cleaned)) !== null) {
+        matchedDmlCount++;
         assertIdentifierPrefixed(pluginId, prefix, match[1]!, label);
       }
+    }
+    if (/^(?:INSERT|REPLACE|UPDATE|DELETE)\b/i.test(cleaned)) {
+      if (matchedDmlCount === 0) {
+        throw new PluginSqlAccessError(
+          pluginId,
+          `unable to parse DML target in "${cleaned.slice(0, 48)}"`,
+        );
+      }
+      continue;
     }
 
     // Validate DDL targets

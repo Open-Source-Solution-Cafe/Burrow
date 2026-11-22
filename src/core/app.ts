@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import {
   maxUploadBytesForRuntime,
@@ -100,6 +101,17 @@ export function createCoreApp(
     getPublicConfig: () => effectiveAuth.getPublicConfig?.() ?? {},
   };
 
+  const requireIdentityMiddleware = createMiddleware<Env>(async (c, next) => {
+    if (!c.get('identity')) {
+      const identity = await pluginAuthProxy.getSession(c.req.raw.headers);
+      if (identity) c.set('identity', identity);
+    }
+    if (!c.get('identity')) {
+      return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+    }
+    await next();
+  });
+
   const loadedPlugins = options.plugins?.length
     ? loadServerPlugins({
         plugins: options.plugins,
@@ -108,7 +120,7 @@ export function createCoreApp(
         mentionRegistry,
         rawDb: options.rawDb,
         middleware: {
-          requireIdentity: createIdentityMiddleware(pluginAuthProxy),
+          requireIdentity: requireIdentityMiddleware,
           requireWorkspace: explicitWorkspaceMiddleware,
           requireRole,
         },

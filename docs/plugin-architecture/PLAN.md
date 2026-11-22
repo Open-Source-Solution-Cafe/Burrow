@@ -22,15 +22,15 @@
 - [x] Create `docs/plugin-architecture/{PLAN.md,PROGRESS.md,DECISIONS.md,AUDIT.md}`.
 
 ## Phase 1: Core Seams and Monorepo Split (`Burrow`)
-- [ ] **1.1** Clean cloud/demo leaks (`policy.ts`, `infrastructure/types.ts`, `decoupling-allowlist.json`, `workspace-export.ts`, `Login.tsx`, update `check-decoupling.mjs` to scan `packages/`).
-- [ ] **1.2** Split into pnpm workspace packages: `packages/sdk`, `packages/core`, `packages/web`, `packages/worker`, `packages/plugins` while keeping root build, Vitest, and `pnpm deploy` working.
-- [ ] **1.3** Implement `packages/sdk` (`@burrow/sdk`, zero runtime dependencies, MIT license field, types & manifest interfaces).
-- [ ] **1.4** Add typed event bus (`PluginEventBus`) in core with synchronous `before*` guards and post-commit `after*` handlers dispatched via `ctx.waitUntil` (`task.created`, `task.updated`, `task.deleted`, `notepad.saved`, `workspace.created`, `workspace.deleted`, `user.deleted`, `account.export`).
-- [ ] **1.5** Implement `createApp({ plugins, adapters, policy })` in `worker/index.ts` and `core/app.ts`; pass `ExecutionContext`; mount plugin routes at `/api/plugins/:id` with identity, workspace, and role middleware helpers.
-- [ ] **1.6** Add `AuthProvider.getPublicConfig()` for `/api/auth/config` composition and widen `oauthProviders[].kind` in `Login.tsx` (`'social' | 'oidc' | 'saml'`).
-- [ ] **1.7** Implement `plugin_migrations` ledger, deploy/boot runner (`scripts/deploy.mjs` & `src/worker/bootstrap.ts`), and `PluginDb` SQL guard (`plugin_<id>_*` table enforcement, `PRAGMA foreign_keys = OFF` blocked).
-- [ ] **1.8** Implement `validatePluginManifest` loader failing fast on invalid IDs, SemVer incompatibility, or unknown permissions.
-- [ ] **1.9** Add Phase 1 tests (events, migrations, `PluginDb`, manifest validation, route mounting, `AuthProvider.getPublicConfig`) and `packages/plugins/hello` example plugin; verify local Wrangler dev / dry-run and OSS deploy unchanged.
+- [x] **1.1** Clean cloud/demo leaks (`policy.ts`, `infrastructure/types.ts`, `decoupling-allowlist.json`, `workspace-export.ts`, `Login.tsx`, update `check-decoupling.mjs` to scan `packages/`).
+- [x] **1.2** Split into pnpm workspace packages: `packages/sdk`, `packages/core`, `packages/web`, `packages/worker`, `packages/plugins` while keeping root build, Vitest, and `pnpm deploy` working.
+- [x] **1.3** Implement `packages/sdk` (`@burrow/sdk`, zero runtime dependencies, MIT license field, types & manifest interfaces).
+- [x] **1.4** Add typed event bus (`PluginEventBus`) in core with synchronous `before*` guards and post-commit `after*` handlers dispatched via `ctx.waitUntil` (`task.created`, `task.updated`, `task.deleted`, `notepad.saved`, `workspace.created`, `workspace.deleted`, `user.deleted`, `account.export`).
+- [x] **1.5** Implement `createApp({ plugins, adapters, policy })` in `worker/index.ts` and `core/app.ts`; pass `ExecutionContext`; mount plugin routes at `/api/plugins/:id` with identity, workspace, and role middleware helpers.
+- [x] **1.6** Add `AuthProvider.getPublicConfig()` for `/api/auth/config` composition and widen `oauthProviders[].kind` in `Login.tsx` (`'social' | 'oidc' | 'saml'`).
+- [x] **1.7** Implement `plugin_migrations` ledger, deploy/boot runner (`scripts/deploy.mjs` & `src/worker/bootstrap.ts`), and `PluginDb` SQL guard (`plugin_<id>_*` table enforcement, `PRAGMA foreign_keys = OFF` blocked).
+- [x] **1.8** Implement `validatePluginManifest` loader failing fast on invalid IDs, SemVer incompatibility, or unknown permissions.
+- [x] **1.9** Add Phase 1 tests (events, migrations, `PluginDb`, manifest validation, route mounting, `AuthProvider.getPublicConfig`) and `packages/plugins/hello` example plugin; verify local Wrangler dev / dry-run and OSS deploy unchanged.
 
 ## Phase 2: `burrow-cloud` on Workers + D1 as Plugins
 - [ ] **2.1** Export `mountBurrowWeb({ plugins })` and `createBurrowRouter(plugins)` from `@burrow/web`; consume `@burrow/*` from `burrow-cloud` via pinned `vendor/burrow` submodule.

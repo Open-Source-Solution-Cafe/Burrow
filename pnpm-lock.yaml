@@ -186,6 +186,12 @@ importers:
 
   packages/plugins: {}
 
+  packages/plugins/hello:
+    dependencies:
+      '@burrow/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+
   packages/sdk: {}
 
   packages/web: {}
