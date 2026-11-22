@@ -59,6 +59,10 @@ export function runWithPluginHttpMethod<T>(method: string, fn: () => Promise<T>)
   return httpMethodStorage.run(method.toUpperCase(), fn);
 }
 
+export function getCurrentPluginHttpMethod(): string | undefined {
+  return httpMethodStorage.getStore();
+}
+
 function unwrapDbClient(rawDb: unknown): D1Database | SqliteLikeDb | PostgresLikeSql | null {
   if (!rawDb || typeof rawDb !== 'object' && typeof rawDb !== 'function') return null;
   if (typeof rawDb === 'object' && rawDb !== null && '$client' in rawDb) {

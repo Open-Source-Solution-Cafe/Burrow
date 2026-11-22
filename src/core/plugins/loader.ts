@@ -13,14 +13,20 @@ import type { AuthProvider, Infrastructure } from '../infrastructure/types';
 import type { IStorageAdapter } from '../adapters/storage';
 import type { IEmailProvider } from '../adapters/email';
 import { httpError } from '../services/errors';
+import { resolveVerifiedClientIp } from '../middleware/security';
 import { PluginEventBus } from './event-bus';
 import { MentionSourceRegistry } from './mention-registry';
 import { assertPluginDialectSupported, validatePluginManifest } from './manifest';
-import { createPluginDb, detectPluginDialect, runWithPluginHttpMethod } from './plugin-db';
+import {
+  createPluginDb,
+  detectPluginDialect,
+  getCurrentPluginHttpMethod,
+  runWithPluginHttpMethod,
+} from './plugin-db';
 import { createPluginFetch } from './safe-fetch';
 import { createPluginStorage } from './plugin-storage';
 import { buildScopedPluginConfig, collectSecretValues, createPluginLogger, redactSecrets } from './logger';
-import type { PluginRuntimeRegistry } from './runtime-state';
+import { parseDisabledPluginsEnv, type PluginRuntimeRegistry } from './runtime-state';
 
 export interface LoadedPluginsResult {
   pluginRoutes: Array<{ mountPath: string; router: Hono<any> }>;
@@ -34,6 +40,33 @@ export interface LoadedPluginsResult {
 
 const DEFAULT_ROUTE_TIMEOUT_MS = 5_000;
 const DEFAULT_PLUGIN_RATE_LIMIT = 120; // requests per minute
+const MAX_RATE_LIMIT_BUCKETS = 10_000;
+const EMPTY_PLUGIN_ENV = Object.freeze({});
+const RESERVED_BUILTIN_PLUGIN_IDS = new Set<string>(['public-sharing', 'workspace-export']);
+
+function clonePluginManifest(manifest: BurrowServerPlugin['manifest']): BurrowServerPlugin['manifest'] {
+  return {
+    ...manifest,
+    permissions: [...manifest.permissions],
+    ...(manifest.network !== undefined ? { network: [...manifest.network] } : {}),
+    ...(manifest.configKeys !== undefined ? { configKeys: [...manifest.configKeys] } : {}),
+    ...(manifest.coreTables !== undefined ? { coreTables: [...manifest.coreTables] } : {}),
+    ...(manifest.dialects !== undefined ? { dialects: [...manifest.dialects] } : {}),
+    ...(manifest.dependencies !== undefined ? { dependencies: [...manifest.dependencies] } : {}),
+  };
+}
+
+function deepFreezeManifest<T>(val: T): T {
+  if (val && typeof val === 'object') {
+    Object.freeze(val);
+    for (const v of Object.values(val as Record<string, unknown>)) {
+      if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+        deepFreezeManifest(v);
+      }
+    }
+  }
+  return val;
+}
 
 function assertPermission(manifestId: string, granted: ReadonlySet<Permission>, needed: Permission): void {
   if (!granted.has(needed)) {
@@ -90,6 +123,7 @@ function wrapPluginRouter(args: {
   runtimeRegistry?: PluginRuntimeRegistry;
   secretValues: readonly string[];
   requireIdentity: MiddlewareHandler;
+  envObj?: Record<string, unknown>;
   timeoutMs?: number;
   maxRequestsPerMinute?: number;
 }): Hono<any> {
@@ -100,6 +134,7 @@ function wrapPluginRouter(args: {
     runtimeRegistry,
     secretValues,
     requireIdentity,
+    envObj,
     timeoutMs = DEFAULT_ROUTE_TIMEOUT_MS,
     maxRequestsPerMinute = DEFAULT_PLUGIN_RATE_LIMIT,
   } = args;
@@ -115,10 +150,19 @@ function wrapPluginRouter(args: {
       );
     }
 
-    // Per-plugin sliding fixed-window rate limiter
+    // Per-plugin sliding fixed-window rate limiter using verified peer IP only
     const now = Date.now();
+    if (buckets.size > MAX_RATE_LIMIT_BUCKETS) {
+      for (const [k, b] of buckets) {
+        if (b.resetAt <= now) buckets.delete(k);
+        if (buckets.size <= MAX_RATE_LIMIT_BUCKETS / 2) break;
+      }
+      if (buckets.size > MAX_RATE_LIMIT_BUCKETS) {
+        buckets.clear();
+      }
+    }
     const identity = (c.get('identity') as { userId?: string } | undefined)?.userId;
-    const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'anon';
+    const ip = resolveVerifiedClientIp(c, { env: envObj }) ?? 'unverified';
     const key = `${pluginId}:${identity ?? 'anon'}:${ip}`;
     const bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
@@ -175,6 +219,13 @@ function wrapPluginRouter(args: {
 
   wrapper.use('*', async (_c, next) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const origEnvDesc = Object.getOwnPropertyDescriptor(_c, 'env');
+    Object.defineProperty(_c, 'env', {
+      value: EMPTY_PLUGIN_ENV,
+      configurable: true,
+      enumerable: true,
+      writable: false,
+    });
     try {
       await runWithPluginHttpMethod(_c.req.method, async () => {
         await Promise.race([
@@ -189,6 +240,11 @@ function wrapPluginRouter(args: {
       });
     } finally {
       if (timer) clearTimeout(timer);
+      if (origEnvDesc) {
+        Object.defineProperty(_c, 'env', origEnvDesc);
+      } else {
+        delete (_c as { env?: unknown }).env;
+      }
     }
   });
 
@@ -205,6 +261,11 @@ export function loadServerPlugins(args: {
   rawDb?: unknown;
   runtimeRegistry?: PluginRuntimeRegistry;
   firstPartyCore?: boolean;
+  consented?: boolean;
+  consentedPluginIds?: ReadonlySet<string>;
+  adapterOwners?: Map<string, string>;
+  pluginsDisabledEnv?: unknown;
+  disabledPluginsEnv?: unknown;
   timeoutMs?: number;
 }): LoadedPluginsResult {
   const { plugins, infra, events, mentionRegistry, middleware, runtimeRegistry, firstPartyCore = false } = args;
@@ -212,22 +273,49 @@ export function loadServerPlugins(args: {
   const pluginRoutes: Array<{ mountPath: string; router: Hono<any> }> = [];
   const seenMountPaths = new Set<string>();
   const adapterOverrides: LoadedPluginsResult['adapterOverrides'] = {};
-  const adapterOwners = new Map<string, string>();
+  const adapterOwners = args.adapterOwners ?? new Map<string, string>();
   const envObj = (infra.env ?? {}) as Record<string, unknown>;
   const activeDialect = detectPluginDialect(args.rawDb ?? infra.db ?? envObj.DB);
+  const disabledCanonical = parseDisabledPluginsEnv(
+    args.pluginsDisabledEnv ??
+      envObj.PLUGINS_DISABLED ??
+      (typeof process !== 'undefined' ? process.env?.PLUGINS_DISABLED : undefined),
+  );
+  const disabledDeprecated = parseDisabledPluginsEnv(
+    args.disabledPluginsEnv ??
+      envObj.DISABLED_PLUGINS ??
+      (typeof process !== 'undefined' ? process.env?.DISABLED_PLUGINS : undefined),
+  );
 
   for (const plugin of orderedPlugins) {
     const id = plugin.manifest.id;
     assertPluginDialectSupported(plugin.manifest, activeDialect);
-    runtimeRegistry?.register(plugin.manifest, { firstPartyCore });
+    if (!firstPartyCore && RESERVED_BUILTIN_PLUGIN_IDS.has(id)) {
+      throw new Error(`Plugin id "${id}" is reserved for built-in core functionality`);
+    }
+    const frozenManifest = deepFreezeManifest(clonePluginManifest(plugin.manifest));
+    const ctxManifest = clonePluginManifest(plugin.manifest);
+    const isConsented =
+      firstPartyCore || Boolean(args.consented || args.consentedPluginIds?.has(id));
+    runtimeRegistry?.register(frozenManifest, { firstPartyCore, consented: isConsented });
 
-    const granted = new Set<Permission>(plugin.manifest.permissions);
+    const killSwitched =
+      (runtimeRegistry?.isKillSwitched(id) ?? false) ||
+      disabledCanonical.wildcardAll ||
+      disabledDeprecated.wildcardAll ||
+      disabledCanonical.ids.has(id) ||
+      disabledDeprecated.ids.has(id);
+    if (killSwitched) {
+      continue;
+    }
+
+    const granted = new Set<Permission>(frozenManifest.permissions);
     const rawDb = args.rawDb ?? infra.db ?? envObj.DB;
-    const realDb = createPluginDb(rawDb, id, { coreTables: plugin.manifest.coreTables ?? [] });
-    const secretValues = collectSecretValues(envObj, plugin.manifest.configKeys);
+    const realDb = createPluginDb(rawDb, id, { coreTables: frozenManifest.coreTables ?? [] });
+    const secretValues = collectSecretValues(envObj, frozenManifest.configKeys);
     const logger = createPluginLogger(id, secretValues);
-    const scopedConfig = buildScopedPluginConfig(plugin.manifest, envObj, firstPartyCore);
-    const safeFetch = createPluginFetch(plugin.manifest);
+    const scopedConfig = buildScopedPluginConfig(frozenManifest, envObj, firstPartyCore);
+    const safeFetch = createPluginFetch(frozenManifest);
     const scopedStorage = createPluginStorage(id, infra.storage);
 
     const guardedDb: typeof realDb = {
@@ -347,6 +435,7 @@ export function loadServerPlugins(args: {
             runtimeRegistry,
             secretValues,
             requireIdentity: middleware.requireIdentity as MiddlewareHandler,
+            envObj,
             timeoutMs: args.timeoutMs,
           });
       pluginRoutes.push({ mountPath: requestedPath, router: finalRouter });
@@ -355,7 +444,7 @@ export function loadServerPlugins(args: {
     const isEnabled = () => (runtimeRegistry ? runtimeRegistry.isEnabled(id) : true);
 
     const ctx: ServerPluginContext = {
-      manifest: plugin.manifest,
+      manifest: ctxManifest,
       db: guardedDb,
       config: scopedConfig,
       log: logger,
@@ -363,6 +452,14 @@ export function loadServerPlugins(args: {
       storage: {
         put: (key, data, contentType) => {
           assertPermission(id, granted, 'storage:own');
+          const method = getCurrentPluginHttpMethod();
+          if (method === 'GET' || method === 'HEAD') {
+            throw httpError(
+              405,
+              'method_not_allowed',
+              `Plugin "${id}" cannot write to storage during an HTTP ${method} request`,
+            );
+          }
           return scopedStorage.put(key, data, contentType);
         },
         get: (key) => {
@@ -371,6 +468,14 @@ export function loadServerPlugins(args: {
         },
         delete: (key) => {
           assertPermission(id, granted, 'storage:own');
+          const method = getCurrentPluginHttpMethod();
+          if (method === 'GET' || method === 'HEAD') {
+            throw httpError(
+              405,
+              'method_not_allowed',
+              `Plugin "${id}" cannot delete from storage during an HTTP ${method} request`,
+            );
+          }
           return scopedStorage.delete(key);
         },
         list: () => {
@@ -446,11 +551,11 @@ export function loadServerPlugins(args: {
       },
       on(event, handler) {
         assertPermission(id, granted, 'events:read');
-        events.on(event, handler, { pluginId: id, isEnabled, secretValues });
+        events.on(event, handler, { pluginId: id, isEnabled, secretValues, firstPartyCore });
       },
       onBefore(event, handler) {
         assertPermission(id, granted, 'events:before');
-        events.onBefore(event, handler, { pluginId: id, isEnabled, secretValues });
+        events.onBefore(event, handler, { pluginId: id, isEnabled, secretValues, firstPartyCore });
       },
       registerMentionSource(source) {
         assertPermission(id, granted, 'mentions:register');

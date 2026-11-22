@@ -85,6 +85,10 @@ export interface CreateCoreAppOptions {
   rawDb?: unknown;
   /** Plugin IDs composed by the host distribution that may mount custom base paths and wrap core adapters. */
   firstPartyPluginIds?: readonly string[];
+  /** When true, external plugins start disabled until explicitly consented by an instance owner. */
+  requirePluginConsent?: boolean;
+  /** Plugin IDs pre-consented at boot when `requirePluginConsent` is enabled. */
+  consentedPluginIds?: readonly string[];
 }
 
 /**
@@ -134,6 +138,10 @@ export function createCoreApp(
   const firstPartySet = new Set(options.firstPartyPluginIds ?? []);
   const externalPlugins = (options.plugins ?? []).filter((p) => !firstPartySet.has(p.manifest.id));
   const trustedPlugins = (options.plugins ?? []).filter((p) => firstPartySet.has(p.manifest.id));
+  const sharedAdapterOwners = new Map<string, string>();
+  const consentedExternalIds = options.consentedPluginIds
+    ? new Set(options.consentedPluginIds)
+    : undefined;
 
   const trustedLoaded = trustedPlugins.length
     ? loadServerPlugins({
@@ -144,6 +152,8 @@ export function createCoreApp(
         rawDb: options.rawDb,
         runtimeRegistry,
         firstPartyCore: true,
+        consented: true,
+        adapterOwners: sharedAdapterOwners,
         timeoutMs: options.pluginRouteTimeoutMs,
         middleware: {
           requireIdentity: requireIdentityMiddleware,
@@ -162,6 +172,9 @@ export function createCoreApp(
         rawDb: options.rawDb,
         runtimeRegistry,
         firstPartyCore: false,
+        consented: !options.requirePluginConsent,
+        consentedPluginIds: consentedExternalIds,
+        adapterOwners: sharedAdapterOwners,
         timeoutMs: options.pluginRouteTimeoutMs,
         middleware: {
           requireIdentity: requireIdentityMiddleware,
@@ -210,6 +223,8 @@ export function createCoreApp(
         rawDb: options.rawDb,
         runtimeRegistry,
         firstPartyCore: true,
+        consented: true,
+        adapterOwners: sharedAdapterOwners,
         middleware: {
           requireIdentity: requireIdentityMiddleware,
           requireWorkspace: explicitWorkspaceMiddleware,
