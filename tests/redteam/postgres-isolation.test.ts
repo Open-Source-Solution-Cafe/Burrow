@@ -111,13 +111,36 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
     });
 
     it('prevents plugins from creating FKs without ON DELETE CASCADE that permanently block core user/workspace deletion', async () => {
-      const fkLockPlugin: BurrowServerPlugin = {
+      const fkLockPluginNoCore: BurrowServerPlugin = {
+        manifest: {
+          id: 'fklock-nocore',
+          version: '0.1.0',
+          sdkVersion: '^0.4.0',
+          permissions: ['db:own'],
+          dialects: ['postgres'],
+        },
+        migrations: [
+          {
+            name: '0001_lock.sql',
+            dialect: 'postgres',
+            sql: `CREATE TABLE IF NOT EXISTS plugin_fklock_nocore_refs (
+              id TEXT PRIMARY KEY,
+              ws_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE RESTRICT
+            )`,
+          },
+        ],
+        setup() {},
+      };
+      await expect(runPluginMigrations(sql, [fkLockPluginNoCore])).rejects.toThrow();
+
+      const fkLockPluginWithCore: BurrowServerPlugin = {
         manifest: {
           id: 'fklock',
           version: '0.1.0',
           sdkVersion: '^0.4.0',
           permissions: ['db:own'],
           dialects: ['postgres'],
+          coreTables: ['workspaces'],
         },
         migrations: [
           {
@@ -131,13 +154,10 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
         ],
         setup() {},
       };
-      await runPluginMigrations(sql, [fkLockPlugin]);
+      await expect(runPluginMigrations(sql, [fkLockPluginWithCore])).rejects.toThrow();
 
       const tempWsId = `ws_lock_${randomUUID().slice(0, 8)}`;
       await sql`INSERT INTO workspaces (id, name, created_by, created_at) VALUES (${tempWsId}, 'Disposable', 'u_victim', 2000)`;
-
-      const db = createPluginDb(sql, 'fklock', { coreTables: [] });
-      await db.execute('INSERT INTO plugin_fklock_refs (id, ws_id) VALUES (?, ?)', ['r1', tempWsId]);
 
       // Core workspace deletion must NOT be blockable by a plugin's ON DELETE RESTRICT foreign key
       await expect(sql`DELETE FROM workspaces WHERE id = ${tempWsId}`).resolves.toBeDefined();
@@ -165,19 +185,22 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
         ],
         setup() {},
       };
-      await runPluginMigrations(sql, [oraclePlugin]);
-      const db = createPluginDb(sql, 'fkoracle', { coreTables: [] });
+      await expect(runPluginMigrations(sql, [oraclePlugin])).rejects.toThrow();
 
-      // Attacker can distinguish existing 'u_victim' (succeeds) from non-existent 'u_missing' (23503)
-      const insertExisting = await db
-        .execute('INSERT INTO plugin_fkoracle_probe (id, uid) VALUES (?, ?)', ['p1', 'u_victim'])
+      await provisionPluginPostgresIsolation(sql, 'fkoracle', { coreTables: [] });
+      const db = createPluginDb(sql, 'fkoracle', { coreTables: [], enforceLexer: false });
+
+      // Neither migration-time FK nor runtime lookup against public."user" can distinguish existing vs missing IDs
+      const probeExisting = await db
+        .query('SELECT id FROM public."user" WHERE id = $1', ['u_victim'])
         .then(() => 'existed')
         .catch(() => 'denied');
-      const insertMissing = await db
-        .execute('INSERT INTO plugin_fkoracle_probe (id, uid) VALUES (?, ?)', ['p2', 'u_does_not_exist'])
+      const probeMissing = await db
+        .query('SELECT id FROM public."user" WHERE id = $1', ['u_does_not_exist'])
         .then(() => 'existed')
         .catch(() => 'denied');
-      expect(insertExisting).toBe(insertMissing);
+      expect(probeExisting).toBe('denied');
+      expect(probeMissing).toBe('denied');
     });
 
     it('prevents plugin queries from holding core advisory locks (burrow:migrations / burrow:plugin_migrations)', async () => {
