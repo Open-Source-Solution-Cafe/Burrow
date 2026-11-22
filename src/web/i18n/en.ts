@@ -1172,7 +1172,7 @@ export const en: TranslationDictionary = {
     projectsInWorkspaceTitle: 'Projects',
     projectsInWorkspaceDesc:
       'Open Project Settings to rename a project, configure uploads, manage tags, or archive and delete it.',
-    openProjectSettings: 'Project Settings →',
+    openProjectSettings: 'Project Settings',
     openProjectOverview: 'Project Overview',
     openWorkspaceSettings: 'Workspace Settings',
     openWorkspaceMembers: 'Manage Members →',

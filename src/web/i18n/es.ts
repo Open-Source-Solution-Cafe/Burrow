@@ -524,7 +524,7 @@ export const es: TranslationDictionary = {
     projectsInWorkspaceTitle: 'Proyectos',
     projectsInWorkspaceDesc:
       'Abre la configuración de un proyecto para cambiar su nombre, configurar subidas, gestionar etiquetas o archivarlo y eliminarlo.',
-    openProjectSettings: 'Configuración del proyecto →',
+    openProjectSettings: 'Configuración del proyecto',
     openProjectOverview: 'Resumen del proyecto',
     openWorkspaceSettings: 'Configuración del espacio de trabajo',
     openWorkspaceMembers: 'Gestionar miembros →',

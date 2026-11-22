@@ -528,7 +528,7 @@ export const fr: TranslationDictionary = {
     projectsInWorkspaceTitle: 'Projets',
     projectsInWorkspaceDesc:
       'Ouvrez les paramètres d’un projet pour le renommer, configurer les téléversements, gérer les étiquettes ou l’archiver et le supprimer.',
-    openProjectSettings: 'Paramètres du projet →',
+    openProjectSettings: 'Paramètres du projet',
     openProjectOverview: 'Aperçu du projet',
     openWorkspaceSettings: 'Paramètres de l’espace de travail',
     openWorkspaceMembers: 'Gérer les membres →',
