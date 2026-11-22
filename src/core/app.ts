@@ -964,103 +964,132 @@ export function createCoreApp(
           }
           return c.json({ workspaceId: workspace.id });
         },
-      )
+      );
 
-      // ---------------------------------------------------------------------------
-      // Auth routes (delegated to auth provider handler)
-      // ---------------------------------------------------------------------------
-      .all('/api/auth/*', async (c) => {
-        const path = c.req.path.replace(/\/+$/, '');
-        if (path === '/api/auth/sign-up/email' || path.startsWith('/api/auth/sign-up')) {
-          throw httpError(403, 'forbidden', 'Direct sign-up disabled; use bootstrap or invite');
-        }
+  const RESERVED_CORE_AUTH_PREFIXES = [
+    '/api/auth/config',
+    '/api/auth/sign-up',
+    '/api/auth/sign-in',
+    '/api/auth/sign-out',
+    '/api/auth/bootstrap',
+    '/api/auth/session',
+    '/api/auth/get-session',
+    '/api/auth/magic-link',
+    '/api/auth/delete-user',
+    '/api/auth/callback',
+  ];
+  const allPluginRoutes = [
+    ...builtinLoaded.pluginRoutes,
+    ...trustedLoaded.pluginRoutes,
+    ...loadedPlugins.pluginRoutes,
+  ];
+  for (const { mountPath, router } of allPluginRoutes) {
+    if (mountPath.startsWith('/api/auth/')) {
+      const normalizedMount = mountPath.replace(/\/+$/, '');
+      if (
+        RESERVED_CORE_AUTH_PREFIXES.some(
+          (reserved) => normalizedMount === reserved || normalizedMount.startsWith(`${reserved}/`),
+        )
+      ) {
+        throw new Error(`Plugin route "${mountPath}" collides with reserved core auth route`);
+      }
+      baseApp.route(mountPath, router);
+    }
+  }
 
-        const deletingUserId =
-          c.req.method.toUpperCase() === 'POST' && path === '/api/auth/delete-user'
-            ? c.get('identity')?.userId ?? null
-            : null;
-        if (deletingUserId) {
-          await events.emitBefore('user.deleted', { userId: deletingUserId });
-        }
+  // ---------------------------------------------------------------------------
+  // Auth routes (delegated to auth provider handler)
+  // ---------------------------------------------------------------------------
+  baseApp.all('/api/auth/*', async (c) => {
+    const path = c.req.path.replace(/\/+$/, '');
+    if (path === '/api/auth/sign-up/email' || path.startsWith('/api/auth/sign-up')) {
+      throw httpError(403, 'forbidden', 'Direct sign-up disabled; use bootstrap or invite');
+    }
 
-        // Better-auth attempts to parse JSON body if content-type contains application/json,
-        // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
-        const req = c.req.raw;
-        const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
-        const stampedHeaders = new Headers(req.headers);
-        stampedHeaders.delete('x-burrow-client-ip');
-        if (verifiedIp) {
-          stampedHeaders.set('x-burrow-client-ip', verifiedIp);
-        }
-        const contentType = req.headers.get('content-type') || '';
-        const dispatch = (forwarded: Request) =>
-          runWithAuthRequestContext(
-            { verifiedIp, accountKey: null, sessionKey: null },
-            () => auth.handler(forwarded),
-          );
-        let res: Response;
-        try {
-          if (
-            req.method !== 'GET' &&
-            req.method !== 'HEAD' &&
-            contentType.includes('application/json')
-          ) {
-            if (req.headers.get('content-length') === '0') {
-              const fixedReq = new Request(req.url, {
-                method: req.method,
-                headers: stampedHeaders,
-                body: JSON.stringify({}),
-                duplex: 'half',
-              } as RequestInit);
-              res = await dispatch(fixedReq);
-            } else {
-              const cloned = req.clone();
-              const text = await cloned.text();
-              if (!text || text.trim() === '') {
-                const fixedReq = new Request(req.url, {
-                  method: req.method,
-                  headers: stampedHeaders,
-                  body: JSON.stringify({}),
-                  duplex: 'half',
-                } as RequestInit);
-                res = await dispatch(fixedReq);
-              } else {
-                const stampedReq = new Request(req.url, {
-                  method: req.method,
-                  headers: stampedHeaders,
-                  body: text,
-                });
-                res = await dispatch(stampedReq);
-              }
-            }
+    const deletingUserId =
+      c.req.method.toUpperCase() === 'POST' && path === '/api/auth/delete-user'
+        ? c.get('identity')?.userId ?? null
+        : null;
+    if (deletingUserId) {
+      await events.emitBefore('user.deleted', { userId: deletingUserId });
+    }
+
+    // Better-auth attempts to parse JSON body if content-type contains application/json,
+    // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
+    const req = c.req.raw;
+    const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
+    const stampedHeaders = new Headers(req.headers);
+    stampedHeaders.delete('x-burrow-client-ip');
+    if (verifiedIp) {
+      stampedHeaders.set('x-burrow-client-ip', verifiedIp);
+    }
+    const contentType = req.headers.get('content-type') || '';
+    const dispatch = (forwarded: Request) =>
+      runWithAuthRequestContext(
+        { verifiedIp, accountKey: null, sessionKey: null },
+        () => auth.handler(forwarded),
+      );
+    let res: Response;
+    try {
+      if (
+        req.method !== 'GET' &&
+        req.method !== 'HEAD' &&
+        contentType.includes('application/json')
+      ) {
+        if (req.headers.get('content-length') === '0') {
+          const fixedReq = new Request(req.url, {
+            method: req.method,
+            headers: stampedHeaders,
+            body: JSON.stringify({}),
+            duplex: 'half',
+          } as RequestInit);
+          res = await dispatch(fixedReq);
+        } else {
+          const cloned = req.clone();
+          const text = await cloned.text();
+          if (!text || text.trim() === '') {
+            const fixedReq = new Request(req.url, {
+              method: req.method,
+              headers: stampedHeaders,
+              body: JSON.stringify({}),
+              duplex: 'half',
+            } as RequestInit);
+            res = await dispatch(fixedReq);
           } else {
-            const stampedReq = new Request(req, { headers: stampedHeaders });
+            const stampedReq = new Request(req.url, {
+              method: req.method,
+              headers: stampedHeaders,
+              body: text,
+            });
             res = await dispatch(stampedReq);
           }
-          if (deletingUserId && res.ok) {
-            await events.emitAfter('user.deleted', { userId: deletingUserId });
-          }
-          return res;
-        } catch (err: any) {
-          if (err && (typeof err.statusCode === 'number' || err.status)) {
-            const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
-            const message = err.body?.message || err.message || 'Authentication error';
-            return c.json({ message, error: message }, status as any);
-          }
-          throw err;
         }
-      });
+      } else {
+        const stampedReq = new Request(req, { headers: stampedHeaders });
+        res = await dispatch(stampedReq);
+      }
+      if (deletingUserId && res.ok) {
+        await events.emitAfter('user.deleted', { userId: deletingUserId });
+      }
+      return res;
+    } catch (err: any) {
+      if (err && (typeof err.statusCode === 'number' || err.status)) {
+        const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
+        const message = err.body?.message || err.message || 'Authentication error';
+        return c.json({ message, error: message }, status as any);
+      }
+      throw err;
+    }
+  });
 
   baseApp.route(
     '/api/plugins',
     createPluginAdminRoutes({ runtimeRegistry, workspaces: repositories.workspaces }),
   );
-  for (const { mountPath, router } of [
-    ...builtinLoaded.pluginRoutes,
-    ...trustedLoaded.pluginRoutes,
-    ...loadedPlugins.pluginRoutes,
-  ]) {
-    baseApp.route(mountPath, router);
+  for (const { mountPath, router } of allPluginRoutes) {
+    if (!mountPath.startsWith('/api/auth/')) {
+      baseApp.route(mountPath, router);
+    }
   }
 
   return baseApp
