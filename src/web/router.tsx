@@ -1,5 +1,6 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type ComponentType, type FormEvent, type ReactNode } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import type { BurrowWebPlugin } from '@burrow/sdk';
 import {
   createRootRoute,
   createRoute,
@@ -533,38 +534,92 @@ const publicShareRoute = createRoute({
   component: PublicShareView,
 });
 
-const routeTree = rootRoute.addChildren([
-  loginRoute,
-  inviteRoute,
-  publicShareRoute,
-  shellRoute.addChildren([
-    homeRoute,
-    workspaceRoute.addChildren([
-      workspaceIndexRoute,
-      projectRoute.addChildren([
-        projectHomeRoute,
-        notepadRoute,
-        boardRoute,
-        trashRoute,
-        libraryRoute,
-      ]),
-      tasksRoute,
-      profileRoute,
-      settingsRoute,
-      membersRoute,
-    ]),
-    legacyProjectRoute,
-    legacyNotepadRoute,
-    legacyBoardRoute,
-    legacyTrashRoute,
-    legacyTasksRoute,
-    legacyProfileRoute,
-    legacySettingsRoute,
-    legacyMembersRoute,
-  ]),
-]);
+export function createBurrowRouter(plugins: readonly BurrowWebPlugin[] = []) {
+  const rootPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
+  const shellPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
+  const workspacePluginRoutes: Array<ReturnType<typeof createRoute>> = [];
+  const projectPluginRoutes: Array<ReturnType<typeof createRoute>> = [];
 
-export const router = createRouter({ routeTree });
+  for (const plugin of plugins) {
+    for (const contribution of plugin.routes ?? []) {
+      const parentKind =
+        contribution.parent ?? (contribution.path.startsWith('/') ? 'root' : 'workspace');
+      const Comp = contribution.component as ComponentType<Record<string, unknown>>;
+      if (parentKind === 'root') {
+        rootPluginRoutes.push(
+          createRoute({
+            getParentRoute: () => rootRoute,
+            path: contribution.path,
+            component: () => <Comp />,
+          }),
+        );
+      } else if (parentKind === 'shell') {
+        shellPluginRoutes.push(
+          createRoute({
+            getParentRoute: () => shellRoute,
+            path: contribution.path,
+            component: () => <Comp />,
+          }),
+        );
+      } else if (parentKind === 'project') {
+        projectPluginRoutes.push(
+          createRoute({
+            getParentRoute: () => projectRoute,
+            path: contribution.path,
+            component: () => <Comp />,
+          }),
+        );
+      } else {
+        workspacePluginRoutes.push(
+          createRoute({
+            getParentRoute: () => workspaceRoute,
+            path: contribution.path,
+            component: () => <Comp />,
+          }),
+        );
+      }
+    }
+  }
+
+  const tree = rootRoute.addChildren([
+    loginRoute,
+    inviteRoute,
+    publicShareRoute,
+    ...rootPluginRoutes,
+    shellRoute.addChildren([
+      homeRoute,
+      ...shellPluginRoutes,
+      workspaceRoute.addChildren([
+        workspaceIndexRoute,
+        projectRoute.addChildren([
+          projectHomeRoute,
+          notepadRoute,
+          boardRoute,
+          trashRoute,
+          libraryRoute,
+          ...projectPluginRoutes,
+        ]),
+        tasksRoute,
+        profileRoute,
+        settingsRoute,
+        membersRoute,
+        ...workspacePluginRoutes,
+      ]),
+      legacyProjectRoute,
+      legacyNotepadRoute,
+      legacyBoardRoute,
+      legacyTrashRoute,
+      legacyTasksRoute,
+      legacyProfileRoute,
+      legacySettingsRoute,
+      legacyMembersRoute,
+    ]),
+  ]);
+
+  return createRouter({ routeTree: tree });
+}
+
+export const router = createBurrowRouter();
 
 declare module '@tanstack/react-router' {
   interface Register {
