@@ -116,6 +116,9 @@ export function createCoreApp(
     await next();
   });
 
+  const pluginsDisabledRaw =
+    infra.env?.PLUGINS_DISABLED ??
+    (typeof process !== 'undefined' ? process.env?.PLUGINS_DISABLED : undefined);
   const envDisabledRaw =
     infra.env?.DISABLED_PLUGINS ??
     (typeof process !== 'undefined' ? process.env?.DISABLED_PLUGINS : undefined);
@@ -123,6 +126,7 @@ export function createCoreApp(
     options.pluginRuntimeRegistry ??
     options.runtimeRegistry ??
     new PluginRuntimeRegistry({
+      pluginsDisabledEnv: pluginsDisabledRaw,
       disabledPluginsEnv: envDisabledRaw,
       instanceManaged: options.policy?.allowSelfUpdate?.() === false,
     });

@@ -119,7 +119,7 @@ function wrapPluginRouter(args: {
     const now = Date.now();
     const identity = (c.get('identity') as { userId?: string } | undefined)?.userId;
     const ip = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? 'anon';
-    const key = `${pluginId}:${identity ?? ip}`;
+    const key = `${pluginId}:${identity ?? 'anon'}:${ip}`;
     const bucket = buckets.get(key);
     if (!bucket || bucket.resetAt <= now) {
       buckets.set(key, { count: 1, resetAt: now + 60_000 });
@@ -223,7 +223,7 @@ export function loadServerPlugins(args: {
 
     const granted = new Set<Permission>(plugin.manifest.permissions);
     const rawDb = args.rawDb ?? infra.db ?? envObj.DB;
-    const realDb = createPluginDb(rawDb, id);
+    const realDb = createPluginDb(rawDb, id, { coreTables: plugin.manifest.coreTables ?? [] });
     const secretValues = collectSecretValues(envObj, plugin.manifest.configKeys);
     const logger = createPluginLogger(id, secretValues);
     const scopedConfig = buildScopedPluginConfig(plugin.manifest, envObj, firstPartyCore);

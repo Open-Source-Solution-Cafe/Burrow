@@ -34,6 +34,8 @@ export interface PluginManifest {
   network?: readonly string[];
   /** Declared config/env key names exposed via ctx.config (sensitive core keys are always blocked). */
   configKeys?: readonly string[];
+  /** Explicit allowlist of non-sensitive core tables this plugin is permitted to SELECT from (e.g. ["cards", "projects"]). */
+  coreTables?: readonly string[];
 }
 
 export interface BurrowEventMap {
@@ -587,6 +589,9 @@ export function describePluginCapabilities(manifest: PluginManifest): string[] {
   for (const host of manifest.network ?? []) {
     items.push(`call ${host}`);
   }
+  if ((manifest.coreTables?.length ?? 0) > 0) {
+    items.push(`read core tables (${manifest.coreTables!.join(', ')})`);
+  }
   if ((manifest.configKeys?.length ?? 0) > 0) {
     items.push(`read config keys (${manifest.configKeys!.join(', ')})`);
   }
@@ -595,7 +600,8 @@ export function describePluginCapabilities(manifest: PluginManifest): string[] {
 
 /** Formats a single-line human-readable consent summary for a plugin manifest. */
 export function formatPluginConsentSummary(manifest: PluginManifest): string {
+  const title = manifest.name ? `${manifest.name} (${manifest.id})` : manifest.id;
   const caps = describePluginCapabilities(manifest);
-  if (caps.length === 0) return 'This plugin requests no special capabilities.';
-  return `This plugin can: ${caps.join(', ')}.`;
+  if (caps.length === 0) return `${title} — This plugin requests no special capabilities.`;
+  return `${title} — This plugin can: ${caps.join(', ')}.`;
 }

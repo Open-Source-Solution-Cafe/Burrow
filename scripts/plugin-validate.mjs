@@ -273,6 +273,40 @@ function validateManifestObject(manifest, findings) {
       }
     }
   }
+  if (manifest.coreTables !== undefined) {
+    const allowedCore = new Set([
+      'workspaces',
+      'projects',
+      'project_files',
+      'members',
+      'invites',
+      'boards',
+      'board_columns',
+      'cards',
+      'notepads',
+      'tags',
+      'card_tags',
+    ]);
+    if (!Array.isArray(manifest.coreTables)) {
+      findings.push({
+        rule: 'manifest-core-tables',
+        severity: 'error',
+        file: 'manifest.json',
+        message: 'manifest.coreTables must be an array of allowlisted core table names.',
+      });
+    } else {
+      for (const tbl of manifest.coreTables) {
+        if (typeof tbl !== 'string' || !allowedCore.has(tbl)) {
+          findings.push({
+            rule: 'manifest-core-tables',
+            severity: 'error',
+            file: 'manifest.json',
+            message: `Core table "${tbl}" is not allowlistable in manifest.coreTables.`,
+          });
+        }
+      }
+    }
+  }
 }
 
 function validateSqlMigrationFile(sqlText, relPath, findings) {

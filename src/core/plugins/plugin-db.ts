@@ -11,6 +11,17 @@ import {
   type SqlIdentifier,
 } from '@burrow/sdk';
 import { pluginTablePrefix } from './manifest';
+import { withPluginPostgresRole } from './postgres-isolation';
+
+/**
+ * NOTE ON DIALECT SECURITY BOUNDARIES:
+ * - On PostgreSQL, plugin isolation is enforced by the database engine itself via dedicated
+ *   `plugin_<id>` schemas, NOLOGIN `plugin_<id>_role` roles, `REVOKE ALL` / explicit `coreTables`
+ *   grants, DDL event triggers, and transactional `SET LOCAL ROLE` + pinned `search_path`.
+ * - On SQLite / Cloudflare D1 (which lack database roles, schemas, and GRANT/REVOKE), the
+ *   SQL guard (`assertPluginSqlAllowed`) is a best-effort tripwire for operator-trusted plugins,
+ *   NOT a cryptographic or engine-level isolation boundary.
+ */
 
 export class PluginSqlAccessError extends Error {
   constructor(
@@ -36,7 +47,7 @@ interface SqliteLikeDb {
 
 export interface PostgresLikeSql {
   unsafe(query: string, params?: unknown[]): Promise<Array<Record<string, unknown>> & { count?: number }>;
-  begin<T>(cb: (tx: PostgresLikeSql) => Promise<T>): Promise<T>;
+  begin?<T>(cb: (tx: any) => Promise<T> | T): Promise<any>;
 }
 
 const DEFAULT_MAX_ROWS = 500;
@@ -406,6 +417,15 @@ export interface AssertPluginSqlOptions {
   isRuntime?: boolean;
   fromSqlTag?: boolean;
   allowUnscopedCoreReads?: boolean;
+  allowedCoreTables?: ReadonlySet<string>;
+  enforceCoreAllowlist?: boolean;
+}
+
+export interface CreatePluginDbOptions {
+  /** Allowlisted core tables from `manifest.coreTables`. */
+  coreTables?: readonly string[];
+  /** Internal test hook ONLY: bypass JS lexer check to prove DB-level Postgres role enforcement. */
+  enforceLexer?: boolean;
 }
 
 export function assertPluginSqlAllowed(
@@ -414,14 +434,12 @@ export function assertPluginSqlAllowed(
   prefix = pluginTablePrefix(pluginId),
   options: AssertPluginSqlOptions = {},
 ): void {
-  if (options.isRuntime) {
-    const rawLexed = stripCommentsAndStrings(sqlText);
-    if (rawLexed.hasComments) {
-      throw new PluginSqlAccessError(pluginId, 'SQL comments are disallowed in runtime queries');
-    }
-    if (rawLexed.hasDollarQuotes) {
-      throw new PluginSqlAccessError(pluginId, 'dollar-quoted strings are disallowed in runtime queries');
-    }
+  const rawLexed = stripCommentsAndStrings(sqlText);
+  if (rawLexed.hasDollarQuotes) {
+    throw new PluginSqlAccessError(pluginId, 'dollar-quoted strings are disallowed in plugin SQL');
+  }
+  if (options.isRuntime && rawLexed.hasComments) {
+    throw new PluginSqlAccessError(pluginId, 'SQL comments are disallowed in runtime queries');
   }
 
   const statements = splitPluginSqlStatements(sqlText);
@@ -509,15 +527,27 @@ export function assertPluginSqlAllowed(
       }
       if (
         options.isRuntime &&
-        !options.allowUnscopedCoreReads &&
         !table.startsWith(prefix) &&
-        SAFE_CORE_READ_TABLES.has(table) &&
-        !/\bWHERE\b/i.test(cleaned)
+        SAFE_CORE_READ_TABLES.has(table)
       ) {
-        throw new PluginSqlAccessError(
-          pluginId,
-          `unscoped query on core table "${table}" requires a WHERE clause (workspace_id / scope filter)`,
-        );
+        if (options.enforceCoreAllowlist && !options.allowedCoreTables?.has(table)) {
+          throw new PluginSqlAccessError(
+            pluginId,
+            `core table "${table}" must be declared in manifest.coreTables`,
+          );
+        }
+        if (!options.allowUnscopedCoreReads) {
+          const whereMatch = /\bWHERE\b([\s\S]*)$/i.exec(cleaned);
+          const whereClause = whereMatch?.[1] ?? '';
+          const hasBoundParam =
+            Boolean(options.fromSqlTag) || /\?|\$\d+/.test(whereClause);
+          if (!whereMatch || !hasBoundParam) {
+            throw new PluginSqlAccessError(
+              pluginId,
+              `unscoped query on core table "${table}" requires a parameterized WHERE clause (workspace_id / scope filter)`,
+            );
+          }
+        }
       }
     }
 
@@ -717,15 +747,32 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, pluginId: 
   }
 }
 
-export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
+export function createPluginDb(
+  rawDb: unknown,
+  pluginId: string,
+  dbOptions: CreatePluginDbOptions = {},
+): PluginDb {
   const client = unwrapDbClient(rawDb);
   const prefix = pluginTablePrefix(pluginId);
   const dialect: PluginDialect = isPostgresClient(client) ? 'postgres' : 'sqlite';
+  const enforceLexer = dbOptions.enforceLexer !== false;
+  const enforceCoreAllowlist = dbOptions.coreTables !== undefined;
+  const allowedCoreTables = new Set(dbOptions.coreTables ?? []);
 
   const ensureClient = () => {
     if (!client || (!isPostgresClient(client) && typeof (client as { prepare?: unknown }).prepare !== 'function')) {
       throw new PluginSqlAccessError(pluginId, 'database binding is not available');
     }
+  };
+
+  const checkRuntimeSql = (sqlText: string, fromSqlTag: boolean) => {
+    if (!enforceLexer) return;
+    assertPluginSqlAllowed(pluginId, sqlText, prefix, {
+      isRuntime: true,
+      fromSqlTag,
+      allowedCoreTables,
+      enforceCoreAllowlist,
+    });
   };
 
   return {
@@ -744,8 +791,8 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
     ): Promise<T[]> {
       ensureClient();
       const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
-      assertPluginSqlAllowed(pluginId, sqlText, prefix, { isRuntime: true, fromSqlTag });
-      assertWriteAllowedInRequest(pluginId, sqlText);
+      checkRuntimeSql(sqlText, fromSqlTag);
+      if (enforceLexer) assertWriteAllowedInRequest(pluginId, sqlText);
 
       const maxRows = Math.min(Math.max(1, options.maxRows ?? DEFAULT_MAX_ROWS), 5_000);
       const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
@@ -753,7 +800,12 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
       const execQuery = async (): Promise<T[]> => {
         if (isPostgresClient(client)) {
           const pgSql = translateSqlToPostgres(sqlText);
-          const rows = await client.unsafe(pgSql, [...boundParams]);
+          const rows = await withPluginPostgresRole(
+            client,
+            pluginId,
+            (roleTx) => roleTx.unsafe(pgSql, [...boundParams]),
+            { coreTables: dbOptions.coreTables },
+          );
           return rows.slice(0, maxRows) as T[];
         }
         if (isD1Database(client)) {
@@ -774,14 +826,19 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
     ): Promise<T | null> {
       ensureClient();
       const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
-      assertPluginSqlAllowed(pluginId, sqlText, prefix, { isRuntime: true, fromSqlTag });
-      assertWriteAllowedInRequest(pluginId, sqlText);
+      checkRuntimeSql(sqlText, fromSqlTag);
+      if (enforceLexer) assertWriteAllowedInRequest(pluginId, sqlText);
 
       const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
       const execFirst = async (): Promise<T | null> => {
         if (isPostgresClient(client)) {
           const pgSql = translateSqlToPostgres(sqlText);
-          const rows = await client.unsafe(pgSql, [...boundParams]);
+          const rows = await withPluginPostgresRole(
+            client,
+            pluginId,
+            (roleTx) => roleTx.unsafe(pgSql, [...boundParams]),
+            { coreTables: dbOptions.coreTables },
+          );
           return (rows[0] as T | undefined) ?? null;
         }
         if (isD1Database(client)) {
@@ -800,7 +857,7 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
     ): Promise<{ changes: number; lastRowId?: number | string }> {
       ensureClient();
       const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
-      assertPluginSqlAllowed(pluginId, sqlText, prefix, { isRuntime: true, fromSqlTag });
+      checkRuntimeSql(sqlText, fromSqlTag);
 
       const method = httpMethodStorage.getStore();
       if (method === 'GET' || method === 'HEAD') {
@@ -814,7 +871,12 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
       const execMutate = async (): Promise<{ changes: number; lastRowId?: number | string }> => {
         if (isPostgresClient(client)) {
           const pgSql = translateSqlToPostgres(sqlText);
-          const res = await client.unsafe(pgSql, [...boundParams]);
+          const res = await withPluginPostgresRole(
+            client,
+            pluginId,
+            (roleTx) => roleTx.unsafe(pgSql, [...boundParams]),
+            { coreTables: dbOptions.coreTables },
+          );
           return {
             changes: Number(res.count ?? res.length ?? 0),
           };
@@ -853,16 +915,21 @@ export function createPluginDb(rawDb: unknown, pluginId: string): PluginDb {
 
       const resolved = statements.map((s) => {
         const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(s.sql, s.params ?? []);
-        assertPluginSqlAllowed(pluginId, sqlText, prefix, { isRuntime: true, fromSqlTag });
+        checkRuntimeSql(sqlText, fromSqlTag);
         return { sqlText, boundParams };
       });
 
       if (isPostgresClient(client)) {
-        await client.begin(async (tx) => {
-          for (const s of resolved) {
-            await tx.unsafe(translateSqlToPostgres(s.sqlText), [...s.boundParams]);
-          }
-        });
+        await withPluginPostgresRole(
+          client,
+          pluginId,
+          async (roleTx) => {
+            for (const s of resolved) {
+              await roleTx.unsafe(translateSqlToPostgres(s.sqlText), [...s.boundParams]);
+            }
+          },
+          { coreTables: dbOptions.coreTables },
+        );
         return;
       }
 

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { Linter } from 'eslint';
+import { Hono } from 'hono';
 import tseslint from 'typescript-eslint';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
@@ -173,18 +174,27 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
         INSERT INTO workspaces (id, name) VALUES ('ws_1', 'Workspace One');
         CREATE TABLE plugin_safe_items (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL);
       `);
-      const db = createPluginDb(sqlite, 'safe');
+      const db = createPluginDb(sqlite, 'safe', { coreTables: ['workspaces'] });
 
-      // Double-quoted identifier containing an apostrophe must not desync lexer
+      // Double-quoted identifier containing an apostrophe must not desync lexer (both literal and bound variants)
+      await expect(
+        db.execute(`WITH cte AS (SELECT 1 AS "a'b") DELETE FROM workspaces WHERE 'x' = 'x'`),
+      ).rejects.toThrow(PluginSqlAccessError);
       await expect(
         db.execute(`WITH cte AS (SELECT 1 AS "a'b") DELETE FROM workspaces WHERE id = ?`, ['ws_1']),
       ).rejects.toThrow(PluginSqlAccessError);
 
-      // Postgres dollar quotes must not smuggle multi-statement or hide DML
+      // Postgres dollar quotes blocked unconditionally even without runtime flags or unprefixed targets
       expect(() =>
-        assertPluginSqlAllowed('safe', `WITH cte AS (SELECT $$a'b$$) DELETE FROM workspaces WHERE id = ?`, 'plugin_safe_'),
+        assertPluginSqlAllowed('safe', `WITH cte AS (SELECT $$a'b$$) DELETE FROM workspaces WHERE '1' = '1'`, 'plugin_safe_'),
+      ).toThrow(PluginSqlAccessError);
+      expect(() =>
+        assertPluginSqlAllowed('safe', `SELECT $$dollar$$ FROM plugin_safe_items`, 'plugin_safe_'),
       ).toThrow(PluginSqlAccessError);
       expect(splitPluginSqlStatements('SELECT $$; DELETE FROM workspaces; $$')).toHaveLength(1);
+
+      // Tautological WHERE without bound parameters on core tables rejected by SQLite tripwire
+      await expect(db.query('SELECT id FROM workspaces WHERE 1 = 1')).rejects.toThrow(PluginSqlAccessError);
 
       // SELECT INTO and WITH MERGE INTO blocked
       expect(() => assertPluginSqlAllowed('safe', 'SELECT * INTO unprefixed_tbl FROM workspaces', 'plugin_safe_')).toThrow(
@@ -301,6 +311,7 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
       expect(scriptSrc).toBe("script-src 'self'");
       expect(scriptSrc).not.toContain("'unsafe-eval'");
       expect(scriptSrc).not.toContain("'unsafe-inline'");
+      expect(csp).not.toContain('default-src *');
     } finally {
       sqlite.close();
     }
@@ -477,14 +488,93 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
         })).status,
       ).toBe(200);
 
-      // PluginDb blocks auth/config tables, token_hash, other plugins, and unscoped core reads
-      const db = createPluginDb(sqlite, 'authz-check');
+      // PluginDb blocks auth/config tables, token_hash, other plugins, undeclared core tables, and unscoped core reads
+      const db = createPluginDb(sqlite, 'authz-check', { coreTables: [] });
       await expect(db.query('SELECT value FROM _worker_runtime_config WHERE key = ?', ['better_auth_secret'])).rejects.toThrow(PluginSqlAccessError);
       await expect(db.query('SELECT email FROM user WHERE id = ?', ['u1'])).rejects.toThrow(PluginSqlAccessError);
       await expect(db.query('SELECT token FROM session WHERE id = ?', ['s1'])).rejects.toThrow(PluginSqlAccessError);
       await expect(db.query('SELECT token_hash FROM invites WHERE workspace_id = ?', ['ws_1'])).rejects.toThrow(PluginSqlAccessError);
       await expect(db.query('SELECT secret FROM plugin_other_secrets')).rejects.toThrow(PluginSqlAccessError);
       await expect(db.query('SELECT id FROM workspaces')).rejects.toThrow(PluginSqlAccessError);
+      await expect(db.query('SELECT id FROM workspaces WHERE id = ?', ['ws_1'])).rejects.toThrow(PluginSqlAccessError);
+
+      // Restored c661369 probe #2: permissions: [] plugin cannot access BETTER_AUTH_SECRET, ctx.infra, db, route, or storage
+      let zeroPermEnvSecret: unknown = 'unexpected';
+      let zeroPermInfra: unknown = 'unexpected';
+      let zeroPermDbThrew = false;
+      let zeroPermRouteThrew = false;
+      const zeroPermPlugin: BurrowServerPlugin = {
+        manifest: {
+          id: 'zero-perm',
+          version: '0.1.0',
+          sdkVersion: '^0.4.0',
+          permissions: [],
+        },
+        setup(ctx) {
+          zeroPermEnvSecret = ctx.env.BETTER_AUTH_SECRET;
+          zeroPermInfra = ctx.infra;
+          try {
+            ctx.route(new Hono());
+          } catch {
+            zeroPermRouteThrew = true;
+          }
+          try {
+            void ctx.db.query('SELECT 1');
+          } catch {
+            zeroPermDbThrew = true;
+          }
+        },
+      };
+      createCoreApp(
+        createStubInfra(sqlite, { env: { BETTER_AUTH_SECRET: 'leaked-master-secret-32-bytes!!!!' } }),
+        { policy: new SelfHostedPolicy(), plugins: [zeroPermPlugin], rawDb: sqlite },
+      );
+      expect(zeroPermEnvSecret).toBeUndefined();
+      expect(zeroPermInfra).toBeUndefined();
+      expect(zeroPermRouteThrew).toBe(true);
+      expect(zeroPermDbThrew).toBe(true);
+
+      // Restored c661369 probe #3: custom mountPath override rejected AND default ctx.route(router) requires authentication (401)
+      const arbitraryMountPlugin: BurrowServerPlugin = {
+        manifest: {
+          id: 'arbitrary-mount',
+          version: '0.1.0',
+          sdkVersion: '^0.4.0',
+          permissions: ['routes:api'],
+        },
+        setup(ctx) {
+          const router = new Hono();
+          router.get('/open', (c) => c.json({ ok: true }));
+          ctx.route(router, { mountPath: '/api/arbitrary-root' });
+        },
+      };
+      expect(() =>
+        createCoreApp(createStubInfra(sqlite), {
+          policy: new SelfHostedPolicy(),
+          plugins: [arbitraryMountPlugin],
+          rawDb: sqlite,
+        }),
+      ).toThrow(/cannot override mountPath/);
+
+      const defaultDenyRawRoutePlugin: BurrowServerPlugin = {
+        manifest: {
+          id: 'raw-route-deny',
+          version: '0.1.0',
+          sdkVersion: '^0.4.0',
+          permissions: ['routes:api'],
+        },
+        setup(ctx) {
+          const router = new Hono();
+          router.get('/open', (c) => c.json({ ok: true }));
+          ctx.route(router);
+        },
+      };
+      const rawRouteApp = createCoreApp(createStubInfra(sqlite, { userId: null }), {
+        policy: new SelfHostedPolicy(),
+        plugins: [defaultDenyRawRoutePlugin],
+        rawDb: sqlite,
+      });
+      expect((await rawRouteApp.request('http://localhost/api/plugins/raw-route-deny/open')).status).toBe(401);
     } finally {
       sqlite.close();
     }
@@ -759,7 +849,7 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
     }
   });
 
-  it('9. Resource Abuse & Kill Switch: enforces handler timeouts (504), rate limits (429), DB row limits, non-blocking emitAfter, DISABLED_PLUGINS, and /api/plugins toggle consent', async () => {
+  it('9. Resource Abuse & Kill Switch: enforces handler timeouts (504), rate limits (429), DB row limits, non-blocking emitAfter, PLUGINS_DISABLED / DISABLED_PLUGINS, and /api/plugins toggle consent', async () => {
     const sqlite = createTempSqlite();
     try {
       sqlite.exec('CREATE TABLE plugin_quota_rows (id TEXT PRIMARY KEY);');
@@ -829,6 +919,7 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
       const listJson = (await listRes.json()) as { plugins: Array<{ id: string; enabled: boolean }> };
       expect(listJson.plugins[0]).toMatchObject({ id: 'quota', enabled: true });
       const summary = formatPluginConsentSummary(quotaPlugin.manifest);
+      expect(summary).toContain('Quota Test Plugin');
       expect(summary).toContain('This plugin can:');
       expect(summary).toContain('api.example.com');
       expect(summary).toContain('QUOTA_API_KEY');
@@ -858,20 +949,57 @@ describe('Phase A+ Safe-by-Default Plugin Security Verification Suite', () => {
         })).status,
       ).toBe(200);
 
-      // Per-plugin rate limit (120 req/min cap -> including 1 earlier /slow call, 121st returns 429)
-      for (let i = 0; i < 119; i++) {
-        const res = await app.request('http://localhost/api/plugins/quota/ping');
+      // Per-plugin rate limit (120 req/min cap -> isolated burst client: 120 pass, 121st returns 429)
+      for (let i = 0; i < 120; i++) {
+        const res = await app.request('http://localhost/api/plugins/quota/ping', {
+          headers: { 'x-forwarded-for': '203.0.113.99' },
+        });
         expect(res.status).toBe(200);
       }
-      expect((await app.request('http://localhost/api/plugins/quota/ping')).status).toBe(429);
+      expect(
+        (
+          await app.request('http://localhost/api/plugins/quota/ping', {
+            headers: { 'x-forwarded-for': '203.0.113.99' },
+          })
+        ).status,
+      ).toBe(429);
 
-      // Env kill switch blocks permanently via DISABLED_PLUGINS
-      const envKilledReg = new PluginRuntimeRegistry({ disabledPluginsEnv: 'quota' });
-      envKilledReg.register(quotaPlugin.manifest);
-      expect(envKilledReg.isEnabled('quota')).toBe(false);
+      // Canonical PLUGINS_DISABLED (both string ID, constructor shorthand, and '*' wildcard) + deprecated DISABLED_PLUGINS warning
+      const shorthandReg = new PluginRuntimeRegistry('quota');
+      shorthandReg.register(quotaPlugin.manifest);
+      expect(shorthandReg.isEnabled('quota')).toBe(false);
 
-      // emitAfter without waitUntil schedules asynchronously and does not block caller
+      const wildcardReg = new PluginRuntimeRegistry({ pluginsDisabledEnv: '*' });
+      wildcardReg.register(quotaPlugin.manifest);
+      expect(wildcardReg.isEnabled('quota')).toBe(false);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const deprecatedReg = new PluginRuntimeRegistry({ disabledPluginsEnv: 'quota' });
+      deprecatedReg.register(quotaPlugin.manifest);
+      expect(deprecatedReg.isEnabled('quota')).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('DISABLED_PLUGINS is deprecated; use PLUGINS_DISABLED'),
+      );
+      warnSpy.mockRestore();
+
+      // Restored c661369 probe: before* throwing guard & timeout abort cleanly, while emitAfter dispatches non-blocking
       const bus = new PluginEventBus();
+      bus.onBefore('task.created', () => {
+        throw new TypeError('unexpected bug in plugin guard');
+      });
+      await expect(
+        bus.emitBefore('task.created', {
+          workspaceId: 'ws_1',
+          projectId: 'p1',
+          boardId: 'b1',
+          columnId: 'c1',
+          cardId: 'card1',
+          notepadId: 'np1',
+          title: 'Test',
+          actorId: 'u_owner',
+        }),
+      ).rejects.toThrow(TypeError);
+
       let slowAfterDone = false;
       bus.on('notepad.saved', async () => {
         await new Promise((r) => setTimeout(r, 80));

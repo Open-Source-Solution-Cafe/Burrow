@@ -40,6 +40,7 @@ Every plugin manifest must pass `validatePluginManifest()` (`src/core/plugins/ma
 | `dependencies` | Array of plugin IDs | Deterministic topological initialization ordering |
 | `network` | Exact public hostnames (no `*`, IPs, ports, or paths) | `ctx.fetch` egress allowlist + SSRF protection |
 | `configKeys` | Array matching `/^[A-Z][A-Z0-9_]{0,63}$/` | Scopes `ctx.config` to declared keys only |
+| `coreTables` | Subset of allowlisted non-sensitive core tables | Grants PostgreSQL `SELECT` (never `token_hash`) & SQLite tripwire scope |
 
 ---
 
@@ -74,10 +75,11 @@ pnpm run plugin:validate <path-to-plugin-dir> --audit
 
 Reviewers MUST verify every item below before merging any plugin PR:
 
-1. **SQL Injection (`db:own`)**
+1. **SQL Injection & Database Scope (`db:own`)**
    - [ ] All queries use `ctx.db.query/first/execute(text, params)`, `ctx.db.sql\`...\``, or `ctx.db.table('name')` identifiers.
    - [ ] Zero string concatenation or raw template interpolation passed to `PluginDb`.
    - [ ] No SQL comments (`--`, `/*`), dollar quotes, `UNION SELECT`, `SELECT INTO`, or multi-statement queries.
+   - [ ] Any read against non-sensitive core tables (`workspaces`, `projects`, `cards`, `boards`, `members`, `invites`) is declared explicitly in `manifest.coreTables`. *(Note: On SQLite/D1, `assertPluginSqlAllowed` is a best-effort tripwire for operator-trusted plugins; true database-level `NOLOGIN` role & schema isolation is enforced on PostgreSQL.)*
    - [ ] Tested on both `sqlite` and `postgres` when both dialects are declared in `manifest.dialects`.
 2. **Cross-Site Scripting & CSP (`ui:register`, `cards:register`, `mentions:register`)**
    - [ ] UI renders plain escaped React text by default; any rich HTML passes through `sanitizePluginHtml()` (`@burrow/sdk`).

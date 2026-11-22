@@ -1933,6 +1933,7 @@ export interface InstalledPluginInfo {
   permissions: string[];
   network: string[];
   configKeys: string[];
+  coreTables?: string[];
   dialects: string[];
   dependencies: string[];
   enabled: boolean;

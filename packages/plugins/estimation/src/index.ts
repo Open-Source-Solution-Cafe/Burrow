@@ -7,6 +7,7 @@ export const ESTIMATION_MANIFEST: PluginManifest = {
   version: '0.1.0',
   sdkVersion: '^0.4.0',
   permissions: ['db:own', 'routes:api', 'events:read', 'mentions:register'],
+  coreTables: ['cards', 'boards', 'projects'],
   description:
     'Community-style showcase plugin adding card point estimation, sprint @-mentions, and workspace summaries.',
 };

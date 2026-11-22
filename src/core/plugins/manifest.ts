@@ -26,6 +26,20 @@ export const VALID_PLUGIN_PERMISSIONS: ReadonlySet<Permission> = new Set<Permiss
   'ui:register',
 ]);
 
+export const ALLOWLISTABLE_CORE_TABLES: ReadonlySet<string> = new Set<string>([
+  'workspaces',
+  'projects',
+  'project_files',
+  'members',
+  'invites',
+  'boards',
+  'board_columns',
+  'cards',
+  'notepads',
+  'tags',
+  'card_tags',
+]);
+
 export class PluginManifestError extends Error {
   constructor(
     public readonly pluginId: string,
@@ -197,6 +211,19 @@ export function validatePluginManifest(
       }
     }
   }
+  if (manifest.coreTables !== undefined) {
+    if (!Array.isArray(manifest.coreTables)) {
+      throw new PluginManifestError(manifest.id, 'coreTables must be an array');
+    }
+    for (const table of manifest.coreTables) {
+      if (typeof table !== 'string' || !ALLOWLISTABLE_CORE_TABLES.has(table)) {
+        throw new PluginManifestError(
+          manifest.id,
+          `table "${String(table)}" is not in the allowlistable core tables set`,
+        );
+      }
+    }
+  }
 }
 
 export function assertPluginDialectSupported(
@@ -206,7 +233,7 @@ export function assertPluginDialectSupported(
   if (manifest.dialects && !manifest.dialects.includes(activeDialect)) {
     throw new PluginManifestError(
       manifest.id,
-      `does not support active database dialect "${activeDialect}" (supports: ${manifest.dialects.join(', ')})`,
+      `does not support active dialect "${activeDialect}" (supported database dialects: ${manifest.dialects.join(', ')})`,
     );
   }
 }

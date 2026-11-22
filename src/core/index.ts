@@ -116,7 +116,14 @@ export {
   PluginManifestError,
   PLUGIN_ID_RE,
   VALID_PLUGIN_PERMISSIONS,
+  ALLOWLISTABLE_CORE_TABLES,
 } from './plugins/manifest';
+export {
+  pluginPostgresSchemaName,
+  pluginPostgresRoleName,
+  provisionPluginPostgresIsolation,
+  withPluginPostgresRole,
+} from './plugins/postgres-isolation';
 export {
   createPluginDb,
   assertPluginSqlAllowed,

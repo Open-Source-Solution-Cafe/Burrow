@@ -16,6 +16,7 @@ export interface PluginAdminView {
   permissions: readonly string[];
   network: readonly string[];
   configKeys: readonly string[];
+  coreTables: readonly string[];
   dialects: readonly string[];
   dependencies: readonly string[];
   enabled: boolean;
@@ -25,32 +26,77 @@ export interface PluginAdminView {
   consentSummary: string;
 }
 
-export function parseDisabledPluginsEnv(raw: unknown): Set<string> {
-  if (typeof raw !== 'string' || !raw.trim()) return new Set();
-  return new Set(
-    raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-  );
+export interface ParsedPluginsDisabled {
+  ids: Set<string>;
+  wildcardAll: boolean;
+}
+
+export function parseDisabledPluginsEnv(raw: unknown): ParsedPluginsDisabled {
+  const ids = new Set<string>();
+  let wildcardAll = false;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return { ids, wildcardAll };
+  }
+  for (const token of raw.split(',')) {
+    const trimmed = token.trim();
+    if (!trimmed) continue;
+    if (trimmed === '*') {
+      wildcardAll = true;
+    } else {
+      ids.add(trimmed);
+    }
+  }
+  return { ids, wildcardAll };
+}
+
+export interface PluginRuntimeRegistryOptions {
+  /** Canonical kill-switch env value (`PLUGINS_DISABLED`: comma-separated IDs or `*`). */
+  pluginsDisabledEnv?: unknown;
+  /** Deprecated alias (`DISABLED_PLUGINS`). Logs a warning when supplied without `PLUGINS_DISABLED`. */
+  disabledPluginsEnv?: unknown;
+  instanceManaged?: boolean;
 }
 
 /**
- * Runtime registry tracking loaded plugins, kill-switched IDs (`DISABLED_PLUGINS`),
- * and operator/admin enable-disable toggles without requiring a redeploy.
+ * Runtime registry tracking loaded plugins, kill-switched IDs (`PLUGINS_DISABLED` / deprecated
+ * `DISABLED_PLUGINS`), and operator/admin enable-disable toggles without requiring a redeploy.
  */
 export class PluginRuntimeRegistry {
   private readonly records = new Map<string, RegisteredPluginRecord>();
   private readonly envDisabled: Set<string>;
+  private readonly wildcardDisabled: boolean;
   private readonly instanceManaged: boolean;
 
-  constructor(options: { disabledPluginsEnv?: unknown; instanceManaged?: boolean } = {}) {
-    this.envDisabled = parseDisabledPluginsEnv(options.disabledPluginsEnv);
-    this.instanceManaged = Boolean(options.instanceManaged);
+  constructor(optionsOrDisabled: PluginRuntimeRegistryOptions | string = {}) {
+    const opts: PluginRuntimeRegistryOptions =
+      typeof optionsOrDisabled === 'string'
+        ? { pluginsDisabledEnv: optionsOrDisabled }
+        : optionsOrDisabled;
+
+    const canonicalRaw = opts.pluginsDisabledEnv;
+    const deprecatedRaw = opts.disabledPluginsEnv;
+
+    if (
+      typeof deprecatedRaw === 'string' &&
+      deprecatedRaw.trim().length > 0 &&
+      (typeof canonicalRaw !== 'string' || !canonicalRaw.trim())
+    ) {
+      console.warn('[plugins] DISABLED_PLUGINS is deprecated; use PLUGINS_DISABLED instead.');
+    }
+
+    const parsedCanonical = parseDisabledPluginsEnv(canonicalRaw);
+    const parsedDeprecated = parseDisabledPluginsEnv(deprecatedRaw);
+    this.envDisabled = new Set([...parsedCanonical.ids, ...parsedDeprecated.ids]);
+    this.wildcardDisabled = parsedCanonical.wildcardAll || parsedDeprecated.wildcardAll;
+    this.instanceManaged = Boolean(opts.instanceManaged);
+  }
+
+  private isKillSwitchedByEnv(pluginId: string): boolean {
+    return this.wildcardDisabled || this.envDisabled.has(pluginId);
   }
 
   register(manifest: PluginManifest, opts: { firstPartyCore?: boolean } = {}): RegisteredPluginRecord {
-    const killSwitched = this.envDisabled.has(manifest.id);
+    const killSwitched = this.isKillSwitchedByEnv(manifest.id);
     const record: RegisteredPluginRecord = {
       manifest,
       enabled: !killSwitched,
@@ -63,7 +109,7 @@ export class PluginRuntimeRegistry {
   }
 
   isEnabled(pluginId: string): boolean {
-    if (this.envDisabled.has(pluginId)) return false;
+    if (this.isKillSwitchedByEnv(pluginId)) return false;
     const rec = this.records.get(pluginId);
     return rec ? rec.enabled && !rec.killSwitched : true;
   }
@@ -72,7 +118,7 @@ export class PluginRuntimeRegistry {
     const rec = this.records.get(pluginId);
     if (!rec) return null;
     if (rec.killSwitched && enabled) {
-      throw new Error(`Plugin "${pluginId}" is kill-switched by DISABLED_PLUGINS environment setting`);
+      throw new Error(`Plugin "${pluginId}" is kill-switched by PLUGINS_DISABLED environment setting`);
     }
     rec.enabled = enabled;
     return rec;
@@ -91,6 +137,7 @@ export class PluginRuntimeRegistry {
       permissions: rec.manifest.permissions,
       network: rec.manifest.network ?? [],
       configKeys: rec.manifest.configKeys ?? [],
+      coreTables: rec.manifest.coreTables ?? [],
       dialects: rec.manifest.dialects ?? ['sqlite', 'postgres'],
       dependencies: rec.manifest.dependencies ?? [],
       enabled: rec.enabled && !rec.killSwitched,
