@@ -8,8 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **SDK & ESLint Licensing Audit (`docs/plugin-architecture/LICENSING.md`)**: Documented the MIT/AGPL boundary for `@burrow/sdk` and `@burrow/eslint-plugin`, verifying zero shared AGPL core code, sole authorship via git history and `CLA.md`, public npm `0.x` scope availability status, and the remaining legal sign-off item for direct core imports.
 
 ### Changed
+- **Owner Decisions & Merge Runbook (`docs/plugin-architecture/DECISIONS.md`, `docs/plugin-architecture/HANDOFF.md`)**: Recorded confirmed core domain scope (`D5`), clean-room SDK licensing checks (`D3`), per-plugin Hono RPC client guidance, public npm `0.x` release readiness, and the red-team-first `--no-ff` merge and tag sequence.
 
 ### Deprecated
 

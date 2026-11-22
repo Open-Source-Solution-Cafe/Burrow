@@ -11,7 +11,7 @@
 Burrow exposes a safe-by-default, capability-scoped plugin architecture across server (Node PostgreSQL / SQLite & Cloudflare Workers D1) and web (Vite + React + TanStack Router) while keeping public Burrow 100% standalone and free of commercial coupling (`node scripts/check-decoupling.mjs` verified with 0 violations).
 
 ### Workspace & Package Split (`Burrow`)
-- **`packages/sdk` (`@burrow/sdk`)**: Publishable MIT-licensed contract package building ESM + `.d.ts` into `dist/` (`PluginManifest`, `coreTables`, `network`, `configKeys`, `sql` template tag, `db.table()`, `sanitizePluginHtml()`, `sanitizePluginProps()`, `ctx.defineRoute`, `ctx.requireRole`, `ctx.requireWorkspaceAccess`, `ctx.fetch`, `ctx.storage`, `ctx.log`, `ctx.config`, `formatPluginConsentSummary`).
+- **`packages/sdk` (`@burrow/sdk`)**: Publishable MIT-licensed contract package building ESM + `.d.ts` into `dist/` (`PluginManifest`, `coreTables`, `network`, `configKeys`, `sql` template tag, `db.table()`, `sanitizePluginHtml()`, `sanitizePluginProps()`, `ctx.defineRoute`, `ctx.requireRole`, `ctx.requireWorkspaceAccess`, `ctx.fetch`, `ctx.storage`, `ctx.log`, `ctx.config`, `formatPluginConsentSummary`). Plugins export their own route types + typed web client helpers (`hc<typeof pluginRouter>`) independently of core `AppType`. See [LICENSING.md](./LICENSING.md) for MIT/AGPL boundary checks.
 - **`packages/eslint-plugin` (`@burrow/eslint-plugin`)**: MIT static analysis rules (`no-unsafe-eval`, `no-unsanitized-html`, `no-raw-fetch`, `no-process-env`, `no-string-sql`, `no-child-process`) executed by `pnpm run plugin:validate`.
 - **`packages/core` (`@burrow/core`)**: Hono app composition (`createCoreApp`), `PluginEventBus`, `MentionSourceRegistry`, `plugin_migrations` runner, `PluginDb`, PostgreSQL database-enforced isolation (`provisionPluginPostgresIsolation`, `withPluginPostgresRole`), SSRF-hardened `safe-fetch`, prefix-scoped `plugin-storage`, secret-redacting `logger`, and `PLUGINS_DISABLED` (`*` or comma list; deprecated alias `DISABLED_PLUGINS`) + `/api/plugins` admin toggle UI.
 - **`packages/web` (`@burrow/web`)**: `mountBurrowWeb({ plugins })`, `createBurrowRouter(plugins)`, `WebPluginRegistryProvider`, prop sanitization across slots, card type selector (`QuickAddCard` / `CardPanel`), and Workspace Settings → Installed Plugins (`PluginsSection`).
@@ -59,13 +59,17 @@ pnpm run build:web
 
 ## 4. Merge & Submodule Pinning Runbook (Critical)
 
-1. **NEVER Squash-Merge `Burrow`**:
+1. **Red-Team Gate First**:
+   - Run the red team against `feat/plugin-hardening`, fix all Critical and High findings, and re-run until clean before merging.
+2. **NEVER Squash-Merge `Burrow`**:
    - Downstream repositories pin exact `Burrow` commit SHAs in `vendor/burrow`. Squash-merging rewrites history and orphans any `vendor/burrow` gitlink referencing commits on `feat/plugin-hardening`.
-   - Always merge `Burrow` (`feat/plugin-hardening` -> `master`) using a standard merge commit (`git merge --no-ff`) or fast-forward merge (`git merge --ff-only`).
-2. **Re-Pin Downstream Submodule After Merge**:
+   - Always merge `Burrow`: `git switch master && git merge --no-ff feat/plugin-hardening` (never squash).
+3. **Re-Pin Downstream Submodule After Merge**:
    - After merging `Burrow` onto `master`, record the merged commit hash (`MERGED_SHA`), update `vendor/burrow` in the downstream repo (`git -C vendor/burrow fetch origin ; git -C vendor/burrow checkout <MERGED_SHA>`), commit the updated gitlink + `pnpm-lock.yaml`, and verify with `node scripts/check-pinned-burrow.mjs`.
+4. **Merge Downstream with `--no-ff` & Tag Both Repos**:
+   - Merge downstream `feat/plugin-hardening` into `main` using `git merge --no-ff` and tag both repositories at their merge commits for clean rollback.
 
 ---
 
-## 5. Open Owner Decisions
-See [DECISIONS.md](./DECISIONS.md) (`D1`–`D5` and Open Questions 1–3, including D1 edge test harness disposition) before merging `feat/plugin-hardening` to `master` / `main`.
+## 5. Governance & Licensing References
+See [DECISIONS.md](./DECISIONS.md) (decisions `D1`–`D5`, npm `0.x` unstable publish plan, and `@burrow` scope verification) and [LICENSING.md](./LICENSING.md) (MIT vs. AGPL boundary verification).
