@@ -1,6 +1,7 @@
 {
   "files": [],
   "references": [
+    { "path": "./packages/sdk" },
     { "path": "./tsconfig.core.json" },
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.worker.json" },

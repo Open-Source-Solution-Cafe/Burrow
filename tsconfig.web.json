@@ -18,8 +18,18 @@
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@burrow/sdk": ["./packages/sdk/src/index.ts"],
+      "@burrow/core": ["./packages/core/src/index.ts"],
+      "@burrow/core/*": ["./src/core/*"],
+      "@burrow/web": ["./packages/web/src/index.ts"],
+      "@burrow/web/*": ["./src/web/*"],
+      "@burrow/plugins": ["./packages/plugins/src/index.ts"],
+      "@burrow/plugins/*": ["./packages/plugins/*"]
+    }
   },
-  "include": ["src/web", "src/shared"],
-  "references": [{ "path": "./tsconfig.worker.json" }]
+  "include": ["src/web", "src/shared", "packages/web/src"],
+  "references": [{ "path": "./packages/sdk" }, { "path": "./tsconfig.worker.json" }]
 }

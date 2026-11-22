@@ -6,6 +6,15 @@ import path from 'node:path';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   root: path.resolve(import.meta.dirname),
+  resolve: {
+    alias: {
+      '@burrow/sdk': path.resolve(import.meta.dirname, 'packages/sdk/src/index.ts'),
+      '@burrow/core': path.resolve(import.meta.dirname, 'packages/core/src/index.ts'),
+      '@burrow/web': path.resolve(import.meta.dirname, 'packages/web/src/index.ts'),
+      '@burrow/worker': path.resolve(import.meta.dirname, 'packages/worker/src/index.ts'),
+      '@burrow/plugins': path.resolve(import.meta.dirname, 'packages/plugins/src/index.ts'),
+    },
+  },
   build: {
     outDir: 'dist/web',
     emptyOutDir: true,

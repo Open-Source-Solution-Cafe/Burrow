@@ -17,8 +17,16 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true
+    "noUnusedParameters": true,
+    "baseUrl": ".",
+    "paths": {
+      "@burrow/sdk": ["./packages/sdk/src/index.ts"],
+      "@burrow/core": ["./packages/core/src/index.ts"],
+      "@burrow/core/*": ["./src/core/*"],
+      "@burrow/plugins": ["./packages/plugins/src/index.ts"],
+      "@burrow/plugins/*": ["./packages/plugins/*"]
+    }
   },
   "include": ["src/core"],
-  "references": [{ "path": "./tsconfig.worker.json" }]
+  "references": [{ "path": "./packages/sdk" }, { "path": "./tsconfig.worker.json" }]
 }
