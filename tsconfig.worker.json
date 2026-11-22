@@ -40,6 +40,9 @@
     "packages/worker/src",
     "packages/plugins/src",
     "packages/plugins/hello/src",
+    "packages/plugins/public-sharing/src",
+    "packages/plugins/workspace-export/src",
+    "packages/plugins/estimation/src",
     "tests/api",
     "tests/unit",
     "tests/adapters"

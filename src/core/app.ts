@@ -42,11 +42,8 @@ import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
 import { createSystemRoutes } from './routes/system';
 import { createFeatureFlagRoutes } from './routes/feature-flags';
-import { createWorkspaceExportRoutes } from './routes/workspace-export';
-import {
-  createShareManagementRoutes,
-  createPublicShareViewerRoutes,
-} from './routes/public-shares';
+import { createPublicSharingPlugin } from '../../packages/plugins/public-sharing/src/index';
+import { createWorkspaceExportPlugin } from '../../packages/plugins/workspace-export/src/index';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
 import type { BurrowServerPlugin } from '@burrow/sdk';
 import { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
@@ -144,6 +141,29 @@ export function createCoreApp(
     storage,
     email: emailProvider,
   };
+
+  const registeredIds = new Set((options.plugins ?? []).map((p) => p.manifest.id));
+  const builtinPlugins: BurrowServerPlugin[] = [];
+  if (!registeredIds.has('public-sharing')) {
+    builtinPlugins.push(createPublicSharingPlugin({ policy }));
+  }
+  if (!registeredIds.has('workspace-export')) {
+    builtinPlugins.push(createWorkspaceExportPlugin({ policy, events }));
+  }
+  const builtinLoaded = builtinPlugins.length
+    ? loadServerPlugins({
+        plugins: builtinPlugins,
+        infra: effectiveInfra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        middleware: {
+          requireIdentity: requireIdentityMiddleware,
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
   const trimmedBootstrapToken = bootstrapToken?.trim() ?? '';
   const hasBootstrapToken = trimmedBootstrapToken.length > 0;
   const projects = new ProjectService(
@@ -260,24 +280,6 @@ export function createCoreApp(
   const featureFlagRoutes = createFeatureFlagRoutes({
     workspaces: repositories.workspaces,
     members: repositories.members,
-    policy,
-    env: infra.env,
-  });
-  const workspaceExportRoutes = createWorkspaceExportRoutes({
-    repositories,
-    storage,
-    policy,
-    env: infra.env,
-    events,
-  });
-  const shareManagementRoutes = createShareManagementRoutes({
-    repositories,
-    policy,
-    env: infra.env,
-  });
-  const publicShareViewerRoutes = createPublicShareViewerRoutes({
-    repositories,
-    storage,
     policy,
     env: infra.env,
   });
@@ -606,14 +608,11 @@ export function createCoreApp(
 
       .route('/api/workspaces', workspaceRoutes)
       .route('/api/workspaces', featureFlagRoutes)
-      .route('/api/workspaces', workspaceExportRoutes)
       .route('/api/workspaces/:wid/projects', projectRoutes)
       .route('/api/system', systemRoutes)
       .route('/api', workspaceViewRoutes)
       .route('/api', projectResourceRoutes)
       .route('/api', projectFileRoutes)
-      .route('/api', shareManagementRoutes)
-      .route('/api/public/shares', publicShareViewerRoutes)
       .delete('/api/workspaces/:wid/projects/:id', createExplicitWorkspaceMiddleware(repositories.members), requireRole('owner'), zValidator('query', deleteProjectQuerySchema), async (c) => {
         await projects.permanentDeleteProject({
           workspaceId: c.get('workspaceId'),
@@ -999,7 +998,7 @@ export function createCoreApp(
         }
       });
 
-  for (const { mountPath, router } of loadedPlugins.pluginRoutes) {
+  for (const { mountPath, router } of [...builtinLoaded.pluginRoutes, ...loadedPlugins.pluginRoutes]) {
     baseApp.route(mountPath, router);
   }
 

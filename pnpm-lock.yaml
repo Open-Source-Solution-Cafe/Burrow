@@ -192,6 +192,18 @@ importers:
         specifier: workspace:*
         version: link:../../sdk
 
+  packages/plugins/public-sharing:
+    dependencies:
+      '@burrow/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+
+  packages/plugins/workspace-export:
+    dependencies:
+      '@burrow/sdk':
+        specifier: workspace:*
+        version: link:../../sdk
+
   packages/sdk: {}
 
   packages/web: {}
