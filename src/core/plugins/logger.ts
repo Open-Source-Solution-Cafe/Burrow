@@ -55,22 +55,30 @@ export function redactSecrets(input: string, secretValues: readonly string[] = [
   return out;
 }
 
+const MAX_META_SANITIZE_DEPTH = 32;
+
 export function sanitizeMetaValue(
   value: unknown,
   secretValues: readonly string[],
   depth = 0,
+  seen: WeakSet<object> = new WeakSet(),
 ): unknown {
-  if (depth > 5 || value === null || value === undefined) return value;
+  if (value === null || value === undefined) return value;
   if (typeof value === 'string') return redactSecrets(value, secretValues);
   if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (depth > MAX_META_SANITIZE_DEPTH) return '[TRUNCATED]';
   if (value instanceof Error) {
     return {
       name: value.name,
       message: redactSecrets(value.message, secretValues),
     };
   }
+  if (typeof value === 'object') {
+    if (seen.has(value)) return '[Circular]';
+    seen.add(value);
+  }
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeMetaValue(item, secretValues, depth + 1));
+    return value.map((item) => sanitizeMetaValue(item, secretValues, depth + 1, seen));
   }
   if (typeof value === 'object') {
     const out: Record<string, unknown> = {};
@@ -78,7 +86,7 @@ export function sanitizeMetaValue(
       if (SECRET_KEY_NAME_RE.test(k)) {
         out[k] = '[REDACTED]';
       } else {
-        out[k] = sanitizeMetaValue(v, secretValues, depth + 1);
+        out[k] = sanitizeMetaValue(v, secretValues, depth + 1, seen);
       }
     }
     return out;
