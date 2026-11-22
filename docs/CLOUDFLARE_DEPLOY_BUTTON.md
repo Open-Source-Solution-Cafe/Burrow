@@ -26,6 +26,38 @@ Burrow's Worker entrypoint (`src/worker/index.ts` → `ensureWorkerRuntimeEnv` i
 
 ---
 
+## One-Click Automatic Upgrades (Sync Repo & Rebuild)
+
+Burrow checks for new upstream releases automatically **every hour** (and immediately when you click **Check for Updates** in **Settings → Features & System → System & Core Updates**). When a newer version is available, workspace owners see a dismissible top banner, sidebar badge, and Settings tab indicator.
+
+Because Cloudflare Workers cannot execute `git` or rebuild themselves inside the edge isolate, one-click upgrades trigger your Git host (GitLab CI or GitHub Actions) to run `node scripts/sync-upstream.mjs` — which safely merges upstream Burrow while preserving your custom `wrangler.jsonc` bindings and `package.json` name — and pushes the commit back so **Cloudflare Workers Builds** rebuilds and redeploys automatically:
+
+### GitLab + Cloudflare Workers Builds (Included `.gitlab-ci.yml`)
+
+1. In GitLab → **Settings → Access Tokens**, create a Project Access Token with role **Maintainer** and scope **`write_repository`**.
+2. In GitLab → **Settings → CI/CD → Variables**, add `BURROW_SYNC_TOKEN` (Masked & Protected) with that token value.
+3. In GitLab → **Settings → CI/CD → Pipeline trigger tokens**, create a trigger token and copy the trigger URL:
+   ```text
+   https://gitlab.com/api/v4/projects/<PROJECT_ID>/trigger/pipeline?token=<TRIGGER_TOKEN>&ref=main
+   ```
+4. In Cloudflare Dashboard → your Worker → **Settings → Variables and Secrets**, add `SELF_UPDATE_WEBHOOK_URL` with that trigger URL.
+5. Click **Upgrade Now** in Burrow whenever an update banner appears — GitLab CI syncs upstream Burrow and Cloudflare Workers Builds automatically redeploys.
+
+### GitHub + Cloudflare Workers Builds
+
+1. Add a workflow `.github/workflows/sync-upstream.yml` to your cloned repository listening to `repository_dispatch` (`types: [burrow-update]`) that runs `node scripts/sync-upstream.mjs` and pushes to your default branch.
+2. In Cloudflare Worker Secrets, set:
+   - `SELF_UPDATE_WEBHOOK_URL=https://api.github.com/repos/<OWNER>/<REPO>/dispatches`
+   - `SELF_UPDATE_WEBHOOK_TOKEN=<fine-grained PAT with contents: write>`
+
+### Manual Sync (Local CLI)
+
+```bash
+pnpm run sync:upstream && pnpm install && pnpm run deploy
+```
+
+---
+
 ## CLI Alternative (`pnpm run setup -r`)
 
 For operators who want automated Time Travel bookmarks, interactive domain binding, and CLI-generated secrets printed once at install time, `pnpm run setup -r` remains fully supported.

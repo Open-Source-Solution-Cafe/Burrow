@@ -33,17 +33,17 @@ describe('System Version & Update Logic', () => {
     it('fetches release tag and strips v prefix', async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ tag_name: 'v0.3.0' }),
+        json: async () => ({ tag_name: 'v9.3.0' }),
       });
       vi.stubGlobal('fetch', fetchMock);
 
       const latest = await fetchLatestReleaseVersion(APP_VERSION);
-      expect(latest).toBe('0.3.0');
+      expect(latest).toBe('9.3.0');
       expect(fetchMock).toHaveBeenCalledTimes(1);
 
       // Cached on subsequent call within TTL
       const cached = await fetchLatestReleaseVersion(APP_VERSION);
-      expect(cached).toBe('0.3.0');
+      expect(cached).toBe('9.3.0');
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
@@ -116,7 +116,7 @@ describe('System Version & Update Logic', () => {
         listByUser: vi.fn().mockResolvedValue([{ id: 'w1', role: 'owner' }]),
         isInstanceOwner: vi.fn().mockResolvedValue(true),
       } as any;
-      const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       vi.stubGlobal('fetch', fetchMock);
 
       const routes = createSystemRoutes({
@@ -148,7 +148,7 @@ describe('System Version & Update Logic', () => {
         ]),
         isInstanceOwner: vi.fn().mockResolvedValue(false),
       } as any;
-      const fetchMock = vi.fn().mockResolvedValue({ status: 200 });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
       vi.stubGlobal('fetch', fetchMock);
 
       const routes = createSystemRoutes({

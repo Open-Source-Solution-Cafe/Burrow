@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.4.0] - 2026-11-22
+
+### Added
+- **One-Click Upstream Sync, Automatic Update Notifications & Webhook Token Support (`.gitlab-ci.yml`, `scripts/sync-upstream.mjs`, `src/core/routes/system.ts`, `UpdateAvailableBanner.tsx`, `SystemUpdateSection.tsx`, `Sidebar.tsx`, `SettingsView.tsx`)**: Added an automatic hourly update check (`refetchInterval: 60 min`, server cache 60 min) with a dismissible top-of-app `UpdateAvailableBanner` for workspace owners, clickable sidebar and Settings tab indicators linking directly to `/w/:workspaceId/settings#updates`, `scripts/sync-upstream.mjs` + `.gitlab-ci.yml` to safely merge upstream Burrow while preserving custom `wrangler.jsonc` bindings and `package.json` names (automatically triggering Cloudflare Workers Builds on push), and `SELF_UPDATE_WEBHOOK_TOKEN` + GitLab/GitHub/generic webhook dispatch formatting with non-OK HTTP error reporting.
+- **Accurate Latest Release Resolution (`src/core/routes/system.ts`)**: Upgraded `fetchLatestReleaseInfo` to select the highest SemVer tag from `/tags`, fall back to upstream `package.json` when release tags lag behind `master`, and never display a `latestVersion` older than `currentVersion`.
 ## [0.3.1] - 2026-11-22
 
 ### Fixed

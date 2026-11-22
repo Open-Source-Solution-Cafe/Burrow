@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hono } from 'hono';
-import { createSystemRoutes, isNewerVersion, resetReleaseCacheForTests } from './system';
+import {
+  buildWebhookDispatchRequest,
+  createSystemRoutes,
+  detectWebhookProvider,
+  isNewerVersion,
+  resetReleaseCacheForTests,
+} from './system';
 
 describe('System Version & Update Routes (Milestone 1)', () => {
   const originalFetch = globalThis.fetch;
@@ -89,5 +95,115 @@ describe('System Version & Update Routes (Milestone 1)', () => {
     expect(body.allowSelfUpdate).toBe(false);
     expect(body.updateAvailable).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('picks the highest SemVer tag, falls back to upstream package.json, and never reports a version older than current', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/releases/latest')) {
+        return new Response('Not Found', { status: 404 });
+      }
+      if (url.includes('/tags')) {
+        return new Response(
+          JSON.stringify([{ name: 'v0.1.0' }, { name: 'v0.2.0' }, { name: 'not-semver' }]),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      if (url.includes('package.json')) {
+        return new Response(JSON.stringify({ version: '9.2.0' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('Not Found', { status: 404 });
+    }) as typeof fetch;
+
+    const app = new Hono<any>().route(
+      '/api/system',
+      createSystemRoutes({ workspaces: {} as any, runtime: 'worker' }),
+    );
+
+    const res = await app.request('/api/system/version');
+    const body = (await res.json()) as any;
+    expect(body.latestVersion).toBe('9.2.0');
+    expect(body.updateAvailable).toBe(true);
+    expect(body.checkIntervalMinutes).toBe(60);
+    expect(typeof body.checkedAt).toBe('string');
+
+    // When upstream feeds only have an older version (e.g. v0.1.0), clamp to currentVersion
+    resetReleaseCacheForTests();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/releases/latest')) return new Response('Not Found', { status: 404 });
+      if (url.includes('/tags')) {
+        return new Response(JSON.stringify([{ name: 'v0.1.0' }]), { status: 200 });
+      }
+      if (url.includes('package.json')) {
+        return new Response(JSON.stringify({ version: '0.1.0' }), { status: 200 });
+      }
+      return new Response('Not Found', { status: 404 });
+    }) as typeof fetch;
+
+    const clampedRes = await app.request('/api/system/version?refresh=1');
+    const clampedBody = (await clampedRes.json()) as any;
+    expect(clampedBody.latestVersion).toBe(clampedBody.currentVersion);
+    expect(clampedBody.updateAvailable).toBe(false);
+  });
+
+  it('detects GitHub, GitLab, and generic webhooks and surfaces non-OK dispatch errors', async () => {
+    expect(detectWebhookProvider('https://gitlab.com/api/v4/projects/123/trigger/pipeline?token=abc&ref=main')).toBe('gitlab');
+    expect(detectWebhookProvider('https://api.github.com/repos/owner/repo/dispatches')).toBe('github');
+    expect(detectWebhookProvider('https://hooks.example.com/redeploy')).toBe('webhook');
+
+    const ghDispatch = buildWebhookDispatchRequest({
+      webhookUrl: 'https://api.github.com/repos/owner/repo/dispatches',
+      webhookToken: 'ghp_secret',
+      triggeredBy: 'user-1',
+      currentVersion: '0.3.1',
+      targetVersion: '0.4.0',
+    });
+    expect(ghDispatch.headers.Authorization).toBe('Bearer ghp_secret');
+    expect(JSON.parse(ghDispatch.body ?? '{}').event_type).toBe('burrow-update');
+
+    const glDispatch = buildWebhookDispatchRequest({
+      webhookUrl: 'https://gitlab.com/api/v4/projects/42/trigger/pipeline',
+      webhookToken: 'glptt-secret',
+      webhookRef: 'main',
+      triggeredBy: 'user-1',
+      currentVersion: '0.3.1',
+      targetVersion: '0.4.0',
+    });
+    expect(JSON.parse(glDispatch.body ?? '{}')).toEqual({ ref: 'main', token: 'glptt-secret' });
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('gitlab.com')) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      return new Response('Not Found', { status: 404 });
+    }) as typeof fetch;
+
+    const app = new Hono<any>()
+      .use('*', async (c, next) => {
+        c.set('identity', { userId: 'owner-1' });
+        await next();
+      })
+      .route(
+        '/api/system',
+        createSystemRoutes({
+          workspaces: { isInstanceOwner: async () => true } as any,
+          env: {
+            SELF_UPDATE_WEBHOOK_URL:
+              'https://gitlab.com/api/v4/projects/42/trigger/pipeline?token=bad&ref=main',
+          },
+          runtime: 'worker',
+        }),
+      );
+
+    const failRes = await app.request('/api/system/update', { method: 'POST' });
+    expect(failRes.status).toBe(502);
+    const failBody = (await failRes.json()) as any;
+    expect(failBody.error.code).toBe('webhook_failed');
+    expect(failBody.error.message).toContain('HTTP 401');
   });
 });

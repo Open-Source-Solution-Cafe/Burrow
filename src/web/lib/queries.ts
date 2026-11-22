@@ -206,7 +206,10 @@ export interface SystemVersionInfo {
   allowSelfUpdate: boolean;
   releaseNotesUrl?: string;
   publishedAt?: string | null;
+  checkedAt?: string;
+  checkIntervalMinutes?: number;
   webhookConfigured?: boolean;
+  webhookProvider?: 'github' | 'gitlab' | 'webhook' | null;
   runtime?: 'worker' | 'node-sqlite' | 'docker-postgres';
   maxUploadBytes?: number;
 }
@@ -220,6 +223,8 @@ export function useSystemVersion() {
       return (await res.json()) as SystemVersionInfo;
     },
     staleTime: 1000 * 60 * 30,
+    refetchInterval: 1000 * 60 * 60,
+    refetchOnWindowFocus: true,
     retry: false,
   });
 }

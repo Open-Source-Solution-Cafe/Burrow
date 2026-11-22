@@ -3,6 +3,7 @@ import { Outlet } from '@tanstack/react-router';
 import { Menu } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { Sidebar } from './Sidebar';
+import { UpdateAvailableBanner } from './UpdateAvailableBanner';
 import { CommandPalette } from '../CommandPalette';
 import { ShortcutHelp } from './ShortcutHelp';
 import { useTranslation } from '../../lib/i18n';
@@ -72,6 +73,9 @@ export function AppShell() {
             <span className="text-xs">⌘K</span>
           </button>
         </header>
+
+        {/* Update available banner (instance owners, self-hosted only) */}
+        <UpdateAvailableBanner />
 
         {/* Dynamic Page Content */}
         <main className="flex-1 min-h-0 overflow-hidden flex flex-col">

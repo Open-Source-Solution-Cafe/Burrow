@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate, useParams } from '@tanstack/react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  ArrowUpCircle,
   Check,
   Clock,
   FileText,
@@ -342,18 +343,39 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
       {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
         <div className="border-t border-hair py-1">
-          <a
-            href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 theme-radius-xs transition"
-          >
-            <span className="flex items-center gap-1.5 font-medium">
-              <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
-              <span>{t('sidebar.updateAvailable')}</span>
-            </span>
-            <span className="font-mono text-[10px]">v{systemVersion.latestVersion}</span>
-          </a>
+          {workspaceId ? (
+            <button
+              type="button"
+              onClick={() => {
+                setAccountMenuOpen(false);
+                navigate({ ...workspaceSettingsTarget(workspaceId), hash: 'updates' });
+                onCloseMobile?.();
+              }}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 theme-radius-xs transition cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
+                <span>{t('sidebar.updateAvailable')}</span>
+              </span>
+              <span className="font-mono text-[10px]">v{systemVersion.latestVersion}</span>
+            </button>
+          ) : (
+            <a
+              href={
+                systemVersion.releaseNotesUrl ||
+                'https://github.com/Open-Source-Solution-Cafe/Burrow/releases'
+              }
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-accent bg-accent/10 hover:bg-accent/20 theme-radius-xs transition"
+            >
+              <span className="flex items-center gap-1.5 font-medium">
+                <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
+                <span>{t('sidebar.updateAvailable')}</span>
+              </span>
+              <span className="font-mono text-[10px]">v{systemVersion.latestVersion}</span>
+            </a>
+          )}
         </div>
       )}
 
@@ -697,11 +719,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             </Link>
           )}
 
-          {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
-            <a
-              href="https://github.com/Open-Source-Solution-Cafe/Burrow/releases"
-              target="_blank"
-              rel="noopener noreferrer"
+          {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && workspaceId && (
+            <Link
+              {...workspaceSettingsTarget(workspaceId)}
+              hash="updates"
+              onClick={() => onCloseMobile?.()}
               className="mx-2 mb-1 px-2.5 py-1.5 theme-radius-md text-xs bg-accent/15 text-accent border border-accent/30 flex items-center justify-between gap-1.5 transition hover:bg-accent/25"
               title={`${t('sidebar.updateAvailable')}: v${systemVersion.latestVersion}`}
             >
@@ -709,7 +731,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 <span className="w-1.5 h-1.5 theme-radius-xs bg-accent animate-pulse" />
                 <span>{t('sidebar.updateAvailable')} (v{systemVersion.latestVersion})</span>
               </span>
-            </a>
+            </Link>
           )}
 
           {/* User footer */}
@@ -902,18 +924,18 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             )}
 
             {/* Update available indicator */}
-            {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && (
-              <a
-                href={systemVersion.releaseNotesUrl || 'https://github.com/Open-Source-Solution-Cafe/Burrow/releases'}
-                target="_blank"
-                rel="noopener noreferrer"
+            {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && workspaceId && (
+              <Link
+                {...workspaceSettingsTarget(workspaceId)}
+                hash="updates"
+                onClick={() => onCloseMobile?.()}
                 className="w-10 h-10 flex items-center justify-center transition cursor-pointer text-accent relative hover:bg-hi theme-radius-md"
-                title={`Update available (v${systemVersion.latestVersion})`}
-                aria-label={`Update available (v${systemVersion.latestVersion})`}
+                title={`${t('sidebar.updateAvailable')} (v${systemVersion.latestVersion})`}
+                aria-label={`${t('sidebar.updateAvailable')} (v${systemVersion.latestVersion})`}
               >
                 <span className="w-2 h-2 theme-radius-xs bg-accent absolute top-2 right-2 animate-pulse" />
-                <Clock className="w-[18px] h-[18px]" />
-              </a>
+                <ArrowUpCircle className="w-[18px] h-[18px]" />
+              </Link>
             )}
 
             {/* Theme Toggle */}

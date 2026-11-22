@@ -10,6 +10,8 @@ import * as deployLib from '../../scripts/lib.mjs';
 // @ts-expect-error untyped local .mjs script
 import * as deployScript from '../../scripts/deploy.mjs';
 // @ts-expect-error untyped local .mjs script
+import * as syncUpstreamScript from '../../scripts/sync-upstream.mjs';
+// @ts-expect-error untyped local .mjs script
 import * as demoResetLib from '../../scripts/demo-reset.mjs';
 
 const {
@@ -33,6 +35,7 @@ const {
 } = deployLib as any;
 
 const { isWorkersCiBuild, resolveWorkersCiConfigArgs } = deployScript as any;
+const { mergePreservedPackageName, mergePreservedWranglerConfig } = syncUpstreamScript as any;
 
 const {
   buildDemoSeedSql,
@@ -1249,6 +1252,45 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
           fs.rmSync(tmpDir, { recursive: true, force: true });
         }
       }
+    });
+
+    it('preserves custom wrangler.jsonc bindings and package.json name during sync-upstream upgrades', () => {
+      const upstreamWrangler = JSON.stringify({
+        name: 'burrow',
+        main: 'src/worker/index.ts',
+        compatibility_date: '2026-01-01',
+        d1_databases: [{ binding: 'DB', database_name: 'burrow', migrations_dir: 'migrations' }],
+        r2_buckets: [{ binding: 'FILES', bucket_name: 'burrow-files' }],
+      });
+      const userWrangler = JSON.stringify({
+        name: 'burrowgitdeploy',
+        main: 'src/worker/index.ts',
+        compatibility_date: '2025-01-01',
+        d1_databases: [
+          {
+            binding: 'DB',
+            database_name: 'burrowgitdeploy-db',
+            database_id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+            migrations_dir: 'migrations',
+          },
+        ],
+        r2_buckets: [{ binding: 'FILES', bucket_name: 'burrowgitdeploy-files' }],
+      });
+
+      const mergedWrangler = JSON.parse(
+        mergePreservedWranglerConfig(upstreamWrangler, userWrangler),
+      );
+      expect(mergedWrangler.name).toBe('burrowgitdeploy');
+      expect(mergedWrangler.compatibility_date).toBe('2026-01-01');
+      expect(mergedWrangler.d1_databases[0].database_id).toBe(
+        'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      );
+      expect(mergedWrangler.r2_buckets[0].bucket_name).toBe('burrowgitdeploy-files');
+
+      const upstreamPkg = '{\n  "name": "burrow",\n  "version": "0.4.0"\n}\n';
+      const mergedPkg = JSON.parse(mergePreservedPackageName(upstreamPkg, 'burrowgitdeploy'));
+      expect(mergedPkg.name).toBe('burrowgitdeploy');
+      expect(mergedPkg.version).toBe('0.4.0');
     });
   });
 });

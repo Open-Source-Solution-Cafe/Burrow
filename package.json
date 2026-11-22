@@ -1,7 +1,7 @@
 {
   "name": "burrow",
   "private": true,
-  "version": "0.3.1",
+  "version": "0.4.0",
   "packageManager": "pnpm@10.15.0",
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -52,6 +52,7 @@
     "db:generate": "drizzle-kit generate",
     "db:generate:postgres": "drizzle-kit generate --config drizzle.postgres.config.ts",
     "db:sync-d1": "node scripts/sync-d1-migrations.mjs",
+    "sync:upstream": "node scripts/sync-upstream.mjs",
     "hooks:install": "node scripts/install-hooks.mjs",
     "prepare": "node scripts/install-hooks.mjs",
     "inventory:storage": "tsx scripts/inventory-storage.mjs",

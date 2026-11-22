@@ -193,11 +193,18 @@ export function SettingsView() {
   const [deleteWorkspaceConfirmName, setDeleteWorkspaceConfirmName] = useState('');
   const [deletingWorkspace, setDeletingWorkspace] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
+  const systemVersion = useSystemVersion();
 
   useEffect(() => {
     const hash = location.hash || (typeof window !== 'undefined' ? window.location.hash : '');
     if (hash) {
       setActiveTab(resolveSettingsTabFromHash(hash));
+      const targetId = hash.replace(/^#/, '').toLowerCase();
+      if (targetId && typeof document !== 'undefined') {
+        requestAnimationFrame(() => {
+          document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
     }
   }, [location.hash]);
 
@@ -447,7 +454,13 @@ export function SettingsView() {
             ariaLabel="Settings sections"
             options={[
               { value: 'workspace', label: 'Workspace & Projects' },
-              { value: 'system', label: 'Features & System' },
+              {
+                value: 'system',
+                label:
+                  systemVersion.data?.updateAvailable && systemVersion.data?.allowSelfUpdate
+                    ? `Features & System • v${systemVersion.data.latestVersion}`
+                    : 'Features & System',
+              },
             ]}
           />
         </div>

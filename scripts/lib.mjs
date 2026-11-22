@@ -1050,6 +1050,8 @@ export function buildSecretPlan({
     'GITHUB_CLIENT_ID',
     'GITHUB_CLIENT_SECRET',
     'SELF_UPDATE_WEBHOOK_URL',
+    'SELF_UPDATE_WEBHOOK_TOKEN',
+    'SELF_UPDATE_WEBHOOK_REF',
   ]) {
     const val = env[optionalKey]?.trim();
     if (val) {
