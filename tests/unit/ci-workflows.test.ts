@@ -1,13 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error untyped local .mjs script
+import { extractReleaseNotes } from '../../scripts/extract-release-notes.mjs';
 
 const root = path.resolve('.');
 const ciWorkflowPath = path.join(root, '.github/workflows/ci.yml');
 const demoWorkflowPath = path.join(root, '.github/workflows/demo-reset.yml');
+const releaseWorkflowPath = path.join(root, '.github/workflows/release.yml');
 const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 const hasCiWorkflow = fs.existsSync(ciWorkflowPath);
 const hasDemoWorkflow = fs.existsSync(demoWorkflowPath);
+const hasReleaseWorkflow = fs.existsSync(releaseWorkflowPath);
 
 describe('GitHub Actions workflows security and coverage', () => {
   it('pins pnpm@10.15.0 in package.json', () => {
@@ -68,4 +72,27 @@ describe('GitHub Actions workflows security and coverage', () => {
       expect(demo).toContain('BURROW_ALLOW_DEMO_RESET');
     },
   );
+
+  it.skipIf(!hasReleaseWorkflow && !isGitHubActions)(
+    'auto-publishes GitHub Releases from package.json and CHANGELOG.md with least-privilege GITHUB_TOKEN',
+    () => {
+      const release = fs.readFileSync(releaseWorkflowPath, 'utf8');
+      expect(release).toContain('contents: write');
+      expect(release).toContain('gh release view');
+      expect(release).toContain('gh release create');
+      expect(release).toContain('scripts/extract-release-notes.mjs');
+      expect(release).not.toContain('CLOUDFLARE_API_TOKEN');
+      expect(release).not.toContain('DEMO_CLOUDFLARE');
+    },
+  );
+
+  it('extracts matching release notes section cleanly from CHANGELOG.md', () => {
+    const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
+    const notes040 = extractReleaseNotes(changelog, 'v0.4.0');
+    expect(notes040).toContain('### Added');
+    expect(notes040).toContain('UpdateAvailableBanner');
+    expect(notes040).not.toContain('## [0.3.1]');
+
+    expect(extractReleaseNotes(changelog, '99.99.99')).toBe('');
+  });
 });

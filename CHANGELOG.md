@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Automated GitHub Releases (`.github/workflows/release.yml`, `scripts/extract-release-notes.mjs`)**: Added an automatic GitHub Actions release workflow on `master` that auto-tags and publishes a GitHub Release with notes extracted from `CHANGELOG.md` whenever `package.json` introduces a new version.
 
 ### Changed
 

@@ -1,0 +1,72 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - package.json
+      - CHANGELOG.md
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-burrow
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: Auto-tag & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve version and publish release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          APP_VERSION="$(node -p "const m = require('fs').readFileSync('src/core/version.ts', 'utf8').match(/APP_VERSION\s*=\s*'([^']+)'/); m ? m[1] : ''")"
+
+          if [ -z "$VERSION" ] || [ "$VERSION" != "$APP_VERSION" ]; then
+            echo "Error: package.json ($VERSION) and src/core/version.ts ($APP_VERSION) are out of sync."
+            exit 1
+          fi
+
+          TAG="v${VERSION}"
+          echo "Checking GitHub Release for ${TAG}..."
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists — skipping."
+            exit 0
+          fi
+
+          node scripts/extract-release-notes.mjs "$VERSION" > /tmp/release-notes.md
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists — publishing GitHub Release for existing tag."
+            gh release create "$TAG" \
+              --title "Burrow ${TAG}" \
+              --notes-file /tmp/release-notes.md \
+              --latest
+          else
+            echo "Creating tag ${TAG} and publishing GitHub Release at ${GITHUB_SHA}."
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Burrow ${TAG}" \
+              --notes-file /tmp/release-notes.md \
+              --latest
+          fi
