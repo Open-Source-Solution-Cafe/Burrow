@@ -12,3 +12,4 @@ export {
   workspaceExportPlugin,
   type WorkspaceExportPluginDeps,
 } from '../workspace-export/src/index';
+export { ESTIMATION_MANIFEST, estimationServerPlugin } from '../estimation/src/index';

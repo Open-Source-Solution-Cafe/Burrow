@@ -1,0 +1,13 @@
+{
+  "name": "@burrow/plugin-estimation",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./web": "./src/web.tsx"
+  },
+  "dependencies": {
+    "@burrow/sdk": "workspace:*"
+  }
+}

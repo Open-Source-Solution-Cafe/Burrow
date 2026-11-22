@@ -42,7 +42,7 @@
     "packages/plugins/hello/src",
     "packages/plugins/public-sharing/src",
     "packages/plugins/workspace-export/src",
-    "packages/plugins/estimation/src",
+    "packages/plugins/estimation/src/index.ts",
     "tests/api",
     "tests/unit",
     "tests/adapters"

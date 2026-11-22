@@ -30,6 +30,6 @@
       "@burrow/plugins/*": ["./packages/plugins/*"]
     }
   },
-  "include": ["src/web", "src/shared", "packages/web/src"],
+  "include": ["src/web", "src/shared", "packages/web/src", "packages/plugins/estimation/src"],
   "references": [{ "path": "./packages/sdk" }, { "path": "./tsconfig.worker.json" }]
 }
