@@ -16,10 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
-- **Plugin-Owned Migration Table Prefix Guard (`src/core/plugins/plugin-db.ts`)**: Updated `assertOwnedPluginTableName()` to honor `ownedTables` explicitly created by a plugin's own migrations before checking sibling plugin prefixes, preventing false cross-plugin denials when a multi-segment table name begins with another plugin's prefix.
 
 ### Security
 
+## [0.6.3] - 2026-11-23
+
+### Fixed
+- **Plugin-Owned Migration Table Prefix Guard (`src/core/plugins/plugin-db.ts`)**: Updated `assertOwnedPluginTableName()` to honor `ownedTables` explicitly created by a plugin's own migrations before checking sibling plugin prefixes, preventing false cross-plugin denials when a multi-segment table name begins with another plugin's prefix.
 ## [0.6.2] - 2026-11-23
 
 ### Added
