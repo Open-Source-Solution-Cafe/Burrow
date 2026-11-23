@@ -510,7 +510,7 @@ function assertOwnedPluginTableName(
   options: AssertPluginSqlOptions,
   contextLabel = 'table access',
 ): void {
-  if (options.otherPluginPrefixes) {
+  if (options.otherPluginPrefixes && !options.ownedTables?.has(table)) {
     for (const otherPrefix of options.otherPluginPrefixes) {
       if (otherPrefix !== prefix && table.startsWith(otherPrefix)) {
         throw new PluginSqlAccessError(
