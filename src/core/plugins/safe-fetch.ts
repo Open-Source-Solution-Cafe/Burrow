@@ -1,4 +1,5 @@
 import type { PluginManifest } from '@burrow/sdk';
+import ipaddr from 'ipaddr.js';
 
 export class PluginNetworkAccessError extends Error {
   constructor(
@@ -23,71 +24,55 @@ const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2 MB
 const DEFAULT_MAX_REDIRECTS = 3;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const CROSS_ORIGIN_SENSITIVE_HEADERS = ['authorization', 'cookie', 'proxy-authorization'];
 
-function parseIpv4Octets(ip: string): [number, number, number, number] | null {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return null;
-  const nums: number[] = [];
-  for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
-    const n = Number.parseInt(part, 10);
-    if (n < 0 || n > 255) return null;
-    nums.push(n);
-  }
-  return [nums[0]!, nums[1]!, nums[2]!, nums[3]!];
+function isEmbeddedIpv4Blocked(hi: number, lo: number): boolean {
+  const v4 = new ipaddr.IPv4([(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff]);
+  return v4.range() !== 'unicast';
 }
 
 export function isBlockedIpAddress(rawIp: string): boolean {
-  const ip = rawIp.replace(/^\[|\]$/g, '').toLowerCase().split('%')[0] ?? '';
+  const ip = rawIp.replace(/^\[|\]$/g, '').trim().split('%')[0] ?? '';
   if (!ip) return true;
 
-  // IPv4 checks
-  const ipv4 = parseIpv4Octets(ip);
-  if (ipv4) {
-    const [a, b] = ipv4;
-    if (a === 0) return true; // 0.0.0.0/8
-    if (a === 10) return true; // 10.0.0.0/8
-    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
-    if (a === 127) return true; // 127.0.0.0/8 loopback
-    if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local / cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 private
-    if (a === 192 && b === 168) return true; // 192.168.0.0/16 private
-    if (a === 192 && b === 0 && ipv4[2] === 0) return true; // 192.0.0.0/24
-    if (a === 192 && b === 0 && ipv4[2] === 2) return true; // TEST-NET-1
-    if (a >= 224) return true; // multicast & reserved 240/4
-    return false;
-  }
-
-  // IPv6 checks
-  if (ip.includes(':')) {
-    if (ip === '::' || ip === '::1') return true;
-    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1 or ::ffff:7f00:1)
-    if (ip.startsWith('::ffff:')) {
-      const tail = ip.slice('::ffff:'.length);
-      if (parseIpv4Octets(tail)) {
-        return isBlockedIpAddress(tail);
-      }
-      const hexParts = tail.split(':');
-      if (hexParts.length === 2) {
-        const hi = Number.parseInt(hexParts[0]!, 16);
-        const lo = Number.parseInt(hexParts[1]!, 16);
-        if (!Number.isNaN(hi) && !Number.isNaN(lo)) {
-          const mapped = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
-          return isBlockedIpAddress(mapped);
-        }
-      }
-      return true;
+  try {
+    if (!ipaddr.isValid(ip)) return true;
+    const parsed = ipaddr.parse(ip);
+    if (parsed.kind() === 'ipv4') {
+      return parsed.range() !== 'unicast';
     }
-    const firstWord = ip.split(':')[0] || '0';
-    const val = Number.parseInt(firstWord, 16);
-    if (!Number.isNaN(val)) {
-      if ((val & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
-      if ((val & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
-      if ((val & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+    const v6 = parsed as ipaddr.IPv6;
+    if (v6.isIPv4MappedAddress()) {
+      return v6.toIPv4Address().range() !== 'unicast';
     }
+    const parts = v6.parts;
+    // IPv4-compatible IPv6 (::/96 -> 0:0:0:0:0:0:x:y)
+    if (
+      parts[0] === 0 &&
+      parts[1] === 0 &&
+      parts[2] === 0 &&
+      parts[3] === 0 &&
+      parts[4] === 0 &&
+      parts[5] === 0
+    ) {
+      if (parts[6] === 0 && (parts[7] === 0 || parts[7] === 1)) return true;
+      return isEmbeddedIpv4Blocked(parts[6]!, parts[7]!);
+    }
+    // NAT64 well-known prefix (64:ff9b::/96)
+    if (
+      parts[0] === 0x0064 &&
+      parts[1] === 0xff9b &&
+      parts[2] === 0 &&
+      parts[3] === 0 &&
+      parts[4] === 0 &&
+      parts[5] === 0
+    ) {
+      return isEmbeddedIpv4Blocked(parts[6]!, parts[7]!);
+    }
+    return v6.range() !== 'unicast';
+  } catch {
+    return true;
   }
-
-  return false;
 }
 
 export function isBlockedHostname(rawHost: string): boolean {
@@ -104,11 +89,14 @@ export function isBlockedHostname(rawHost: string): boolean {
   ) {
     return true;
   }
-  // Reject raw integer/hex/octal IP representations (e.g. 2130706433, 0x7f000001)
-  if (/^(?:0x[0-9a-f]+|0[0-7]+|\d+)$/i.test(host)) {
+  // Reject raw integer/hex/octal IP representations (e.g. 2130706433, 0x7f000001, 0177.0.0.1)
+  if (/^(?:0x[0-9a-f]+|0[0-7]+|\d+)(?:\.(?:0x[0-9a-f]+|0[0-7]+|\d+))*$/i.test(host)) {
     return true;
   }
-  return isBlockedIpAddress(host);
+  if (host.includes(':') || ipaddr.isValid(host)) {
+    return isBlockedIpAddress(host);
+  }
+  return false;
 }
 
 async function defaultResolveHostIps(hostname: string): Promise<string[]> {
@@ -127,7 +115,7 @@ async function validateTargetUrl(
   url: URL,
   allowedHosts: ReadonlySet<string>,
   resolveHostIps: (hostname: string) => Promise<string[]>,
-): Promise<void> {
+): Promise<string> {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new PluginNetworkAccessError(pluginId, `unsupported protocol "${url.protocol}"`);
   }
@@ -149,6 +137,12 @@ async function validateTargetUrl(
   }
 
   const ips = await resolveHostIps(hostname);
+  if (!ips || ips.length === 0) {
+    throw new PluginNetworkAccessError(
+      pluginId,
+      `DNS resolution returned no usable addresses for "${hostname}"`,
+    );
+  }
   for (const ip of ips) {
     if (isBlockedIpAddress(ip)) {
       throw new PluginNetworkAccessError(
@@ -157,6 +151,125 @@ async function validateTargetUrl(
       );
     }
   }
+  return ips[0]!;
+}
+
+async function fetchWithPinnedNodeSocket(
+  targetUrl: URL,
+  pinnedIp: string,
+  init: {
+    method: string;
+    headers: Headers;
+    body?: BodyInit | null;
+    timeoutMs: number;
+    maxBytes: number;
+    pluginId: string;
+  },
+): Promise<Response> {
+  const isHttps = targetUrl.protocol === 'https:';
+  const mod = isHttps ? await import('node:https') : await import('node:http');
+  const family = pinnedIp.includes(':') ? 6 : 4;
+  const headerObj: Record<string, string> = {};
+  init.headers.forEach((v, k) => {
+    headerObj[k] = v;
+  });
+
+  const bodyBuf =
+    init.body === undefined || init.body === null
+      ? undefined
+      : typeof init.body === 'string'
+        ? Buffer.from(init.body)
+        : init.body instanceof Uint8Array
+          ? Buffer.from(init.body)
+          : init.body instanceof ArrayBuffer
+            ? Buffer.from(init.body)
+            : Buffer.from(await new Response(init.body).arrayBuffer());
+
+  return new Promise<Response>((resolve, reject) => {
+    const req = mod.request(
+      {
+        hostname: targetUrl.hostname,
+        port: targetUrl.port ? Number(targetUrl.port) : isHttps ? 443 : 80,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        method: init.method,
+        headers: headerObj,
+        timeout: init.timeoutMs,
+        ...(isHttps ? { servername: targetUrl.hostname } : {}),
+        lookup: (
+          _hostname: string,
+          opts: unknown,
+          cb: (err: NodeJS.ErrnoException | null, address: any, family?: number) => void,
+        ) => {
+          if (opts && typeof opts === 'object' && (opts as { all?: boolean }).all) {
+            cb(null, [{ address: pinnedIp, family }]);
+            return;
+          }
+          cb(null, pinnedIp, family);
+        },
+      },
+      (res) => {
+        const cl = res.headers['content-length'];
+        if (typeof cl === 'string') {
+          const parsed = Number.parseInt(cl, 10);
+          if (!Number.isNaN(parsed) && parsed > init.maxBytes) {
+            res.destroy();
+            reject(
+              new PluginNetworkAccessError(
+                init.pluginId,
+                `response exceeds max size of ${init.maxBytes} bytes`,
+              ),
+            );
+            return;
+          }
+        }
+        const chunks: Buffer[] = [];
+        let total = 0;
+        res.on('data', (chunk: Buffer) => {
+          total += chunk.byteLength;
+          if (total > init.maxBytes) {
+            res.destroy();
+            reject(
+              new PluginNetworkAccessError(
+                init.pluginId,
+                `response exceeds max size of ${init.maxBytes} bytes`,
+              ),
+            );
+            return;
+          }
+          chunks.push(chunk);
+        });
+        res.on('end', () => {
+          const headers = new Headers();
+          for (const [k, v] of Object.entries(res.headers)) {
+            if (Array.isArray(v)) {
+              for (const item of v) headers.append(k, item);
+            } else if (typeof v === 'string') {
+              headers.set(k, v);
+            }
+          }
+          const combined = Buffer.concat(chunks);
+          const status = res.statusCode ?? 200;
+          const nullBodyStatus = status === 204 || status === 205 || status === 304 || (status >= 300 && status < 400 && combined.byteLength === 0);
+          resolve(
+            new Response(nullBodyStatus ? null : combined, {
+              status,
+              statusText: res.statusMessage ?? '',
+              headers,
+            }),
+          );
+        });
+        res.on('error', reject);
+      },
+    );
+    req.on('timeout', () => {
+      req.destroy(new PluginNetworkAccessError(init.pluginId, `request timed out after ${init.timeoutMs}ms`));
+    });
+    req.on('error', reject);
+    if (bodyBuf && bodyBuf.byteLength > 0) {
+      req.write(bodyBuf);
+    }
+    req.end();
+  });
 }
 
 async function readBodyCapped(
@@ -214,6 +327,7 @@ async function readBodyCapped(
 /**
  * Builds an SSRF-hardened `fetch` wrapper restricted to `manifest.network`,
  * validating initial and redirect targets against private/metadata ranges,
+ * pinning resolved DNS IPs, stripping credentials across cross-origin redirects,
  * enforcing timeouts, and capping response body sizes.
  */
 export function createPluginFetch(
@@ -224,6 +338,7 @@ export function createPluginFetch(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+  const hasCustomFetchImpl = Boolean(options.fetchImpl);
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const resolveHostIps = options.resolveHostIps ?? defaultResolveHostIps;
 
@@ -238,19 +353,47 @@ export function createPluginFetch(
 
     let currentMethod = init?.method ?? (input instanceof Request ? input.method : 'GET');
     let currentBody = init?.body;
-    const baseHeaders = init?.headers ?? (input instanceof Request ? input.headers : undefined);
+    const currentHeaders = new Headers(
+      init?.headers ?? (input instanceof Request ? input.headers : undefined),
+    );
+    let currentOrigin = currentUrl.origin;
 
     for (let hop = 0; hop <= maxRedirects; hop++) {
-      await validateTargetUrl(manifest.id, currentUrl, allowedHosts, resolveHostIps);
+      const pinnedIp = await validateTargetUrl(manifest.id, currentUrl, allowedHosts, resolveHostIps);
 
-      const res = await fetchImpl(currentUrl.toString(), {
-        ...init,
-        method: currentMethod,
-        body: currentBody,
-        headers: baseHeaders,
-        redirect: 'manual',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      const usePinnedNode =
+        !hasCustomFetchImpl &&
+        typeof process !== 'undefined' &&
+        Boolean(process.versions?.node);
+
+      const res = usePinnedNode
+        ? await fetchWithPinnedNodeSocket(currentUrl, pinnedIp, {
+            method: currentMethod,
+            headers: currentHeaders,
+            body: currentBody,
+            timeoutMs,
+            maxBytes,
+            pluginId: manifest.id,
+          })
+        : await (async () => {
+            const resp = await fetchImpl(currentUrl.toString(), {
+              ...init,
+              method: currentMethod,
+              body: currentBody,
+              headers: currentHeaders,
+              redirect: 'manual',
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            // Re-verify DNS right after fetchImpl if custom resolver changes asynchronously (rebinding guard)
+            const postIps = await resolveHostIps(currentUrl.hostname.toLowerCase().replace(/\.$/, ''));
+            if (postIps.length === 0 || postIps.some((ip) => isBlockedIpAddress(ip))) {
+              throw new PluginNetworkAccessError(
+                manifest.id,
+                `DNS resolution for "${currentUrl.hostname}" changed to blocked or empty IP during request`,
+              );
+            }
+            return resp;
+          })();
 
       if (REDIRECT_STATUSES.has(res.status)) {
         const location = res.headers.get('location');
@@ -261,6 +404,12 @@ export function createPluginFetch(
           throw new PluginNetworkAccessError(manifest.id, `exceeded max redirects (${maxRedirects})`);
         }
         currentUrl = new URL(location, currentUrl);
+        if (currentUrl.origin !== currentOrigin) {
+          for (const h of CROSS_ORIGIN_SENSITIVE_HEADERS) {
+            currentHeaders.delete(h);
+          }
+          currentOrigin = currentUrl.origin;
+        }
         if (res.status === 303 || ((res.status === 301 || res.status === 302) && currentMethod === 'POST')) {
           currentMethod = 'GET';
           currentBody = undefined;
