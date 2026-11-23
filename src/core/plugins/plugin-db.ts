@@ -1,17 +1,23 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { D1Database, D1PreparedStatement } from '@cloudflare/workers-types';
+import nodeSqlParser from 'node-sql-parser';
 import {
   buildPluginTableIdentifier,
+  isAuthenticSqlFragment,
   sql as sqlTag,
   type PluginDb,
   type PluginDbQueryOptions,
   type PluginDbStatement,
   type PluginDialect,
+  type PluginTableQueryBuilder,
+  type SqlComparisonOp,
   type SqlFragment,
   type SqlIdentifier,
 } from '@burrow/sdk';
 import { pluginTablePrefix } from './manifest';
 import { withPluginPostgresRole } from './postgres-isolation';
+
+const sqlAstParser = new nodeSqlParser.Parser();
 
 /**
  * NOTE ON DIALECT SECURITY BOUNDARIES:
@@ -52,6 +58,69 @@ export interface PostgresLikeSql {
 
 const DEFAULT_MAX_ROWS = 500;
 const DEFAULT_QUERY_TIMEOUT_MS = 3_000;
+const MIN_QUERY_TIMEOUT_MS = 10;
+const MAX_QUERY_TIMEOUT_MS = 30_000;
+const MAX_AST_PARSE_CHARS = 32_768;
+
+const ownedTablesByDb = new WeakMap<object, Map<string, Set<string>>>();
+const registeredPrefixesByDb = new WeakMap<object, Set<string>>();
+
+function clampQueryTimeoutMs(rawTimeoutMs: number | undefined): number {
+  if (typeof rawTimeoutMs !== 'number' || !Number.isFinite(rawTimeoutMs)) {
+    return DEFAULT_QUERY_TIMEOUT_MS;
+  }
+  return Math.min(Math.max(MIN_QUERY_TIMEOUT_MS, Math.trunc(rawTimeoutMs)), MAX_QUERY_TIMEOUT_MS);
+}
+
+/** Records table names created/owned by `pluginId` on `rawDb` to prevent prefix collisions in SQLite/D1. */
+export function registerPluginOwnedTables(
+  rawDb: unknown,
+  pluginId: string,
+  tables: ReadonlyArray<string>,
+): void {
+  const client = unwrapDbClient(rawDb);
+  if (!client || (typeof client !== 'object' && typeof client !== 'function')) return;
+  const key = client as object;
+  let prefixes = registeredPrefixesByDb.get(key);
+  if (!prefixes) {
+    prefixes = new Set<string>();
+    registeredPrefixesByDb.set(key, prefixes);
+  }
+  prefixes.add(pluginTablePrefix(pluginId));
+
+  if (tables.length === 0) return;
+  let perPlugin = ownedTablesByDb.get(key);
+  if (!perPlugin) {
+    perPlugin = new Map<string, Set<string>>();
+    ownedTablesByDb.set(key, perPlugin);
+  }
+  let owned = perPlugin.get(pluginId);
+  if (!owned) {
+    owned = new Set<string>();
+    perPlugin.set(pluginId, owned);
+  }
+  for (const t of tables) {
+    const clean = t.trim().replace(/^[`"[]|[`"\]]$/g, '');
+    const parts = clean.split('.');
+    const tbl = (parts[parts.length - 1] ?? clean).replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
+    if (tbl) owned.add(tbl);
+  }
+}
+
+/** Extracts CREATE TABLE targets from migration or runtime DDL SQL. */
+export function extractCreatedTablesFromSql(sqlText: string): string[] {
+  const found: string[] = [];
+  for (const stmt of splitPluginSqlStatements(sqlText)) {
+    const cleaned = stripCommentsAndStrings(stmt).cleaned.replace(/\s+/g, ' ').trim();
+    const m = /^CREATE\s+(?:(?:TEMP|TEMPORARY|VIRTUAL)\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"\w.[\]-]+)/i.exec(
+      cleaned,
+    );
+    if (m?.[1]) {
+      found.push(m[1]);
+    }
+  }
+  return found;
+}
 
 const httpMethodStorage = new AsyncLocalStorage<string>();
 
@@ -99,10 +168,23 @@ function readDollarTag(sqlText: string, pos: number): string | null {
   return match ? match[0] : null;
 }
 
+function isBracketIdentifierStart(source: string, idx: number, emitted: string): boolean {
+  if (idx > 0 && /[A-Za-z0-9_$]/.test(source[idx - 1]!)) return false;
+  if (/\bARRAY\s*$/i.test(emitted)) return false;
+  let k = idx + 1;
+  while (k < source.length) {
+    const ch = source[k]!;
+    if (ch === ']') return k > idx + 1;
+    if (ch === "'" || ch === '\n' || ch === '\r' || ch === ';') return false;
+    k++;
+  }
+  return false;
+}
+
 /**
  * Lexer-aware comment & literal stripper.
- * Properly tracks `'...'` literals, `"..."` / `` `...` `` / `[...]` identifiers,
- * and Postgres `$$...$$` / `$tag$...$tag$` dollar-quoted blocks so quoted apostrophes never desync state.
+ * Properly tracks `'...'` and PG `E'...'` literals, `"..."` / `` `...` `` / SQLite `[...]`
+ * identifiers (without desyncing on `ARRAY[']']`), and `$$...$$` dollar-quoted blocks.
  */
 function stripCommentsAndStrings(sqlText: string): {
   cleaned: string;
@@ -135,6 +217,27 @@ function stripCommentsAndStrings(sqlText: string): {
       while (i < len - 1 && !(sqlText[i] === '*' && sqlText[i + 1] === '/')) i++;
       i += 2;
       out += ' ';
+      continue;
+    }
+
+    // Postgres E'...' / e'...' escape string literal
+    if ((ch === 'e' || ch === 'E') && next === "'" && (i === 0 || !/[A-Za-z0-9_$]/.test(sqlText[i - 1]!))) {
+      const start = i;
+      i += 2;
+      while (i < len) {
+        if (sqlText[i] === '\\') {
+          i += 2;
+        } else if (sqlText[i] === "'" && sqlText[i + 1] === "'") {
+          i += 2;
+        } else if (sqlText[i] === "'") {
+          i++;
+          break;
+        } else {
+          i++;
+        }
+      }
+      rawStringLiterals.push(sqlText.slice(start, i));
+      out += " '' ";
       continue;
     }
 
@@ -192,8 +295,8 @@ function stripCommentsAndStrings(sqlText: string): {
       continue;
     }
 
-    // Bracket identifier ([...])
-    if (ch === '[') {
+    // SQLite bracket identifier ([...]), never triggered for Postgres ARRAY[...]
+    if (ch === '[' && isBracketIdentifierStart(sqlText, i, out)) {
       out += ch;
       i++;
       while (i < len) {
@@ -231,7 +334,7 @@ function stripCommentsAndStrings(sqlText: string): {
   return { cleaned: out, hasComments, hasDollarQuotes, rawStringLiterals };
 }
 
-/** Split SQL into non-empty statements while respecting quotes, identifiers, dollar-quotes, and trigger BEGIN...END blocks. */
+/** Split SQL into non-empty statements while respecting quotes, escape strings, brackets, dollar-quotes, and trigger BEGIN...END blocks. */
 export function splitPluginSqlStatements(sqlText: string): string[] {
   const chunks = sqlText.split('--> statement-breakpoint');
   const statements: string[] = [];
@@ -239,6 +342,7 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
   for (const chunk of chunks) {
     let current = '';
     let inSingleQuote = false;
+    let inEscapeSingleQuote = false;
     let inDoubleQuote = false;
     let inBacktick = false;
     let inBracket = false;
@@ -250,7 +354,14 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
       const ch = chunk[i]!;
       const next = chunk[i + 1];
 
-      if (!inSingleQuote && !inDoubleQuote && !inBacktick && !inBracket && !activeDollarTag) {
+      if (
+        !inSingleQuote &&
+        !inEscapeSingleQuote &&
+        !inDoubleQuote &&
+        !inBacktick &&
+        !inBracket &&
+        !activeDollarTag
+      ) {
         if (ch === '-' && next === '-') {
           while (i < len && chunk[i] !== '\n') i++;
           current += '\n';
@@ -270,12 +381,34 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
           i += tag.length - 1;
           continue;
         }
+        if ((ch === 'e' || ch === 'E') && next === "'" && (i === 0 || !/[A-Za-z0-9_$]/.test(chunk[i - 1]!))) {
+          inEscapeSingleQuote = true;
+          current += ch + "'";
+          i++;
+          continue;
+        }
       } else if (activeDollarTag) {
         if (chunk.startsWith(activeDollarTag, i)) {
           current += activeDollarTag;
           i += activeDollarTag.length - 1;
           activeDollarTag = null;
           continue;
+        }
+        current += ch;
+        continue;
+      } else if (inEscapeSingleQuote) {
+        if (ch === '\\') {
+          current += ch + (next ?? '');
+          i++;
+          continue;
+        }
+        if (ch === "'" && next === "'") {
+          current += "''";
+          i++;
+          continue;
+        }
+        if (ch === "'") {
+          inEscapeSingleQuote = false;
         }
         current += ch;
         continue;
@@ -295,7 +428,7 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
       if (ch === '"' && !inSingleQuote && !inBacktick && !inBracket) {
         if (inDoubleQuote && next === '"') {
           current += '""';
-          i += 2 - 1;
+          i++;
           continue;
         }
         inDoubleQuote = !inDoubleQuote;
@@ -309,7 +442,7 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
         continue;
       }
 
-      if (ch === '[' && !inSingleQuote && !inDoubleQuote && !inBacktick) {
+      if (ch === '[' && !inSingleQuote && !inDoubleQuote && !inBacktick && isBracketIdentifierStart(chunk, i, current)) {
         inBracket = true;
         current += ch;
         continue;
@@ -320,7 +453,7 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
         continue;
       }
 
-      if (!inSingleQuote && !inDoubleQuote && !inBacktick && !inBracket) {
+      if (!inSingleQuote && !inEscapeSingleQuote && !inDoubleQuote && !inBacktick && !inBracket) {
         const tail = chunk.slice(i);
         if (/^BEGIN\b/i.test(tail) && (i === 0 || /\s/.test(chunk[i - 1]!))) {
           triggerDepth++;
@@ -346,21 +479,76 @@ export function splitPluginSqlStatements(sqlText: string): string[] {
   return statements;
 }
 
-function normalizeIdentifier(raw: string): string {
-  const trimmed = raw.trim().replace(/^[`"[]|[`"\]]$/g, '');
-  const parts = trimmed.split('.');
-  const table = parts[parts.length - 1] ?? trimmed;
-  return table.replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
+function unquoteIdentSegment(raw: string): string {
+  return raw.trim().replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
 }
 
-function assertIdentifierPrefixed(pluginId: string, prefix: string, rawTarget: string, op: string): void {
-  const target = normalizeIdentifier(rawTarget);
-  if (!target.startsWith(prefix)) {
+interface ParsedTableRef {
+  schema: string | null;
+  table: string;
+}
+
+function parseTableRef(raw: string): ParsedTableRef {
+  const cleaned = raw.trim();
+  const parts = cleaned.split('.');
+  if (parts.length >= 2) {
+    return {
+      schema: unquoteIdentSegment(parts[parts.length - 2]!),
+      table: unquoteIdentSegment(parts[parts.length - 1]!),
+    };
+  }
+  return {
+    schema: null,
+    table: unquoteIdentSegment(cleaned),
+  };
+}
+
+function assertOwnedPluginTableName(
+  pluginId: string,
+  prefix: string,
+  table: string,
+  options: AssertPluginSqlOptions,
+  contextLabel = 'table access',
+): void {
+  if (options.otherPluginPrefixes) {
+    for (const otherPrefix of options.otherPluginPrefixes) {
+      if (otherPrefix !== prefix && table.startsWith(otherPrefix)) {
+        throw new PluginSqlAccessError(
+          pluginId,
+          `cross-plugin ${contextLabel} "${table}" is forbidden (prefix "${otherPrefix}")`,
+        );
+      }
+    }
+  }
+  if (options.isRuntime && options.strictUnownedMultiSegment && !options.ownedTables?.has(table)) {
+    const suffix = table.slice(prefix.length);
+    if (suffix.includes('_')) {
+      throw new PluginSqlAccessError(
+        pluginId,
+        `unregistered multi-segment plugin table "${table}" is forbidden (expected owned table under "${prefix}")`,
+      );
+    }
+  }
+}
+
+function assertIdentifierPrefixed(
+  pluginId: string,
+  prefix: string,
+  rawTarget: string,
+  op: string,
+  options: AssertPluginSqlOptions = {},
+): void {
+  const ref = parseTableRef(rawTarget);
+  if (ref.schema && ref.schema !== 'main' && !prefix.startsWith(`${ref.schema}_`)) {
+    throw new PluginSqlAccessError(pluginId, `${op} schema "${ref.schema}" is forbidden`);
+  }
+  if (!ref.table.startsWith(prefix)) {
     throw new PluginSqlAccessError(
       pluginId,
-      `${op} target "${target}" must start with "${prefix}"`,
+      `${op} target "${ref.table}" must start with "${prefix}"`,
     );
   }
+  assertOwnedPluginTableName(pluginId, prefix, ref.table, options, op);
 }
 
 const SENSITIVE_SYSTEM_TABLES = new Set([
@@ -379,6 +567,15 @@ const SENSITIVE_SYSTEM_TABLES = new Set([
   'sqlite_schema',
   'sqlite_temp_master',
   'sqlite_temp_schema',
+  'pg_roles',
+  'pg_user',
+  'pg_shadow',
+  'pg_authid',
+  'pg_tables',
+  'pg_class',
+  'pg_namespace',
+  'pg_stat_activity',
+  'pg_settings',
 ]);
 
 const SAFE_CORE_READ_TABLES = new Set([
@@ -400,21 +597,304 @@ const SAFE_CORE_READ_TABLES = new Set([
   'v_plugin_members',
 ]);
 
-function extractReferencedTables(cleanedStmt: string): string[] {
-  const tables: string[] = [];
-  const re = /\b(?:FROM|JOIN)\s+([`"\w.[\]-]+)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(cleanedStmt)) !== null) {
-    const raw = match[1]!;
-    if (raw.startsWith('(')) continue;
-    tables.push(normalizeIdentifier(raw));
+const CLAUSE_STOP_KEYWORDS = new Set([
+  'WHERE',
+  'JOIN',
+  'INNER',
+  'LEFT',
+  'RIGHT',
+  'FULL',
+  'CROSS',
+  'NATURAL',
+  'OUTER',
+  'ON',
+  'USING',
+  'GROUP',
+  'ORDER',
+  'HAVING',
+  'LIMIT',
+  'OFFSET',
+  'UNION',
+  'INTERSECT',
+  'EXCEPT',
+  'RETURNING',
+  'SET',
+  'VALUES',
+  'SELECT',
+  'WITH',
+  'FOR',
+  'INTO',
+  'WINDOW',
+]);
+
+const NON_TABLE_FROM_FUNCTIONS = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'OVERLAY', 'POSITION']);
+
+function tokenizeSqlForTableScan(cleanedStmt: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  const len = cleanedStmt.length;
+  while (i < len) {
+    const ch = cleanedStmt[i]!;
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === "'" && cleanedStmt[i + 1] === "'") {
+      tokens.push("''");
+      i += 2;
+      continue;
+    }
+    if (ch === '"' || ch === '`' || ch === '[') {
+      const close = ch === '[' ? ']' : ch;
+      let j = i + 1;
+      while (j < len && cleanedStmt[j] !== close) j++;
+      tokens.push(cleanedStmt.slice(i, Math.min(len, j + 1)));
+      i = j + 1;
+      continue;
+    }
+    if (ch === ',' || ch === '.' || ch === '(' || ch === ')' || ch === ';') {
+      tokens.push(ch);
+      i++;
+      continue;
+    }
+    if (/[A-Za-z0-9_$-]/.test(ch)) {
+      let j = i + 1;
+      while (j < len && /[A-Za-z0-9_$-]/.test(cleanedStmt[j]!)) j++;
+      tokens.push(cleanedStmt.slice(i, j));
+      i = j;
+      continue;
+    }
+    tokens.push(ch);
+    i++;
   }
-  return tables;
+  return tokens;
+}
+
+function findMatchingParenToken(tokens: readonly string[], openIdx: number): number {
+  let depth = 1;
+  for (let i = openIdx + 1; i < tokens.length; i++) {
+    if (tokens[i] === '(') depth++;
+    else if (tokens[i] === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return tokens.length - 1;
+}
+
+function readIdentRef(tokens: readonly string[], pos: number): { ref: ParsedTableRef; nextPos: number } | null {
+  const first = tokens[pos];
+  if (!first || first === ',' || first === '(' || first === ')' || first === ';' || first === '.') {
+    return null;
+  }
+  if (tokens[pos + 1] === '.' && tokens[pos + 2] && tokens[pos + 2] !== '(' && tokens[pos + 2] !== ',') {
+    return {
+      ref: {
+        schema: unquoteIdentSegment(first),
+        table: unquoteIdentSegment(tokens[pos + 2]!),
+      },
+      nextPos: pos + 3,
+    };
+  }
+  return {
+    ref: { schema: null, table: unquoteIdentSegment(first) },
+    nextPos: pos + 1,
+  };
+}
+
+function extractTableReferencesFromCleaned(cleanedStmt: string): ParsedTableRef[] {
+  const refs: ParsedTableRef[] = [];
+  const tokens = tokenizeSqlForTableScan(cleanedStmt);
+  const fnParenStack: Array<string | null> = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok === '(') {
+      const prev = i > 0 ? tokens[i - 1]!.toUpperCase() : null;
+      fnParenStack.push(prev);
+      continue;
+    }
+    if (tok === ')') {
+      fnParenStack.pop();
+      continue;
+    }
+
+    const upper = tok.toUpperCase();
+    if (upper === 'JOIN') {
+      let p = i + 1;
+      if (tokens[p]?.toUpperCase() === 'ONLY') p++;
+      if (tokens[p] === '(') continue;
+      const parsed = readIdentRef(tokens, p);
+      if (parsed) refs.push(parsed.ref);
+      continue;
+    }
+
+    if (upper === 'FROM') {
+      // Do not treat EXTRACT(EPOCH FROM ts) / SUBSTRING(x FROM 1) as FROM table lists
+      const activeFn = fnParenStack[fnParenStack.length - 1];
+      if (activeFn && NON_TABLE_FROM_FUNCTIONS.has(activeFn)) continue;
+
+      let p = i + 1;
+      while (p < tokens.length) {
+        const cur = tokens[p]!;
+        const curUpper = cur.toUpperCase();
+        if (cur === ';' || cur === ')' || CLAUSE_STOP_KEYWORDS.has(curUpper)) {
+          break;
+        }
+        if (curUpper === 'ONLY') {
+          p++;
+          continue;
+        }
+        if (cur === '(') {
+          const closeIdx = findMatchingParenToken(tokens, p);
+          p = closeIdx + 1;
+          if (tokens[p]?.toUpperCase() === 'AS') p += 2;
+          else if (tokens[p] && tokens[p] !== ',' && tokens[p] !== ';' && tokens[p] !== ')' && !CLAUSE_STOP_KEYWORDS.has(tokens[p]!.toUpperCase())) {
+            p++;
+          }
+          if (tokens[p] === ',') {
+            p++;
+            continue;
+          }
+          break;
+        }
+
+        const parsed = readIdentRef(tokens, p);
+        if (!parsed) break;
+        refs.push(parsed.ref);
+        p = parsed.nextPos;
+
+        // Table-valued functions such as pragma_table_info('...')
+        if (tokens[p] === '(') {
+          p = findMatchingParenToken(tokens, p) + 1;
+        }
+
+        // Skip optional AS alias or bare alias before comma
+        if (tokens[p]?.toUpperCase() === 'AS') {
+          p += 2;
+        } else if (
+          tokens[p] &&
+          tokens[p] !== ',' &&
+          tokens[p] !== ';' &&
+          tokens[p] !== ')' &&
+          tokens[p] !== '(' &&
+          !CLAUSE_STOP_KEYWORDS.has(tokens[p]!.toUpperCase())
+        ) {
+          p++;
+        }
+
+        if (tokens[p] === ',') {
+          p++;
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  return refs;
+}
+
+function collectAstRefsAndCheckTautology(
+  node: unknown,
+  outRefs: ParsedTableRef[],
+  state: { hasTautology: boolean },
+  inWhere = false,
+): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      collectAstRefsAndCheckTautology(item, outRefs, state, inWhere);
+    }
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if (
+    obj.type !== 'column_ref' &&
+    !('column' in obj) &&
+    typeof obj.table === 'string' &&
+    obj.table.trim()
+  ) {
+    outRefs.push({
+      schema: typeof obj.db === 'string' && obj.db.trim() ? unquoteIdentSegment(obj.db) : null,
+      table: unquoteIdentSegment(obj.table),
+    });
+  }
+
+  if (inWhere && obj.type === 'binary_expr' && typeof obj.operator === 'string') {
+    const op = obj.operator.toUpperCase();
+    const left = obj.left as Record<string, unknown> | undefined;
+    const right = obj.right as Record<string, unknown> | undefined;
+    const isConstLike = (n: Record<string, unknown> | undefined): boolean => {
+      if (!n) return false;
+      const t = n.type;
+      if (t === 'number' || t === 'single_quote_string' || t === 'string' || t === 'bool' || t === 'null') {
+        return true;
+      }
+      if (t === 'origin' && (n.value === '?' || String(n.value ?? '').startsWith('$'))) {
+        return true;
+      }
+      return false;
+    };
+    const isParamNode = (n: Record<string, unknown> | undefined): boolean =>
+      Boolean(n && (n.type === 'origin' || n.type === 'var') && (n.value === '?' || String(n.value ?? '').startsWith('$')));
+    const isLiteralNode = (n: Record<string, unknown> | undefined): boolean =>
+      Boolean(n && (n.type === 'number' || n.type === 'single_quote_string' || n.type === 'string' || n.type === 'bool'));
+
+    if (op === '=' || op === '!=' || op === '<>' || op === '<' || op === '<=' || op === '>' || op === '>=') {
+      if (
+        (isLiteralNode(left) && isLiteralNode(right)) ||
+        (isLiteralNode(left) && isParamNode(right)) ||
+        (isParamNode(left) && isLiteralNode(right)) ||
+        (isParamNode(left) && isParamNode(right)) ||
+        (isConstLike(left) && isConstLike(right))
+      ) {
+        state.hasTautology = true;
+      }
+    }
+  }
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (k === 'loc') continue;
+    collectAstRefsAndCheckTautology(v, outRefs, state, inWhere || k === 'where' || k === 'having');
+  }
+}
+
+function inspectWithSqlAst(cleanedStmt: string): {
+  refs: ParsedTableRef[];
+  multiStatement: boolean;
+  hasTautology: boolean;
+} | null {
+  if (cleanedStmt.length > MAX_AST_PARSE_CHARS) return null;
+  if (cleanedStmt.split(/\bSELECT\b/i).length > 100) return null;
+
+  for (const database of ['sqlite', 'postgresql'] as const) {
+    try {
+      const ast = sqlAstParser.astify(cleanedStmt, { database });
+      const refs: ParsedTableRef[] = [];
+      const state = { hasTautology: false };
+      collectAstRefsAndCheckTautology(ast, refs, state, false);
+      return {
+        refs,
+        multiStatement: Array.isArray(ast) && ast.length > 1,
+        hasTautology: state.hasTautology,
+      };
+    } catch {
+      // Try next dialect or fall back to deterministic token scanner for dialect-specific extensions
+    }
+  }
+  return null;
+}
+
+function hasSqlSelectInto(cleanedStmt: string): boolean {
+  if (!/^(?:SELECT|WITH)\b/i.test(cleanedStmt)) return false;
+  return /\bINTO\b/i.test(cleanedStmt);
 }
 
 function isMutatingStatement(cleaned: string): boolean {
-  return /^(?:INSERT|REPLACE|UPDATE|DELETE|CREATE|ALTER|DROP|MERGE|TRUNCATE)\b/i.test(cleaned) ||
-    /\b(?:INSERT|REPLACE|UPDATE|DELETE|MERGE)\b/i.test(cleaned);
+  return (
+    /^(?:INSERT|REPLACE|UPDATE|DELETE|CREATE|ALTER|DROP|MERGE|TRUNCATE)\b/i.test(cleaned) ||
+    /\b(?:INSERT|REPLACE|UPDATE|DELETE|MERGE)\b/i.test(cleaned)
+  );
 }
 
 export interface AssertPluginSqlOptions {
@@ -423,6 +903,9 @@ export interface AssertPluginSqlOptions {
   allowUnscopedCoreReads?: boolean;
   allowedCoreTables?: ReadonlySet<string>;
   enforceCoreAllowlist?: boolean;
+  ownedTables?: ReadonlySet<string>;
+  otherPluginPrefixes?: ReadonlySet<string>;
+  strictUnownedMultiSegment?: boolean;
 }
 
 export interface CreatePluginDbOptions {
@@ -430,6 +913,10 @@ export interface CreatePluginDbOptions {
   coreTables?: readonly string[];
   /** Internal test hook ONLY: bypass JS lexer check to prove DB-level Postgres role enforcement. */
   enforceLexer?: boolean;
+  /** Optional explicit plugin-owned table allowlist for this client. */
+  ownedTables?: readonly string[];
+  /** Optional sibling plugin prefixes to reject cross-plugin prefix overlap in SQLite/D1. */
+  otherPluginPrefixes?: readonly string[];
 }
 
 export function assertPluginSqlAllowed(
@@ -454,10 +941,20 @@ export function assertPluginSqlAllowed(
     );
   }
 
+  const pluginSchemaName = prefix.endsWith('_') ? prefix.slice(0, -1) : prefix;
+
   for (const stmt of statements) {
     const lexed = stripCommentsAndStrings(stmt);
     const cleaned = lexed.cleaned.replace(/\s+/g, ' ').trim();
     if (!cleaned) continue;
+
+    const astInfo = inspectWithSqlAst(cleaned);
+    if (options.isRuntime && astInfo?.multiStatement) {
+      throw new PluginSqlAccessError(
+        pluginId,
+        'multi-statement SQL execution is disallowed in runtime queries',
+      );
+    }
 
     if (options.isRuntime) {
       if (lexed.hasComments) {
@@ -466,8 +963,8 @@ export function assertPluginSqlAllowed(
       if (lexed.hasDollarQuotes) {
         throw new PluginSqlAccessError(pluginId, 'dollar-quoted strings are disallowed in runtime queries');
       }
-      // Block string-concatenated SQLi patterns and unparameterized WHERE string literals
-      if (!options.fromSqlTag && lexed.rawStringLiterals.length > 0) {
+      // Block unparameterized string literals in WHERE/HAVING even when using sql`...`
+      if (lexed.rawStringLiterals.length > 0) {
         const whereIdx = cleaned.search(/\b(?:WHERE|HAVING)\b/i);
         if (whereIdx !== -1 && /''/.test(cleaned.slice(whereIdx))) {
           throw new PluginSqlAccessError(
@@ -482,18 +979,36 @@ export function assertPluginSqlAllowed(
       if (/\bUNION\s+(?:ALL\s+)?SELECT\b/i.test(cleaned)) {
         throw new PluginSqlAccessError(pluginId, 'UNION SELECT is disallowed in runtime plugin queries');
       }
+      if (astInfo?.hasTautology) {
+        throw new PluginSqlAccessError(pluginId, 'tautological or constant-only WHERE comparison is disallowed');
+      }
+      if (
+        /\b(?:OR\s+(?:(?:\d+|''|TRUE|FALSE|\?|\$\d+)\s*(?:=|!=|<>)\s*(?:\d+|''|TRUE|FALSE|\?|\$\d+)|TRUE)|(?:WHERE|HAVING)\s+(?:\d+|''|TRUE)\s*=\s*(?:\?|\$\d+|\d+|''|TRUE))\b/i.test(
+          cleaned,
+        )
+      ) {
+        throw new PluginSqlAccessError(pluginId, 'tautological WHERE/HAVING condition is disallowed');
+      }
     }
 
     if (/\b(?:ATTACH|DETACH|VACUUM|REINDEX|COPY|TRUNCATE|GRANT|REVOKE)\b/i.test(cleaned)) {
       throw new PluginSqlAccessError(pluginId, `forbidden SQL command in "${cleaned.slice(0, 48)}"`);
     }
 
-    if (/\bSELECT\b[\s\S]*\bINTO\b/i.test(cleaned)) {
+    if (/\bload_extension\s*\(/i.test(cleaned)) {
+      throw new PluginSqlAccessError(pluginId, 'load_extension() is disallowed in plugin SQL');
+    }
+
+    if (/\b(?:FROM|JOIN|UPDATE|DELETE\s+FROM)\s+ONLY\b/i.test(cleaned)) {
+      throw new PluginSqlAccessError(pluginId, 'ONLY table modifier is disallowed in plugin SQL');
+    }
+
+    if (hasSqlSelectInto(cleaned)) {
       throw new PluginSqlAccessError(pluginId, 'SELECT ... INTO is disallowed');
     }
 
-    if (/\bMERGE\s+INTO\b/i.test(cleaned)) {
-      throw new PluginSqlAccessError(pluginId, 'MERGE INTO is disallowed');
+    if (/\bMERGE\s+(?:INTO\b)?/i.test(cleaned)) {
+      throw new PluginSqlAccessError(pluginId, 'MERGE is disallowed');
     }
 
     if (/^PRAGMA\b/i.test(cleaned)) {
@@ -506,13 +1021,35 @@ export function assertPluginSqlAllowed(
       continue;
     }
 
-    // Check referenced tables on reads/joins to block secret & cross-plugin table reads
-    const referenced = extractReferencedTables(cleaned);
-    for (const table of referenced) {
+    // Merge AST-extracted table references with deterministic token scanner references
+    const tokenRefs = extractTableReferencesFromCleaned(cleaned);
+    const mergedMap = new Map<string, ParsedTableRef>();
+    for (const r of [...tokenRefs, ...(astInfo?.refs ?? [])]) {
+      mergedMap.set(`${r.schema ?? ''}:${r.table}`, r);
+    }
+
+    for (const ref of mergedMap.values()) {
+      const schema = ref.schema;
+      const table = ref.table;
+      if (schema) {
+        if (
+          schema === 'information_schema' ||
+          schema.startsWith('pg_') ||
+          schema.startsWith('sqlite_') ||
+          (schema !== 'main' && schema !== pluginSchemaName)
+        ) {
+          throw new PluginSqlAccessError(
+            pluginId,
+            `access to schema "${schema}" is forbidden`,
+          );
+        }
+      }
+
       if (
         SENSITIVE_SYSTEM_TABLES.has(table) ||
         table.startsWith('pg_') ||
         table.startsWith('sqlite_') ||
+        table.startsWith('pragma_') ||
         table === 'information_schema'
       ) {
         throw new PluginSqlAccessError(
@@ -520,35 +1057,49 @@ export function assertPluginSqlAllowed(
           `access to system/sensitive table "${table}" is forbidden`,
         );
       }
-      if (table.startsWith('plugin_') && !table.startsWith(prefix)) {
+
+      if (table === 'invites' && /\btoken_hash\b/i.test(cleaned)) {
+        throw new PluginSqlAccessError(pluginId, 'reading invites.token_hash is forbidden');
+      }
+
+      const isPrefixedOwned = table.startsWith(prefix);
+      if (isPrefixedOwned) {
+        assertOwnedPluginTableName(pluginId, prefix, table, options, 'table read');
+        continue;
+      }
+
+      if (table.startsWith('plugin_')) {
         throw new PluginSqlAccessError(
           pluginId,
           `cross-plugin table read "${table}" is forbidden (expected prefix "${prefix}")`,
         );
       }
-      if (table === 'invites' && /\btoken_hash\b/i.test(cleaned)) {
-        throw new PluginSqlAccessError(pluginId, 'reading invites.token_hash is forbidden');
-      }
-      if (
-        options.isRuntime &&
-        !table.startsWith(prefix) &&
-        SAFE_CORE_READ_TABLES.has(table)
-      ) {
-        if (options.enforceCoreAllowlist && !options.allowedCoreTables?.has(table)) {
+
+      if (options.isRuntime) {
+        const isAllowedCore = options.enforceCoreAllowlist
+          ? Boolean(options.allowedCoreTables?.has(table))
+          : SAFE_CORE_READ_TABLES.has(table);
+        if (!isAllowedCore) {
           throw new PluginSqlAccessError(
             pluginId,
-            `core table "${table}" must be declared in manifest.coreTables`,
+            options.enforceCoreAllowlist
+              ? `core table "${table}" must be declared in manifest.coreTables`
+              : `table "${table}" is not accessible to plugins`,
           );
         }
-        if (!options.allowUnscopedCoreReads) {
+
+        const isDdlStatement = /^(?:CREATE|ALTER|DROP)\b/i.test(cleaned);
+        if (!options.allowUnscopedCoreReads && !isDdlStatement) {
           const whereMatch = /\bWHERE\b([\s\S]*)$/i.exec(cleaned);
           const whereClause = whereMatch?.[1] ?? '';
-          const hasBoundParam =
-            Boolean(options.fromSqlTag) || /\?|\$\d+/.test(whereClause);
-          if (!whereMatch || !hasBoundParam) {
+          const hasColumnBoundComparison =
+            /(?:\b[a-z_][a-z0-9_.]*\s*(?:=|!=|<>|<|<=|>|>=|LIKE\s+|IN\s*\()\s*(?:\?|\$\d+)|(?:\?|\$\d+)\s*(?:=|!=|<>|<|<=|>|>=)\s*[a-z_][a-z0-9_.]*\b)/i.test(
+              whereClause,
+            );
+          if (!whereMatch || !hasColumnBoundComparison) {
             throw new PluginSqlAccessError(
               pluginId,
-              `unscoped query on core table "${table}" requires a parameterized WHERE clause (workspace_id / scope filter)`,
+              `unscoped query on core table "${table}" requires a column-parameterized WHERE clause (workspace_id / scope filter)`,
             );
           }
         }
@@ -565,12 +1116,11 @@ export function assertPluginSqlAllowed(
     for (const [re, label] of dmlPatterns) {
       let match: RegExpExecArray | null;
       while ((match = re.exec(cleaned)) !== null) {
-        // SQLite/Postgres upserts use `ON CONFLICT(...) DO UPDATE SET ...`, which mutates the INSERT target above.
         if (label === 'UPDATE' && /\bON\s+CONFLICT\b[\s\S]*\bDO\s+$/i.test(cleaned.slice(0, match.index))) {
           continue;
         }
         matchedDmlCount++;
-        assertIdentifierPrefixed(pluginId, prefix, match[1]!, label);
+        assertIdentifierPrefixed(pluginId, prefix, match[1]!, label, options);
       }
     }
     if (/^(?:INSERT|REPLACE|UPDATE|DELETE)\b/i.test(cleaned)) {
@@ -653,72 +1203,150 @@ export function assertPluginSqlAllowed(
 
 /**
  * Translates `?` placeholders outside quotes to `$1, $2, ...` and normalizes common SQLite portability idioms
- * (`INSERT OR IGNORE`, `MAX(0, ...)`) when targeting PostgreSQL.
+ * (`INSERT OR IGNORE`, `MAX(0, ...)`, `INTEGER PRIMARY KEY AUTOINCREMENT`) outside string literals and comments.
  */
 export function translateSqlToPostgres(sqlText: string): string {
-  let out = '';
-  let paramIdx = 1;
-  let inSingle = false;
-  let inDouble = false;
+  const segments: Array<{ isCode: boolean; text: string }> = [];
+  let i = 0;
+  const len = sqlText.length;
+  let codeBuf = '';
 
-  for (let i = 0; i < sqlText.length; i++) {
+  const flushCode = () => {
+    if (codeBuf) {
+      segments.push({ isCode: true, text: codeBuf });
+      codeBuf = '';
+    }
+  };
+
+  while (i < len) {
     const ch = sqlText[i]!;
     const next = sqlText[i + 1];
 
-    if (ch === "'" && !inDouble) {
-      out += ch;
-      if (inSingle && next === "'") {
-        out += "'";
-        i++;
-      } else {
-        inSingle = !inSingle;
-      }
+    if (ch === '-' && next === '-') {
+      flushCode();
+      const start = i;
+      i += 2;
+      while (i < len && sqlText[i] !== '\n') i++;
+      segments.push({ isCode: false, text: sqlText.slice(start, i) });
       continue;
     }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble;
-      out += ch;
-      continue;
-    }
-    if (ch === '?' && !inSingle && !inDouble) {
-      out += `$${paramIdx++}`;
-      continue;
-    }
-    out += ch;
-  }
 
+    if (ch === '/' && next === '*') {
+      flushCode();
+      const start = i;
+      i += 2;
+      while (i < len - 1 && !(sqlText[i] === '*' && sqlText[i + 1] === '/')) i++;
+      i = Math.min(len, i + 2);
+      segments.push({ isCode: false, text: sqlText.slice(start, i) });
+      continue;
+    }
+
+    if ((ch === 'e' || ch === 'E') && next === "'" && (i === 0 || !/[A-Za-z0-9_$]/.test(sqlText[i - 1]!))) {
+      flushCode();
+      const start = i;
+      i += 2;
+      while (i < len) {
+        if (sqlText[i] === '\\') i += 2;
+        else if (sqlText[i] === "'" && sqlText[i + 1] === "'") i += 2;
+        else if (sqlText[i] === "'") {
+          i++;
+          break;
+        } else i++;
+      }
+      segments.push({ isCode: false, text: sqlText.slice(start, i) });
+      continue;
+    }
+
+    if (ch === "'") {
+      flushCode();
+      const start = i;
+      i++;
+      while (i < len) {
+        if (sqlText[i] === "'" && sqlText[i + 1] === "'") i += 2;
+        else if (sqlText[i] === "'") {
+          i++;
+          break;
+        } else i++;
+      }
+      segments.push({ isCode: false, text: sqlText.slice(start, i) });
+      continue;
+    }
+
+    if (ch === '"') {
+      flushCode();
+      const start = i;
+      i++;
+      while (i < len) {
+        if (sqlText[i] === '"' && sqlText[i + 1] === '"') i += 2;
+        else if (sqlText[i] === '"') {
+          i++;
+          break;
+        } else i++;
+      }
+      segments.push({ isCode: false, text: sqlText.slice(start, i) });
+      continue;
+    }
+
+    codeBuf += ch;
+    i++;
+  }
+  flushCode();
+
+  let paramIdx = 1;
   let hasInsertOrIgnore = false;
-  out = out.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, () => {
-    hasInsertOrIgnore = true;
-    return 'INSERT INTO';
+  let hasOnConflict = false;
+
+  const rewritten = segments.map((seg) => {
+    if (!seg.isCode) return seg;
+    let txt = '';
+    for (let j = 0; j < seg.text.length; j++) {
+      if (seg.text[j] === '?') txt += `$${paramIdx++}`;
+      else txt += seg.text[j]!;
+    }
+    txt = txt.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, () => {
+      hasInsertOrIgnore = true;
+      return 'INSERT INTO';
+    });
+    if (/\bON\s+CONFLICT\b/i.test(txt)) {
+      hasOnConflict = true;
+    }
+    txt = txt.replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
+    txt = txt.replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi, 'SERIAL PRIMARY KEY');
+    return { isCode: true, text: txt };
   });
 
-  if (hasInsertOrIgnore && !/\bON\s+CONFLICT\b/i.test(out)) {
-    const returningMatch = /\bRETURNING\b/i.exec(out);
-    if (returningMatch) {
-      out = `${out.slice(0, returningMatch.index)} ON CONFLICT DO NOTHING ${out.slice(returningMatch.index)}`;
-    } else {
-      out = `${out} ON CONFLICT DO NOTHING`;
+  if (hasInsertOrIgnore && !hasOnConflict) {
+    let inserted = false;
+    for (let s = 0; s < rewritten.length; s++) {
+      const seg = rewritten[s]!;
+      if (!seg.isCode) continue;
+      const retMatch = /\bRETURNING\b/i.exec(seg.text);
+      if (retMatch) {
+        seg.text = `${seg.text.slice(0, retMatch.index)} ON CONFLICT DO NOTHING ${seg.text.slice(retMatch.index)}`;
+        inserted = true;
+        break;
+      }
+    }
+    if (!inserted) {
+      rewritten.push({ isCode: true, text: ' ON CONFLICT DO NOTHING' });
     }
   }
 
-  out = out.replace(/\bMAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
-  out = out.replace(/\bINTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT\b/gi, 'SERIAL PRIMARY KEY');
-
-  return out;
+  return rewritten.map((s) => s.text).join('');
 }
 
 function unwrapSqlInput(
   input: string | SqlFragment,
+  pluginId: string,
   params: readonly unknown[] = [],
 ): { sqlText: string; boundParams: readonly unknown[]; fromSqlTag: boolean } {
   if (typeof input === 'string') {
     return { sqlText: input, boundParams: params, fromSqlTag: false };
   }
-  if (input && typeof input === 'object' && input.__burrowSql === true) {
+  if (isAuthenticSqlFragment(input)) {
     return { sqlText: input.text, boundParams: input.params, fromSqlTag: true };
   }
-  throw new Error('Invalid SQL argument passed to PluginDb');
+  throw new PluginSqlAccessError(pluginId, 'forged or invalid SqlFragment passed to PluginDb');
 }
 
 function assertWriteAllowedInRequest(pluginId: string, sqlText: string): void {
@@ -751,6 +1379,28 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, pluginId: 
   }
 }
 
+const SAFE_COLUMN_IDENT_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+const ALLOWED_QB_OPS = new Set<SqlComparisonOp>([
+  '=',
+  '!=',
+  '<',
+  '<=',
+  '>',
+  '>=',
+  'LIKE',
+  'IN',
+  'IS NULL',
+  'IS NOT NULL',
+]);
+
+function assertSafeColumnIdent(pluginId: string, column: string): string {
+  const clean = column.trim();
+  if (!SAFE_COLUMN_IDENT_RE.test(clean)) {
+    throw new PluginSqlAccessError(pluginId, `invalid column identifier "${column}"`);
+  }
+  return clean;
+}
+
 export function createPluginDb(
   rawDb: unknown,
   pluginId: string,
@@ -763,6 +1413,8 @@ export function createPluginDb(
   const enforceCoreAllowlist = dbOptions.coreTables !== undefined;
   const allowedCoreTables = new Set(dbOptions.coreTables ?? []);
 
+  registerPluginOwnedTables(rawDb, pluginId, dbOptions.ownedTables ?? []);
+
   const ensureClient = () => {
     if (!client || (!isPostgresClient(client) && typeof (client as { prepare?: unknown }).prepare !== 'function')) {
       throw new PluginSqlAccessError(pluginId, 'database binding is not available');
@@ -771,15 +1423,28 @@ export function createPluginDb(
 
   const checkRuntimeSql = (sqlText: string, fromSqlTag: boolean) => {
     if (!enforceLexer) return;
+    const clientKey =
+      client && (typeof client === 'object' || typeof client === 'function') ? (client as object) : null;
+    const owned = clientKey ? ownedTablesByDb.get(clientKey)?.get(pluginId) : undefined;
+    const allPrefixes = clientKey ? registeredPrefixesByDb.get(clientKey) : undefined;
+    const combinedOtherPrefixes = new Set<string>(dbOptions.otherPluginPrefixes ?? []);
+    if (allPrefixes) {
+      for (const p of allPrefixes) {
+        if (p !== prefix) combinedOtherPrefixes.add(p);
+      }
+    }
     assertPluginSqlAllowed(pluginId, sqlText, prefix, {
       isRuntime: true,
       fromSqlTag,
       allowedCoreTables,
       enforceCoreAllowlist,
+      ownedTables: owned,
+      otherPluginPrefixes: combinedOtherPrefixes.size > 0 ? combinedOtherPrefixes : undefined,
+      strictUnownedMultiSegment: !isPostgresClient(client),
     });
   };
 
-  return {
+  const api: PluginDb = {
     pluginId,
     prefix,
     dialect,
@@ -788,18 +1453,136 @@ export function createPluginDb(
     },
     sql: sqlTag,
 
+    from<T = Record<string, unknown>>(shortName: string): PluginTableQueryBuilder<T> {
+      const tableIdent = buildPluginTableIdentifier(pluginId, shortName);
+      let selectCols: string[] = [];
+      const wheres: Array<{ sql: string; params: unknown[] }> = [];
+      const orderBys: Array<{ col: string; dir: 'ASC' | 'DESC' }> = [];
+      let limitVal: number | null = null;
+
+      const buildWhereSql = (): { clause: string; params: unknown[] } => {
+        if (wheres.length === 0) return { clause: '', params: [] };
+        return {
+          clause: ` WHERE ${wheres.map((w) => w.sql).join(' AND ')}`,
+          params: wheres.flatMap((w) => w.params),
+        };
+      };
+
+      const buildSelectSql = (): { sql: string; params: unknown[] } => {
+        const cols = selectCols.length > 0 ? selectCols.join(', ') : '*';
+        const { clause, params } = buildWhereSql();
+        const orderSql =
+          orderBys.length > 0
+            ? ` ORDER BY ${orderBys.map((o) => `${o.col} ${o.dir}`).join(', ')}`
+            : '';
+        const limitSql = limitVal !== null ? ` LIMIT ${limitVal}` : '';
+        return {
+          sql: `SELECT ${cols} FROM ${tableIdent.value}${clause}${orderSql}${limitSql}`,
+          params,
+        };
+      };
+
+      const builder: PluginTableQueryBuilder<T> = {
+        select(...columns: string[]) {
+          selectCols = columns.map((c) => assertSafeColumnIdent(pluginId, c));
+          return builder;
+        },
+        where(column: string, op: SqlComparisonOp, value?: unknown) {
+          const safeCol = assertSafeColumnIdent(pluginId, column);
+          if (!ALLOWED_QB_OPS.has(op)) {
+            throw new PluginSqlAccessError(pluginId, `unsupported comparison operator "${String(op)}"`);
+          }
+          if (op === 'IS NULL' || op === 'IS NOT NULL') {
+            wheres.push({ sql: `${safeCol} ${op}`, params: [] });
+          } else if (op === 'IN') {
+            if (!Array.isArray(value) || value.length === 0) {
+              throw new PluginSqlAccessError(pluginId, 'IN filter requires a non-empty array');
+            }
+            wheres.push({
+              sql: `${safeCol} IN (${value.map(() => '?').join(', ')})`,
+              params: [...value],
+            });
+          } else {
+            wheres.push({ sql: `${safeCol} ${op} ?`, params: [value] });
+          }
+          return builder;
+        },
+        orderBy(column: string, direction: 'ASC' | 'DESC' = 'ASC') {
+          const safeCol = assertSafeColumnIdent(pluginId, column);
+          const safeDir = direction === 'DESC' ? 'DESC' : 'ASC';
+          orderBys.push({ col: safeCol, dir: safeDir });
+          return builder;
+        },
+        limit(count: number) {
+          if (typeof count !== 'number' || !Number.isFinite(count) || count < 1) {
+            throw new PluginSqlAccessError(pluginId, `invalid LIMIT value "${String(count)}"`);
+          }
+          limitVal = Math.min(Math.trunc(count), 5_000);
+          return builder;
+        },
+        all(options?: PluginDbQueryOptions) {
+          const { sql, params } = buildSelectSql();
+          return api.query<T>(sql, params, options);
+        },
+        first(options?: PluginDbQueryOptions) {
+          const { sql, params } = buildSelectSql();
+          return api.first<T>(sql, params, options);
+        },
+        insert(values: Record<string, unknown>, options?: PluginDbQueryOptions) {
+          const entries = Object.entries(values);
+          if (entries.length === 0) {
+            throw new PluginSqlAccessError(pluginId, 'insert() requires at least one column');
+          }
+          const cols = entries.map(([k]) => assertSafeColumnIdent(pluginId, k));
+          const params = entries.map(([, v]) => v);
+          const placeholders = cols.map(() => '?').join(', ');
+          return api.execute(
+            `INSERT INTO ${tableIdent.value} (${cols.join(', ')}) VALUES (${placeholders})`,
+            params,
+            options,
+          );
+        },
+        update(values: Record<string, unknown>, options?: PluginDbQueryOptions) {
+          if (wheres.length === 0) {
+            throw new PluginSqlAccessError(pluginId, 'update() requires at least one where() clause');
+          }
+          const entries = Object.entries(values);
+          if (entries.length === 0) {
+            throw new PluginSqlAccessError(pluginId, 'update() requires at least one column');
+          }
+          const setSql = entries.map(([k]) => `${assertSafeColumnIdent(pluginId, k)} = ?`).join(', ');
+          const setParams = entries.map(([, v]) => v);
+          const { clause, params } = buildWhereSql();
+          return api.execute(
+            `UPDATE ${tableIdent.value} SET ${setSql}${clause}`,
+            [...setParams, ...params],
+            options,
+          );
+        },
+        delete(options?: PluginDbQueryOptions) {
+          if (wheres.length === 0) {
+            throw new PluginSqlAccessError(pluginId, 'delete() requires at least one where() clause');
+          }
+          const { clause, params } = buildWhereSql();
+          return api.execute(`DELETE FROM ${tableIdent.value}${clause}`, params, options);
+        },
+      };
+
+      return builder;
+    },
+
     async query<T = Record<string, unknown>>(
       input: string | SqlFragment,
       params: readonly unknown[] = [],
       options: PluginDbQueryOptions = {},
     ): Promise<T[]> {
       ensureClient();
-      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
+      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, pluginId, params);
       checkRuntimeSql(sqlText, fromSqlTag);
       if (enforceLexer) assertWriteAllowedInRequest(pluginId, sqlText);
 
       const maxRows = Math.min(Math.max(1, options.maxRows ?? DEFAULT_MAX_ROWS), 5_000);
-      const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
+      const timeoutMs = clampQueryTimeoutMs(options.timeoutMs);
 
       const execQuery = async (): Promise<T[]> => {
         if (isPostgresClient(client)) {
@@ -829,11 +1612,11 @@ export function createPluginDb(
       options: PluginDbQueryOptions = {},
     ): Promise<T | null> {
       ensureClient();
-      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
+      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, pluginId, params);
       checkRuntimeSql(sqlText, fromSqlTag);
       if (enforceLexer) assertWriteAllowedInRequest(pluginId, sqlText);
 
-      const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
+      const timeoutMs = clampQueryTimeoutMs(options.timeoutMs);
       const execFirst = async (): Promise<T | null> => {
         if (isPostgresClient(client)) {
           const pgSql = translateSqlToPostgres(sqlText);
@@ -860,7 +1643,7 @@ export function createPluginDb(
       options: PluginDbQueryOptions = {},
     ): Promise<{ changes: number; lastRowId?: number | string }> {
       ensureClient();
-      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, params);
+      const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(input, pluginId, params);
       checkRuntimeSql(sqlText, fromSqlTag);
 
       const method = httpMethodStorage.getStore();
@@ -871,7 +1654,7 @@ export function createPluginDb(
         );
       }
 
-      const timeoutMs = options.timeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
+      const timeoutMs = clampQueryTimeoutMs(options.timeoutMs);
       const execMutate = async (): Promise<{ changes: number; lastRowId?: number | string }> => {
         if (isPostgresClient(client)) {
           const pgSql = translateSqlToPostgres(sqlText);
@@ -902,7 +1685,12 @@ export function createPluginDb(
         };
       };
 
-      return withTimeout(execMutate(), timeoutMs, pluginId);
+      const result = await withTimeout(execMutate(), timeoutMs, pluginId);
+      const createdTables = extractCreatedTablesFromSql(sqlText);
+      if (createdTables.length > 0) {
+        registerPluginOwnedTables(rawDb, pluginId, createdTables);
+      }
+      return result;
     },
 
     async batch(statements: ReadonlyArray<PluginDbStatement>): Promise<void> {
@@ -918,44 +1706,54 @@ export function createPluginDb(
       }
 
       const resolved = statements.map((s) => {
-        const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(s.sql, s.params ?? []);
+        const { sqlText, boundParams, fromSqlTag } = unwrapSqlInput(s.sql, pluginId, s.params ?? []);
         checkRuntimeSql(sqlText, fromSqlTag);
         return { sqlText, boundParams };
       });
 
-      if (isPostgresClient(client)) {
-        await withPluginPostgresRole(
-          client,
-          pluginId,
-          async (roleTx) => {
-            for (const s of resolved) {
-              await roleTx.unsafe(translateSqlToPostgres(s.sqlText), [...s.boundParams]);
-            }
-          },
-          { coreTables: dbOptions.coreTables },
-        );
-        return;
-      }
+      const execBatch = async () => {
+        if (isPostgresClient(client)) {
+          await withPluginPostgresRole(
+            client,
+            pluginId,
+            async (roleTx) => {
+              for (const s of resolved) {
+                await roleTx.unsafe(translateSqlToPostgres(s.sqlText), [...s.boundParams]);
+              }
+            },
+            { coreTables: dbOptions.coreTables },
+          );
+          return;
+        }
 
-      if (isD1Database(client)) {
-        const prepared: D1PreparedStatement[] = resolved.map((s) =>
-          client.prepare(s.sqlText).bind(...s.boundParams),
-        );
-        await client.batch(prepared);
-        return;
-      }
+        if (isD1Database(client)) {
+          const prepared: D1PreparedStatement[] = resolved.map((s) =>
+            client.prepare(s.sqlText).bind(...s.boundParams),
+          );
+          await client.batch(prepared);
+          return;
+        }
 
-      const sqlite = client as SqliteLikeDb;
-      const runAll = () => {
-        for (const s of resolved) {
-          sqlite.prepare(s.sqlText).run(...s.boundParams);
+        const sqlite = client as SqliteLikeDb;
+        const runAll = () => {
+          for (const s of resolved) {
+            sqlite.prepare(s.sqlText).run(...s.boundParams);
+          }
+        };
+        if (typeof sqlite.transaction === 'function') {
+          sqlite.transaction(runAll)();
+        } else {
+          runAll();
         }
       };
-      if (typeof sqlite.transaction === 'function') {
-        sqlite.transaction(runAll)();
-      } else {
-        runAll();
+
+      await withTimeout(execBatch(), DEFAULT_QUERY_TIMEOUT_MS, pluginId);
+      const createdTables = resolved.flatMap((s) => extractCreatedTablesFromSql(s.sqlText));
+      if (createdTables.length > 0) {
+        registerPluginOwnedTables(rawDb, pluginId, createdTables);
       }
     },
   };
+
+  return api;
 }

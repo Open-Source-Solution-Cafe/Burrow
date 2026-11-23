@@ -7,8 +7,10 @@ import {
 } from './manifest';
 import {
   assertPluginSqlAllowed,
+  extractCreatedTablesFromSql,
   isD1Database,
   isPostgresClient,
+  registerPluginOwnedTables,
   splitPluginSqlStatements,
   translateSqlToPostgres,
   type PostgresLikeSql,
@@ -118,6 +120,10 @@ export async function runPluginMigrations(
         `Plugin "${plugin.manifest.id}" has migrations but lacks required permission "db:own"`,
       );
     }
+    const createdInMigrations = (plugin.migrations ?? []).flatMap((m) =>
+      extractCreatedTablesFromSql(m.sql),
+    );
+    registerPluginOwnedTables(rawDb, plugin.manifest.id, createdInMigrations);
   }
 
   const withMigrations = activePlugins.filter((p) => (p.migrations?.length ?? 0) > 0);

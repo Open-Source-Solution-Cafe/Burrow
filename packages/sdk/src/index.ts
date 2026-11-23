@@ -103,6 +103,24 @@ export interface SqlIdentifier {
 }
 
 const SAFE_TABLE_PART_RE = /^[a-z][a-z0-9_]{0,40}$/;
+const AUTHENTIC_SQL_FRAGMENTS = new WeakSet<object>();
+const AUTHENTIC_SQL_IDENTIFIERS = new WeakSet<object>();
+const FORGED_IDENT_SQL_FRAGMENTS = new WeakSet<object>();
+
+/** Returns true only for genuine `SqlFragment` objects minted by `sql` template helper. */
+export function isAuthenticSqlFragment(value: unknown): value is SqlFragment {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    AUTHENTIC_SQL_FRAGMENTS.has(value) &&
+    !FORGED_IDENT_SQL_FRAGMENTS.has(value)
+  );
+}
+
+/** Returns true only for genuine `SqlIdentifier` objects minted by `buildPluginTableIdentifier` / `db.table()`. */
+export function isAuthenticSqlIdentifier(value: unknown): value is SqlIdentifier {
+  return typeof value === 'object' && value !== null && AUTHENTIC_SQL_IDENTIFIERS.has(value);
+}
 
 /**
  * Parameterized SQL tagged template helper.
@@ -112,25 +130,34 @@ const SAFE_TABLE_PART_RE = /^[a-z][a-z0-9_]{0,40}$/;
 export function sql(strings: TemplateStringsArray, ...values: unknown[]): SqlFragment {
   let text = '';
   const params: unknown[] = [];
+  let hasForgedIdentifier = false;
   for (let i = 0; i < strings.length; i++) {
     text += strings[i] ?? '';
     if (i < values.length) {
       const val = values[i];
-      if (val && typeof val === 'object' && (val as SqlIdentifier).__burrowIdent === true) {
+      if (AUTHENTIC_SQL_IDENTIFIERS.has(val as object)) {
         text += (val as SqlIdentifier).value;
       } else {
+        if (val && typeof val === 'object' && '__burrowIdent' in val) {
+          hasForgedIdentifier = true;
+        }
         text += '?';
         params.push(val);
       }
     }
   }
-  return Object.freeze({
+  const fragment: SqlFragment = Object.freeze({
     __burrowSql: true as const,
     strings: Object.freeze([...strings]),
     values: Object.freeze([...values]),
     text,
     params: Object.freeze(params),
   });
+  AUTHENTIC_SQL_FRAGMENTS.add(fragment);
+  if (hasForgedIdentifier) {
+    FORGED_IDENT_SQL_FRAGMENTS.add(fragment);
+  }
+  return fragment;
 }
 
 /** Validate and format a plugin-owned table identifier (`plugin_<id>_<shortName>`). */
@@ -143,10 +170,12 @@ export function buildPluginTableIdentifier(pluginId: string, shortName: string):
   }
   const prefix = `plugin_${pluginId.replace(/-/g, '_')}_`;
   const fullName = clean.startsWith(prefix) ? clean : `${prefix}${clean}`;
-  return Object.freeze({
+  const ident: SqlIdentifier = Object.freeze({
     __burrowIdent: true as const,
     value: fullName,
   });
+  AUTHENTIC_SQL_IDENTIFIERS.add(ident);
+  return ident;
 }
 
 export interface PluginDbStatement {
@@ -159,6 +188,36 @@ export interface PluginDbQueryOptions {
   timeoutMs?: number;
 }
 
+export type SqlComparisonOp =
+  | '='
+  | '!='
+  | '<'
+  | '<='
+  | '>'
+  | '>='
+  | 'LIKE'
+  | 'IN'
+  | 'IS NULL'
+  | 'IS NOT NULL';
+
+export interface PluginTableQueryBuilder<T = Record<string, unknown>> {
+  select(...columns: string[]): PluginTableQueryBuilder<T>;
+  where(column: string, op: SqlComparisonOp, value?: unknown): PluginTableQueryBuilder<T>;
+  orderBy(column: string, direction?: 'ASC' | 'DESC'): PluginTableQueryBuilder<T>;
+  limit(count: number): PluginTableQueryBuilder<T>;
+  all(options?: PluginDbQueryOptions): Promise<T[]>;
+  first(options?: PluginDbQueryOptions): Promise<T | null>;
+  insert(
+    values: Record<string, unknown>,
+    options?: PluginDbQueryOptions,
+  ): Promise<{ changes: number; lastRowId?: number | string }>;
+  update(
+    values: Record<string, unknown>,
+    options?: PluginDbQueryOptions,
+  ): Promise<{ changes: number; lastRowId?: number | string }>;
+  delete(options?: PluginDbQueryOptions): Promise<{ changes: number; lastRowId?: number | string }>;
+}
+
 export interface PluginDb {
   readonly pluginId: string;
   readonly prefix: string;
@@ -167,6 +226,8 @@ export interface PluginDb {
   table(shortName: string): SqlIdentifier;
   /** Tagged template helper bound to this PluginDb. */
   sql(strings: TemplateStringsArray, ...values: unknown[]): SqlFragment;
+  /** Safe query builder bound to a plugin-owned table with identifier validation and parameterized bindings. */
+  from?<T = Record<string, unknown>>(shortName: string): PluginTableQueryBuilder<T>;
   query<T = Record<string, unknown>>(
     sql: string | SqlFragment,
     params?: readonly unknown[],
