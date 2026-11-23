@@ -8,11 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **SDK & ESLint Licensing Audit (`docs/plugin-architecture/LICENSING.md`)**: Documented the MIT/AGPL boundary for `@burrow/sdk` and `@burrow/eslint-plugin`, verifying zero shared AGPL core code, sole authorship via git history and `CLA.md`, public npm `0.x` scope availability status, and the remaining legal sign-off item for direct core imports.
-- **Role-Pool PostgreSQL Plugin Isolation, Branded Query Builder & Security Test Suites (`postgres-isolation.ts`, `plugin-db.ts`, `packages/sdk`, `tests/security/*`, `docs/plugin-architecture/RESIDUAL-RISKS.md`)**: Added dedicated per-plugin `LOGIN` query roles (`plugin_<id>_role`) via `PluginPostgresPoolManager`, separate non-login schema owners (`plugin_<id>_owner`), short-lived migration roles (`plugin_<id>_migrator`), `db.from()` structured query builder and `WeakSet`-branded `sql` fragments in `@burrow/sdk`, promoted security regression suites in `tests/security/`, isolated in-process residual risk tests (`tests/redteam/residual/`, `vitest.residual.config.ts`), and published `RESIDUAL-RISKS.md`.
 
 ### Changed
-- **Owner Decisions & Merge Runbook (`docs/plugin-architecture/DECISIONS.md`, `docs/plugin-architecture/HANDOFF.md`)**: Recorded confirmed core domain scope (`D5`), clean-room SDK licensing checks (`D3`), per-plugin Hono RPC client guidance, public npm `0.x` release readiness, and the red-team-first `--no-ff` merge and tag sequence.
 
 ### Deprecated
 
@@ -21,12 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.6.2] - 2026-11-23
+
+### Added
+- **SDK & ESLint Licensing Audit (`docs/plugin-architecture/LICENSING.md`)**: Documented the MIT/AGPL boundary for `@burrow/sdk` and `@burrow/eslint-plugin`, verifying zero shared AGPL core code, sole authorship via git history and `CLA.md`, public npm `0.x` scope availability status, and the remaining legal sign-off item for direct core imports.
+- **Role-Pool PostgreSQL Plugin Isolation, Branded Query Builder & Security Test Suites (`postgres-isolation.ts`, `plugin-db.ts`, `packages/sdk`, `tests/security/*`, `docs/plugin-architecture/RESIDUAL-RISKS.md`)**: Added dedicated per-plugin `LOGIN` query roles (`plugin_<id>_role`) via `PluginPostgresPoolManager`, separate non-login schema owners (`plugin_<id>_owner`), short-lived migration roles (`plugin_<id>_migrator`), `db.from()` structured query builder and `WeakSet`-branded `sql` fragments in `@burrow/sdk`, promoted security regression suites in `tests/security/`, isolated in-process residual risk tests (`tests/redteam/residual/`, `vitest.residual.config.ts`), and published `RESIDUAL-RISKS.md`.
+
+### Changed
+- **Owner Decisions & Merge Runbook (`docs/plugin-architecture/DECISIONS.md`, `docs/plugin-architecture/HANDOFF.md`)**: Recorded confirmed core domain scope (`D5`), clean-room SDK licensing checks (`D3`), per-plugin Hono RPC client guidance, public npm `0.x` release readiness, and the red-team-first `--no-ff` merge and tag sequence.
+
+### Fixed
+- **Composite-Key `coreTables` FK Grant Guard (`src/core/plugins/postgres-isolation.ts`)**: Guarded `GRANT REFERENCES (id)` in `provisionPluginPostgresIsolation()` with an `information_schema.columns` check for an `id` column so core tables using composite primary keys (such as `members`) receive allowlisted `SELECT` privileges without failing on missing `id` columns.
+
+### Security
 - **Remediated P1–P4 Plugin Security & Core Auth Routing Findings (`RT-01`..`RT-28`)**:
   - **PostgreSQL 17 Containment (`RT-01`..`RT-04`, `RT-11`..`RT-13`)**: Removed `SECURITY DEFINER` from DDL event triggers so `current_user` stays the active plugin role; replaced session `SET ROLE` pooling with per-plugin `LOGIN` connection pools (`NOINHERIT`, locked `search_path`, `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`); revoked `PUBLIC` advisory-lock and metadata catalog access; removed unconditional core `REFERENCES` grants and enforced `ON DELETE CASCADE` on explicitly allowlisted core FKs at migration time.
   - **Context, Admin Authz, Lifecycle & Event Bus (`RT-05`, `RT-08`..`RT-10`, `RT-17`, `RT-19`, `RT-22`, `RT-23`, `RT-25`, `RT-26`, core `/api/auth/*` mount order)**: Mounted plugin auth sub-routes ahead of Better Auth's `/api/auth/*` wildcard while keeping standalone self-hosted authentication unchanged; stripped `c.env`/`ctx.infra` bindings from plugin handlers; defaulted external plugins to disabled until explicit operator consent and locked `/api/plugins*` reads/toggles to `isInstanceOwner`; unified `loadServerPlugins()` adapter/ID registries; deep-froze `ctx.manifest`; enforced `GET`/`HEAD` write locks on `ctx.storage`; isolated and capped `PluginEventBus` listeners via `structuredClone` + freeze; enforced `db:own` and `PLUGINS_DISABLED` in `runPluginMigrations()`; applied trusted-proxy rate limiting; redacted/truncated log metadata beyond depth 32.
   - **SQL Parser, WeakSet Brands & Timeout Enforcement (`RT-06`, `RT-07`, `RT-14`, `RT-21`, `RT-28`)**: Added `node-sql-parser` validation alongside linear `E'...'`/`ARRAY[...]` lexing and registered plugin-prefix disambiguation; replaced boolean SQL brands with unforgeable `WeakSet`s; enforced default-deny table allowlisting; clamped query timeouts `[10..30000]` ms and applied timeouts to `batch()`; preserved string literals and comments during PostgreSQL translation.
   - **SSRF, Storage, XSS, CSP, Manifest & Supply-Chain Validator (`RT-15`, `RT-16`, `RT-18`, `RT-20`, `RT-24`, `RT-27`)**: Hardened `safe-fetch` using `ipaddr.js` canonical IPv4/IPv6/NAT64 classification, fail-closed DNS, Node socket IP pinning, and cross-origin redirect header stripping; blocked active/SVG storage uploads with byte sniffing, `LocalStorageAdapter` `.svg` fallback to `application/octet-stream`, and cumulative byte/object quotas; replaced regex HTML/prop sanitizers with `sanitize-html` (`//` href block, 32-level depth cap); stripped plugin CSP headers unconditionally; required `cards:register` and manifest size bounds; closed lifecycle script, `bin`, tarball/lockfile, comment, `.cjs`/`.mts`, and AST obfuscation bypasses across `@burrow/eslint-plugin` and `scripts/plugin-validate.mjs`.
-
 ## [0.6.1] - 2026-11-22
 
 ### Changed
