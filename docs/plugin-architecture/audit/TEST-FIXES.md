@@ -19,3 +19,27 @@ This document logs every adjustment made to tests in `tests/redteam/` where a te
 - **Original assumption**: Passed `assertPluginSqlAllowed("SELECT load_extension('/tmp/evil.so')", 'alpha', { isRuntime: true })` with `sqlText` and `pluginId` positional arguments swapped.
 - **Change**: Corrected to `assertPluginSqlAllowed('alpha', "SELECT load_extension('/tmp/evil.so')", 'plugin_alpha_', { isRuntime: true })`.
 - **Justification**: `assertPluginSqlAllowed` accepts `(pluginId, sqlText, prefix, options)`. Correcting the argument order preserves the exact `load_extension` attack vector while invoking the real contract signature.
+
+### 3. `RT-15` (`tests/redteam/ssrf-storage-events.test.ts` — DNS Rebinding Re-Resolution Harness)
+- **File**: `Burrow/tests/redteam/ssrf-storage-events.test.ts` (lines 83–103)
+- **Original assumption**: Injected a static `resolveHostIps: async () => ['93.184.216.34']` while the mock `fetchImpl` hardcoded its own disconnected `lookupCount` returning `new Response('rebound-to-loopback-metadata')` regardless of DNS resolver or pinned Node socket lookup.
+- **Change**: Simulated DNS rebinding via `resolveHostIps` (returning `['93.184.216.34']` on the initial lookup and `['127.0.0.1']` on re-resolution).
+- **Justification**: Production Node transport now pins the initially resolved IP on `node:http`/`node:https` socket `lookup`, and custom `fetchImpl` re-verifies `resolveHostIps`; modeling rebinding through `resolveHostIps` preserves the exact DNS-rebinding attack scenario while working through `SafeFetchOptions`.
+
+### 4. `RT-18` (`tests/redteam/ssrf-storage-events.test.ts` — SVG Upload Rejection + Post-Restart Fallback)
+- **File**: `Burrow/tests/redteam/ssrf-storage-events.test.ts` (lines 162–184)
+- **Original assumption**: Called `await storage1.put('badge.svg', '<svg onload="alert(1)"></svg>', 'image/png')` without `.rejects` before testing `LocalStorageAdapter` restart fallback.
+- **Change**: Asserted BOTH that `PluginStorage.put` rejects `.svg` / `<svg` uploads with `PluginStorageError` AND wrote a legacy object directly via `adapter1.put('plugins/xss-plug/badge.svg', ...)` before adapter restart to confirm `adapter2` never serves `image/svg+xml`.
+- **Justification**: Hardening `PluginStorage.put` to block `.svg` extensions and sniff `<svg` content rejects SVG payloads upfront at upload time while preserving the restart fallback verification.
+
+### 5. `RT-27` (`tests/redteam/ssrf-storage-events.test.ts` — Cumulative Storage Quota Error Handling)
+- **File**: `Burrow/tests/redteam/ssrf-storage-events.test.ts` (lines 200–222)
+- **Original assumption**: Iterated 20 `storage.put` calls without catching `PluginStorageError`, assuming `put()` would silently cap rather than throw before asserting `listed.length < 20`.
+- **Change**: Caught `PluginStorageError` inside the 20-upload loop and asserted BOTH `quotaRejected === true` and `(await storage.list()).length < 20`.
+- **Justification**: Enforcing a cumulative per-plugin byte quota fails closed by rejecting uploads with `PluginStorageError` once the cap is exceeded.
+
+### 6. `RT-24` (`tests/redteam/xss-manifest-resources-supplychain.test.ts` — Core `script-src` vs Core `img-src`/`font-src` CSP)
+- **File**: `Burrow/tests/redteam/xss-manifest-resources-supplychain.test.ts` (lines 105–112)
+- **Original assumption**: Asserted `!csp.includes('data:')` across the full `Content-Security-Policy` header after clearing the plugin's injected CSP.
+- **Change**: Verified `https://evil.example` is absent and asserted the `script-src` directive equals `"script-src 'self'"` and omits `data:` (without failing on core Burrow's intentional `img-src 'self' data:` / `font-src 'self' data:` directives).
+- **Justification**: `loader.ts` now unconditionally deletes any `Content-Security-Policy` header set by external plugins so core `securityHeaders` applies Burrow's standard policy (`script-src 'self'`).

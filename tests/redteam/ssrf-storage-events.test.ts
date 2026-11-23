@@ -81,22 +81,17 @@ describe('Category 5, 8, 9 — SSRF/Egress, Storage & Event Bus', () => {
     });
 
     it('blocks DNS rebinding where first lookup returns public IP and second lookup returns loopback', async () => {
-      // Simulate TOCTOU: safeFetch resolves once during validateTargetUrl, then fetchImpl triggers a second DNS lookup
+      // Simulate TOCTOU DNS rebinding where initial lookup returns public IP and second lookup returns loopback
       let lookupCount = 0;
-      const fetchImpl = vi.fn().mockImplementation(async () => {
-        lookupCount++;
-        const secondIp = lookupCount === 1 ? '127.0.0.1' : '93.184.216.34';
-        if (secondIp === '127.0.0.1') {
-          return new Response('rebound-to-loopback-metadata');
-        }
-        return new Response('ok');
-      });
+      const fetchImpl = vi.fn().mockImplementation(async () => new Response('ok'));
       const safeFetch = createPluginFetch(baseManifest, {
         fetchImpl,
-        resolveHostIps: async () => ['93.184.216.34'],
+        resolveHostIps: async () => {
+          lookupCount++;
+          return lookupCount === 1 ? ['93.184.216.34'] : ['127.0.0.1'];
+        },
       });
 
-      // Because safeFetch does not pin the resolved IP on the socket/dispatcher, fetchImpl can hit 127.0.0.1
       await expect(safeFetch('https://api.allowed.example/rebind')).rejects.toThrow(
         PluginNetworkAccessError,
       );
@@ -168,9 +163,16 @@ describe('Category 5, 8, 9 — SSRF/Egress, Storage & Event Bus', () => {
       const dir = makeTempDir();
       const adapter1 = new LocalStorageAdapter(dir);
       const storage1 = createPluginStorage('xss-plug', adapter1);
-      await storage1.put('badge.svg', '<svg onload="alert(1)"></svg>', 'image/png');
+      await expect(
+        storage1.put('badge.svg', '<svg onload="alert(1)"></svg>', 'image/png'),
+      ).rejects.toThrow(PluginStorageError);
 
-      // Simulate process restart with fresh LocalStorageAdapter (in-memory contentTypes map cleared)
+      // Even if a legacy .svg object already exists on disk, simulate adapter restart and verify safe Content-Type fallback
+      await adapter1.put(
+        'plugins/xss-plug/badge.svg',
+        new TextEncoder().encode('<svg onload="alert(1)"></svg>'),
+        'image/png',
+      );
       const adapter2 = new LocalStorageAdapter(dir);
       const storage2 = createPluginStorage('xss-plug', adapter2);
       const obj = await storage2.get('badge.svg');
@@ -202,12 +204,20 @@ describe('Category 5, 8, 9 — SSRF/Egress, Storage & Event Bus', () => {
       const dir = makeTempDir();
       const adapter = new LocalStorageAdapter(dir);
       const storage = createPluginStorage('flood', adapter, { maxUploadBytes: 1024 });
-      // Uploading many max-sized files has no cumulative cap
+      let quotaRejected = false;
       for (let i = 0; i < 20; i++) {
-        await storage.put(`chunk-${i}.bin`, new Uint8Array(1024));
+        try {
+          await storage.put(`chunk-${i}.bin`, new Uint8Array(1024));
+        } catch (err) {
+          if (err instanceof PluginStorageError) {
+            quotaRejected = true;
+            break;
+          }
+          throw err;
+        }
       }
+      expect(quotaRejected).toBe(true);
       const listed = await storage.list();
-      // Expected total quota cap to reject unlimited accumulation
       expect(listed.length).toBeLessThan(20);
     });
 

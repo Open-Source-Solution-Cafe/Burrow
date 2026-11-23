@@ -104,8 +104,14 @@ describe('Category 6, 10, 11, 12 — XSS/UI, Manifest/Loader, Resource Abuse & S
 
         const res = await app.request('http://localhost/api/plugins/csp-weak/page');
         const csp = res.headers.get('Content-Security-Policy') ?? '';
+        const scriptSrc =
+          csp
+            .split(';')
+            .map((d) => d.trim())
+            .find((d) => d.startsWith('script-src')) ?? '';
         expect(csp).not.toContain('https://evil.example');
-        expect(csp).not.toContain('data:');
+        expect(scriptSrc).toBe("script-src 'self'");
+        expect(scriptSrc).not.toContain('data:');
       } finally {
         sqlite.close();
       }
