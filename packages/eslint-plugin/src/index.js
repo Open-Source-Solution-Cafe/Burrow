@@ -23,11 +23,31 @@ function isSanitizerCall(node) {
   return false;
 }
 
+function unwrapTsNode(node) {
+  let cur = node;
+  while (
+    cur &&
+    (cur.type === 'TSAsExpression' ||
+      cur.type === 'TSTypeAssertion' ||
+      cur.type === 'TSNonNullExpression' ||
+      cur.type === 'ParenthesizedExpression')
+  ) {
+    cur = cur.expression;
+  }
+  return cur;
+}
+
 function getStringLiteralValue(node) {
-  if (!node) return null;
-  if (node.type === 'Literal' && typeof node.value === 'string') return node.value;
-  if (node.type === 'TemplateLiteral' && node.expressions.length === 0) {
-    return node.quasis.map((q) => q.value.cooked ?? '').join('');
+  const cur = unwrapTsNode(node);
+  if (!cur) return null;
+  if (cur.type === 'Literal' && typeof cur.value === 'string') return cur.value;
+  if (cur.type === 'TemplateLiteral' && cur.expressions.length === 0) {
+    return cur.quasis.map((q) => q.value.cooked ?? '').join('');
+  }
+  if (cur.type === 'BinaryExpression' && cur.operator === '+') {
+    const left = getStringLiteralValue(cur.left);
+    const right = getStringLiteralValue(cur.right);
+    if (left !== null && right !== null) return left + right;
   }
   return null;
 }
@@ -40,11 +60,13 @@ function containsUnsafeSqlExpression(node, unsafeVars) {
   return false;
 }
 
+const GLOBAL_IDENTIFIERS = new Set(['globalThis', 'global', 'window', 'self']);
+
 const noUnsafeEvalRule = {
   meta: {
     type: 'problem',
     docs: {
-      description: 'Disallow eval, new Function, and string-evaluated timers in plugins',
+      description: 'Disallow eval, indirect eval, new Function, and string-evaluated timers in plugins',
     },
     messages: {
       noEval: 'Dynamic code evaluation ({{kind}}) is forbidden in Burrow plugins.',
@@ -53,7 +75,7 @@ const noUnsafeEvalRule = {
   create(context) {
     return {
       CallExpression(node) {
-        const callee = node.callee;
+        const callee = unwrapTsNode(node.callee);
         if (callee?.type === 'Identifier') {
           if (callee.name === 'eval') {
             context.report({ node, messageId: 'noEval', data: { kind: 'eval()' } });
@@ -73,13 +95,26 @@ const noUnsafeEvalRule = {
               });
             }
           }
-        } else if (
-          callee?.type === 'MemberExpression' &&
-          !callee.computed &&
-          callee.property?.type === 'Identifier' &&
-          callee.property.name === 'eval'
-        ) {
-          context.report({ node, messageId: 'noEval', data: { kind: '.eval()' } });
+        } else if (callee?.type === 'MemberExpression') {
+          const propName = callee.computed
+            ? getStringLiteralValue(callee.property)
+            : callee.property?.type === 'Identifier'
+              ? callee.property.name
+              : null;
+          if (propName === 'eval' || (propName === 'Function' && GLOBAL_IDENTIFIERS.has(unwrapTsNode(callee.object)?.name))) {
+            context.report({ node, messageId: 'noEval', data: { kind: `.${propName}()` } });
+          }
+        } else if (callee?.type === 'SequenceExpression') {
+          const last = unwrapTsNode(callee.expressions[callee.expressions.length - 1]);
+          if (last?.type === 'Identifier' && (last.name === 'eval' || last.name === 'Function')) {
+            context.report({ node, messageId: 'noEval', data: { kind: `(..., ${last.name})()` } });
+          }
+        }
+      },
+      SequenceExpression(node) {
+        const last = unwrapTsNode(node.expressions[node.expressions.length - 1]);
+        if (last?.type === 'Identifier' && (last.name === 'eval' || last.name === 'Function')) {
+          context.report({ node, messageId: 'noEval', data: { kind: `(..., ${last.name})` } });
         }
       },
       NewExpression(node) {
@@ -178,21 +213,47 @@ const noRawFetchRule = {
     },
   },
   create(context) {
+    const fetchAliases = new Set();
+
+    const isGlobalFetchExpr = (rawNode) => {
+      const node = unwrapTsNode(rawNode);
+      if (!node) return false;
+      if (node.type === 'Identifier' && node.name === 'fetch') return true;
+      if (node.type === 'MemberExpression') {
+        const obj = unwrapTsNode(node.object);
+        const propName = node.computed
+          ? getStringLiteralValue(node.property)
+          : node.property?.type === 'Identifier'
+            ? node.property.name
+            : null;
+        if (propName === 'fetch' && obj?.type === 'Identifier' && GLOBAL_IDENTIFIERS.has(obj.name)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
     return {
-      CallExpression(node) {
-        const callee = node.callee;
-        if (callee?.type === 'Identifier' && callee.name === 'fetch') {
+      VariableDeclarator(node) {
+        if (node.id?.type === 'Identifier' && isGlobalFetchExpr(node.init)) {
+          fetchAliases.add(node.id.name);
+        }
+      },
+      AssignmentExpression(node) {
+        if (node.left?.type === 'Identifier' && isGlobalFetchExpr(node.right)) {
+          fetchAliases.add(node.left.name);
+        }
+      },
+      MemberExpression(node) {
+        if (isGlobalFetchExpr(node)) {
           context.report({ node, messageId: 'rawFetch' });
-        } else if (
-          callee?.type === 'MemberExpression' &&
-          !callee.computed &&
-          callee.property?.type === 'Identifier' &&
-          callee.property.name === 'fetch' &&
-          callee.object?.type === 'Identifier' &&
-          (callee.object.name === 'globalThis' ||
-            callee.object.name === 'window' ||
-            callee.object.name === 'self')
-        ) {
+        }
+      },
+      CallExpression(node) {
+        const callee = unwrapTsNode(node.callee);
+        if (callee?.type === 'Identifier' && (callee.name === 'fetch' || fetchAliases.has(callee.name))) {
+          context.report({ node, messageId: 'rawFetch' });
+        } else if (isGlobalFetchExpr(callee)) {
           context.report({ node, messageId: 'rawFetch' });
         }
       },
@@ -212,14 +273,30 @@ const noProcessEnvRule = {
     },
   },
   create(context) {
+    const processAliases = new Set(['process']);
+
     return {
+      VariableDeclarator(node) {
+        const init = unwrapTsNode(node.init);
+        if (node.id?.type === 'Identifier' && init?.type === 'Identifier' && processAliases.has(init.name)) {
+          processAliases.add(node.id.name);
+        }
+      },
+      AssignmentExpression(node) {
+        const right = unwrapTsNode(node.right);
+        if (node.left?.type === 'Identifier' && right?.type === 'Identifier' && processAliases.has(right.name)) {
+          processAliases.add(node.left.name);
+        }
+      },
       MemberExpression(node) {
-        if (
-          node.object?.type === 'Identifier' &&
-          node.object.name === 'process' &&
-          ((!node.computed && node.property?.type === 'Identifier' && node.property.name === 'env') ||
-            (node.computed && getStringLiteralValue(node.property) === 'env'))
-        ) {
+        const obj = unwrapTsNode(node.object);
+        if (obj?.type !== 'Identifier' || !processAliases.has(obj.name)) return;
+        const propName = node.computed
+          ? getStringLiteralValue(node.property)
+          : node.property?.type === 'Identifier'
+            ? node.property.name
+            : null;
+        if (propName === 'env') {
           context.report({ node, messageId: 'processEnv' });
         }
       },

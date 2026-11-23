@@ -24,7 +24,20 @@ import tseslint from 'typescript-eslint';
 import burrowEslintPlugin, { recommendedRules } from '../packages/eslint-plugin/src/index.js';
 import { isLicensePermitted } from './check-licenses.mjs';
 
-const BLOCKED_LIFECYCLE_SCRIPTS = new Set(['preinstall', 'install', 'postinstall', 'prepare']);
+const BLOCKED_LIFECYCLE_SCRIPTS = new Set([
+  'preinstall',
+  'install',
+  'postinstall',
+  'prepare',
+  'preprepare',
+  'postprepare',
+  'prepack',
+  'postpack',
+  'prepublish',
+  'prepublishOnly',
+  'publish',
+  'postpublish',
+]);
 const VALID_PLUGIN_LICENSES_EXTRA = new Set(['AGPL-3.0-or-later', 'AGPL-3.0-only', 'AGPL-3.0']);
 const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,30}$/;
 const CONFIG_KEY_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -100,10 +113,47 @@ export function isPinnedDependencySpec(spec) {
   const trimmed = spec.trim();
   if (!trimmed) return false;
   if (trimmed === 'workspace:*' || /^workspace:\d+\.\d+\.\d+$/.test(trimmed)) return true;
-  if (/^file:.+\.tgz$/.test(trimmed)) return true;
   if (/^[~^><=*x]/i.test(trimmed) || trimmed === 'latest') return false;
-  if (/^(https?:|git\+|git:|github:|bitbucket:|gitlab:)/i.test(trimmed)) return false;
+  if (/^(file:|link:|portal:|https?:|git\+|git:|github:|bitbucket:|gitlab:)/i.test(trimmed)) return false;
+  if (/\.tgz(?:$|\?)/i.test(trimmed)) return false;
   return EXACT_SEMVER_RE.test(trimmed);
+}
+
+function stripJsComments(source) {
+  let out = '';
+  let inSingle = false;
+  let inDouble = false;
+  let inTemplate = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (!inSingle && !inDouble && !inTemplate) {
+      if (ch === '/' && next === '/') {
+        while (i < source.length && source[i] !== '\n') i++;
+        out += '\n';
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        i += 2;
+        while (i < source.length - 1 && !(source[i] === '*' && source[i + 1] === '/')) {
+          if (source[i] === '\n') out += '\n';
+          i++;
+        }
+        i++;
+        continue;
+      }
+    }
+    if (ch === '\\' && (inSingle || inDouble || inTemplate)) {
+      out += ch + (next ?? '');
+      i++;
+      continue;
+    }
+    if (ch === "'" && !inDouble && !inTemplate) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle && !inTemplate) inDouble = !inDouble;
+    else if (ch === '`' && !inSingle && !inDouble) inTemplate = !inTemplate;
+    out += ch;
+  }
+  return out;
 }
 
 function isPluginPackageLicenseAllowed(license) {
@@ -125,7 +175,8 @@ function walkSourceFiles(dir, files = []) {
   return files;
 }
 
-function validateRouteValidationUsage(code, relPath, findings) {
+function validateRouteValidationUsage(rawCode, relPath, findings) {
+  const code = stripJsComments(rawCode);
   const lines = code.split(/\r?\n/);
   const routeCallRe = /\b(?:ctx|context)\.route\s*\(/;
   const httpVerbRouteRe = /\b(?:router|app)\.(post|put|patch|delete|get)\s*\(\s*['"`]([^'"`]+)['"`]([^)]*)\)/g;
@@ -421,8 +472,27 @@ export function validatePluginDirectory(pluginDir, options = {}) {
       }
     }
 
-    // Check pinned dependencies and lockfile presence
-    const deps = { ...(pkg.dependencies || {}), ...(pkg.optionalDependencies || {}) };
+    // Disallow pkg.bin command hijacking entries
+    if (
+      pkg.bin !== undefined &&
+      ((typeof pkg.bin === 'string' && pkg.bin.trim().length > 0) ||
+        (typeof pkg.bin === 'object' && pkg.bin !== null && Object.keys(pkg.bin).length > 0))
+    ) {
+      findings.push({
+        rule: 'blocked-bin-entry',
+        severity: 'error',
+        file: 'package.json',
+        message: 'Plugins must not define package.json "bin" executables.',
+      });
+    }
+
+    // Check pinned dependencies and lockfile presence across all dependency maps
+    const deps = {
+      ...(pkg.dependencies || {}),
+      ...(pkg.devDependencies || {}),
+      ...(pkg.optionalDependencies || {}),
+      ...(pkg.peerDependencies || {}),
+    };
     const nonWorkspaceDeps = Object.entries(deps).filter(
       ([, spec]) => typeof spec === 'string' && !spec.startsWith('workspace:'),
     );
@@ -433,7 +503,7 @@ export function validatePluginDirectory(pluginDir, options = {}) {
           rule: 'unpinned-dependency',
           severity: 'error',
           file: 'package.json',
-          message: `Dependency "${depName}": "${spec}" must be pinned to an exact version (ranges like ^, ~, *, latest, and URLs are rejected).`,
+          message: `Dependency "${depName}": "${spec}" must be pinned to an exact version (ranges like ^, ~, *, latest, file:, git:, and tarball URLs are rejected).`,
         });
       }
 
@@ -453,17 +523,31 @@ export function validatePluginDirectory(pluginDir, options = {}) {
     }
 
     if (options.requireLockfile !== false && nonWorkspaceDeps.length > 0) {
-      const hasLockfile =
-        fs.existsSync(path.join(resolvedDir, 'pnpm-lock.yaml')) ||
-        fs.existsSync(path.join(resolvedDir, 'package-lock.json')) ||
-        fs.existsSync(path.join(resolvedDir, 'npm-shrinkwrap.json'));
-      if (!hasLockfile) {
+      const candidateLocks = ['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json']
+        .map((name) => path.join(resolvedDir, name))
+        .filter((p) => fs.existsSync(p));
+      const validLock = candidateLocks.some((lockPath) => {
+        try {
+          const stat = fs.statSync(lockPath);
+          if (!stat.isFile() || stat.size === 0) return false;
+          const content = fs.readFileSync(lockPath, 'utf8').trim();
+          if (!content) return false;
+          if (lockPath.endsWith('.json')) {
+            const parsed = JSON.parse(content);
+            return Boolean(parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0);
+          }
+          return content.includes('lockfileVersion') || content.includes(':');
+        } catch {
+          return false;
+        }
+      });
+      if (!validLock) {
         findings.push({
           rule: 'missing-lockfile',
           severity: 'error',
           file: 'pnpm-lock.yaml',
           message:
-            'Plugins with external dependencies must ship a lockfile (pnpm-lock.yaml or package-lock.json).',
+            'Plugins with external dependencies must ship a valid non-empty lockfile (pnpm-lock.yaml or package-lock.json).',
         });
       }
     }
@@ -564,7 +648,7 @@ export function validatePluginDirectory(pluginDir, options = {}) {
   const linter = new Linter({ configType: 'flat', cwd: resolvedDir });
   const eslintFlatConfig = [
     {
-      files: ['**/*.{js,mjs,cjs,ts,tsx,jsx}'],
+      files: ['**/*.{js,mjs,cjs,ts,tsx,mts,cts,jsx}'],
       languageOptions: {
         parser: tseslint.parser,
         parserOptions: {
@@ -591,7 +675,7 @@ export function validatePluginDirectory(pluginDir, options = {}) {
       continue;
     }
 
-    if (['.ts', '.tsx', '.js', '.mjs', '.jsx'].includes(ext)) {
+    if (['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx'].includes(ext)) {
       const code = fs.readFileSync(fullPath, 'utf8');
       const messages = linter.verify(code, eslintFlatConfig, relPath);
       for (const msg of messages) {
