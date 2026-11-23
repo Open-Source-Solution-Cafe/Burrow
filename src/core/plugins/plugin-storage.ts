@@ -13,10 +13,26 @@ export class PluginStorageError extends Error {
 
 export interface PluginStorageOptions {
   maxUploadBytes?: number;
+  maxTotalBytes?: number;
+  maxObjects?: number;
   allowedContentTypes?: ReadonlySet<string>;
 }
 
 const DEFAULT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+const DEFAULT_MAX_OBJECTS = 1_000;
+const BLOCKED_EXTENSIONS = new Set<string>([
+  'svg',
+  'svgz',
+  'html',
+  'htm',
+  'xhtml',
+  'js',
+  'mjs',
+  'cjs',
+  'php',
+  'xml',
+  'swf',
+]);
 
 const DEFAULT_ALLOWED_CONTENT_TYPES = new Set<string>([
   'application/json',
@@ -94,8 +110,11 @@ export function createPluginStorage(
   options: PluginStorageOptions = {},
 ): PluginStorage {
   const maxBytes = options.maxUploadBytes ?? DEFAULT_MAX_UPLOAD_BYTES;
+  const maxObjects = options.maxObjects ?? DEFAULT_MAX_OBJECTS;
+  const maxTotalBytes = options.maxTotalBytes ?? Math.min(50 * 1024 * 1024, maxBytes * 10);
   const allowedTypes = options.allowedContentTypes ?? DEFAULT_ALLOWED_CONTENT_TYPES;
   const prefix = `plugins/${pluginId}/`;
+  const cachedSizes = new Map<string, number>();
 
   const ensureStorage = (): IStorageAdapter => {
     if (!baseStorage) {
@@ -104,10 +123,66 @@ export function createPluginStorage(
     return baseStorage;
   };
 
+  const hasDisallowedContentSignature = (bytes: Uint8Array): boolean => {
+    const head = new TextDecoder()
+      .decode(bytes.subarray(0, 512))
+      .trimStart()
+      .toLowerCase();
+    return (
+      head.startsWith('<svg') ||
+      head.startsWith('<!doctype html') ||
+      head.startsWith('<html') ||
+      head.startsWith('<script') ||
+      head.includes('<svg') ||
+      head.includes('xmlns="http://www.w3.org/2000/svg"')
+    );
+  };
+
+  const measureExistingTotalBytes = async (storage: IStorageAdapter, targetFullKey: string): Promise<{ count: number; otherBytes: number; exists: boolean }> => {
+    const allKeys = typeof storage.listObjects === 'function' ? await storage.listObjects() : [];
+    const pluginKeys = allKeys.filter((k) => k.startsWith(prefix));
+    let otherBytes = 0;
+    let exists = false;
+    for (const k of pluginKeys) {
+      if (k === targetFullKey) {
+        exists = true;
+        continue;
+      }
+      let sz = cachedSizes.get(k);
+      if (sz === undefined && typeof storage.get === 'function') {
+        const obj = await storage.get(k);
+        if (obj) {
+          sz =
+            typeof obj.contentLength === 'number'
+              ? obj.contentLength
+              : obj.body instanceof Uint8Array
+                ? obj.body.byteLength
+                : obj.body instanceof ArrayBuffer
+                  ? obj.body.byteLength
+                  : 0;
+          cachedSizes.set(k, sz);
+        } else {
+          sz = 0;
+        }
+      }
+      otherBytes += sz ?? 0;
+    }
+    return { count: pluginKeys.length, otherBytes, exists };
+  };
+
   return {
     async put(key: string, data: ArrayBuffer | Uint8Array | string, contentType = 'application/octet-stream'): Promise<void> {
       const storage = ensureStorage();
       const fullKey = sanitizePluginStorageKey(pluginId, key);
+
+      const dotIdx = fullKey.lastIndexOf('.');
+      const ext = dotIdx !== -1 ? fullKey.slice(dotIdx + 1).toLowerCase() : '';
+      if (ext && BLOCKED_EXTENSIONS.has(ext)) {
+        throw new PluginStorageError(
+          pluginId,
+          `file extension ".${ext}" is not permitted for plugin storage`,
+        );
+      }
 
       const normalizedType = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
       if (!normalizedType || BLOCKED_CONTENT_TYPES.has(normalizedType) || !allowedTypes.has(normalizedType)) {
@@ -124,6 +199,13 @@ export function createPluginStorage(
             ? new Uint8Array(data)
             : data;
 
+      if (hasDisallowedContentSignature(bytes)) {
+        throw new PluginStorageError(
+          pluginId,
+          'payload contains active HTML/SVG markup and is disallowed in plugin storage',
+        );
+      }
+
       if (bytes.byteLength > maxBytes) {
         throw new PluginStorageError(
           pluginId,
@@ -131,7 +213,22 @@ export function createPluginStorage(
         );
       }
 
+      const usage = await measureExistingTotalBytes(storage, fullKey);
+      if (!usage.exists && usage.count + 1 > maxObjects) {
+        throw new PluginStorageError(
+          pluginId,
+          `plugin storage object quota (${maxObjects}) exceeded`,
+        );
+      }
+      if (usage.otherBytes + bytes.byteLength > maxTotalBytes) {
+        throw new PluginStorageError(
+          pluginId,
+          `plugin storage cumulative quota (${maxTotalBytes} bytes) exceeded`,
+        );
+      }
+
       await storage.put(fullKey, bytes, normalizedType);
+      cachedSizes.set(fullKey, bytes.byteLength);
     },
 
     async get(key: string): Promise<PluginStorageObject | null> {
@@ -143,6 +240,7 @@ export function createPluginStorage(
     async delete(key: string): Promise<void> {
       const storage = ensureStorage();
       const fullKey = sanitizePluginStorageKey(pluginId, key);
+      cachedSizes.delete(fullKey);
       await storage.delete(fullKey);
     },
 

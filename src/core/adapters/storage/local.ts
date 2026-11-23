@@ -67,7 +67,10 @@ export class LocalStorageAdapter implements IStorageAdapter {
       if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
       throw err;
     }
-    const contentType = this.contentTypes.get(normalized) ?? inferContentType(normalized);
+    const fallbackType = normalized.startsWith('plugins/') && normalized.toLowerCase().endsWith('.svg')
+      ? 'application/octet-stream'
+      : inferContentType(normalized);
+    const contentType = this.contentTypes.get(normalized) ?? fallbackType;
     return {
       body: new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
       contentLength: st.size,
