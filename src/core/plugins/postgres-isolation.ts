@@ -546,7 +546,12 @@ DO $$
 BEGIN
   IF to_regclass(${quoteLiteral(`public.${tbl}`)}) IS NOT NULL THEN
     EXECUTE format('GRANT SELECT ON TABLE public.%I TO %I', ${quoteLiteral(tbl)}, ${quoteLiteral(roleName)});
-    EXECUTE format('GRANT REFERENCES (id) ON TABLE public.%I TO %I', ${quoteLiteral(tbl)}, ${quoteLiteral(roleName)});
+    IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = ${quoteLiteral(tbl)} AND column_name = 'id'
+    ) THEN
+      EXECUTE format('GRANT REFERENCES (id) ON TABLE public.%I TO %I', ${quoteLiteral(tbl)}, ${quoteLiteral(roleName)});
+    END IF;
   END IF;
 END $$;
         `);
