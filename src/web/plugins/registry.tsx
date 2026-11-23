@@ -47,6 +47,15 @@ export function buildWebPluginRegistry(
         `Web plugin "${plugin.manifest.id}" lacks required permission "ui:register"`,
       );
     }
+    if (
+      plugin.cardTypes &&
+      plugin.cardTypes.length > 0 &&
+      !plugin.manifest.permissions.includes('cards:register')
+    ) {
+      throw new Error(
+        `Web plugin "${plugin.manifest.id}" registers cardTypes without required permission "cards:register"`,
+      );
+    }
     if (plugin.slashCommands) slashCommands.push(...plugin.slashCommands);
     if (plugin.mentionKinds) mentionKinds.push(...plugin.mentionKinds);
     if (plugin.cardTypes) cardTypes.push(...plugin.cardTypes);

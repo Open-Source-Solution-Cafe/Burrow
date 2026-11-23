@@ -1,3 +1,5 @@
+import sanitizeHtml from 'sanitize-html';
+
 export const BURROW_SDK_VERSION = '0.4.0';
 
 export type PluginDialect = 'sqlite' | 'postgres';
@@ -526,9 +528,6 @@ const ALLOWED_HTML_TAGS = new Set([
   'a',
 ]);
 
-const STRIP_BLOCK_TAG_RE = /<(script|style|iframe|object|embed|svg|math|noscript|template)[^>]*>[\s\S]*?<\/\1>/gi;
-const STRIP_SELF_CLOSING_DANGEROUS_RE = /<(script|style|iframe|object|embed|svg|math|link|meta|base|form|input)[^>]*\/?>/gi;
-
 function stripWhitespaceAndControl(value: string): string {
   let out = '';
   for (let i = 0; i < value.length; i++) {
@@ -539,9 +538,39 @@ function stripWhitespaceAndControl(value: string): string {
   return out;
 }
 
+function decodeHtmlEntities(input: string): string {
+  let current = input;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = current
+      .replace(/&#x([0-9a-fA-F]+);?/g, (_m, hex: string) => {
+        const cp = Number.parseInt(hex, 16);
+        return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/&#(\d+);?/g, (_m, dec: string) => {
+        const cp = Number.parseInt(dec, 10);
+        return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/&colon;/gi, ':')
+      .replace(/&tab;/gi, '\t')
+      .replace(/&newline;/gi, '\n')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'");
+    if (next === current) break;
+    current = next;
+  }
+  return current;
+}
+
 function isSafeHref(rawHref: string): boolean {
-  const cleaned = stripWhitespaceAndControl(rawHref).toLowerCase();
+  const decoded = decodeHtmlEntities(rawHref);
+  const cleaned = stripWhitespaceAndControl(decoded).toLowerCase();
   if (!cleaned) return false;
+  if (cleaned.startsWith('//') || cleaned.startsWith('/\\') || cleaned.startsWith('\\')) {
+    return false;
+  }
   if (
     cleaned.startsWith('http://') ||
     cleaned.startsWith('https://') ||
@@ -556,54 +585,81 @@ function isSafeHref(rawHref: string): boolean {
 
 /**
  * Allowlist-based HTML sanitizer for plugin UI strings rendered via `dangerouslySetInnerHTML`.
- * Strips scripts, iframes, SVG/MathML, inline event handlers, styles, and unsafe URI schemes.
+ * Strips scripts, iframes, SVG/MathML, inline event handlers, styles, protocol-relative URLs, and unsafe URI schemes.
  */
 export function sanitizePluginHtml(html: string): string {
   if (typeof html !== 'string' || !html) return '';
-  let out = html.replace(/\0/g, '');
-  out = out.replace(/<!--[\s\S]*?-->/g, '');
-  out = out.replace(STRIP_BLOCK_TAG_RE, '');
-  out = out.replace(STRIP_SELF_CLOSING_DANGEROUS_RE, '');
-
-  out = out.replace(/<\/?([a-zA-Z0-9-]+)([^>]*)>/g, (_full, rawTag: string, rawAttrs: string) => {
-    const tag = rawTag.toLowerCase();
-    if (!ALLOWED_HTML_TAGS.has(tag)) {
-      return '';
-    }
-    const isClosing = _full.startsWith('</');
-    if (isClosing) {
-      return `</${tag}>`;
-    }
-    if (tag === 'br') return '<br>';
-    if (tag === 'a') {
-      const hrefMatch = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(rawAttrs);
-      const rawHref = hrefMatch?.[1] ?? hrefMatch?.[2] ?? hrefMatch?.[3] ?? '';
-      if (rawHref && isSafeHref(rawHref)) {
-        const escapedHref = rawHref.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        return `<a href="${escapedHref}" rel="noopener noreferrer" target="_blank">`;
-      }
-      return '<a>';
-    }
-    return `<${tag}>`;
+  const cleanedNulls = html.replace(/\0/g, '');
+  return sanitizeHtml(cleanedNulls, {
+    allowedTags: [...ALLOWED_HTML_TAGS],
+    allowedAttributes: {
+      a: ['href', 'rel', 'target'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    allowedSchemesByTag: {
+      a: ['http', 'https', 'mailto'],
+    },
+    allowProtocolRelative: false,
+    disallowedTagsMode: 'discard',
+    nonTextTags: ['style', 'script', 'textarea', 'option', 'noscript', 'iframe', 'object', 'embed', 'svg', 'math'],
+    transformTags: {
+      a: (_tagName: string, attribs: sanitizeHtml.Attributes): sanitizeHtml.Tag => {
+        const rawHref = attribs.href ?? '';
+        if (rawHref && isSafeHref(rawHref)) {
+          return {
+            tagName: 'a',
+            attribs: {
+              href: rawHref,
+              rel: 'noopener noreferrer',
+              target: '_blank',
+            },
+          };
+        }
+        const cleanAttribs: sanitizeHtml.Attributes = {};
+        return {
+          tagName: 'a',
+          attribs: cleanAttribs,
+        };
+      },
+    },
   });
-
-  return out;
 }
+
+const MAX_PROP_SANITIZE_DEPTH = 32;
+const URL_PROP_KEYS = new Set([
+  'href',
+  'url',
+  'src',
+  'action',
+  'formaction',
+  'poster',
+  'cite',
+  'xlink:href',
+]);
 
 /**
  * Sanitizes string values and URL fields inside props passed to plugin UI slots
  * (mention chips, card badges/footers/panels).
  */
 export function sanitizePluginProps<T>(value: T, depth = 0): T {
-  if (depth > 6 || value === null || value === undefined) return value;
+  if (value === null || value === undefined) return value;
+  if (depth > MAX_PROP_SANITIZE_DEPTH) return null as unknown as T;
   if (typeof value === 'string') {
-    const noScripts = value
-      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-      .replace(/<\/?[a-zA-Z][^>]*on[a-z]+\s*=[^>]*>/gi, '');
-    if (/^\s*(?:javascript|vbscript|data):/i.test(stripWhitespaceAndControl(noScripts))) {
+    let stripped = value.replace(/\0/g, '');
+    if (stripped.includes('<') || stripped.includes('>')) {
+      stripped = sanitizeHtml(stripped, {
+        allowedTags: [],
+        allowedAttributes: {},
+        disallowedTagsMode: 'discard',
+        nonTextTags: ['style', 'script', 'textarea', 'option', 'noscript', 'iframe', 'object', 'embed', 'svg', 'math'],
+      });
+      stripped = stripped.replace(/<\/?[a-zA-Z][^>]*>?/g, '');
+    }
+    const decoded = stripWhitespaceAndControl(decodeHtmlEntities(stripped)).toLowerCase();
+    if (/^(?:javascript|vbscript|data):/i.test(decoded)) {
       return '' as unknown as T;
     }
-    return noScripts as unknown as T;
+    return stripped as unknown as T;
   }
   if (Array.isArray(value)) {
     return value.map((item) => sanitizePluginProps(item, depth + 1)) as unknown as T;
@@ -613,7 +669,7 @@ export function sanitizePluginProps<T>(value: T, depth = 0): T {
     if (proto !== null && proto !== Object.prototype) return value;
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      if ((k === 'href' || k === 'url' || k === 'src') && typeof v === 'string' && !isSafeHref(v)) {
+      if (URL_PROP_KEYS.has(k.toLowerCase()) && typeof v === 'string' && !isSafeHref(v)) {
         out[k] = null;
       } else {
         out[k] = sanitizePluginProps(v, depth + 1);

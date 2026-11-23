@@ -125,6 +125,11 @@ function isValidNetworkHostEntry(entry: string): boolean {
   return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(trimmed);
 }
 
+const MAX_MANIFEST_NAME_CHARS = 120;
+const MAX_MANIFEST_DESC_CHARS = 2_000;
+const MAX_MANIFEST_SERIALIZED_BYTES = 32_768;
+const MAX_MANIFEST_ARRAY_ITEMS = 64;
+
 export function validatePluginManifest(
   manifest: PluginManifest,
   hostSdkVersion = BURROW_SDK_VERSION,
@@ -132,6 +137,42 @@ export function validatePluginManifest(
   const rawId = typeof manifest?.id === 'string' ? manifest.id : '(unknown)';
   if (!manifest || typeof manifest !== 'object') {
     throw new PluginManifestError(rawId, 'manifest must be an object');
+  }
+  let serializedBytes: number;
+  try {
+    serializedBytes = JSON.stringify(manifest).length;
+  } catch {
+    throw new PluginManifestError(rawId, 'manifest must be JSON-serializable');
+  }
+  if (serializedBytes > MAX_MANIFEST_SERIALIZED_BYTES) {
+    throw new PluginManifestError(
+      rawId,
+      `manifest exceeds maximum serialized size (${MAX_MANIFEST_SERIALIZED_BYTES} bytes)`,
+    );
+  }
+  if (manifest.name !== undefined && (typeof manifest.name !== 'string' || manifest.name.length > MAX_MANIFEST_NAME_CHARS)) {
+    throw new PluginManifestError(
+      rawId,
+      `manifest.name must be a string <= ${MAX_MANIFEST_NAME_CHARS} characters`,
+    );
+  }
+  if (
+    manifest.description !== undefined &&
+    (typeof manifest.description !== 'string' || manifest.description.length > MAX_MANIFEST_DESC_CHARS)
+  ) {
+    throw new PluginManifestError(
+      rawId,
+      `manifest.description must be a string <= ${MAX_MANIFEST_DESC_CHARS} characters`,
+    );
+  }
+  for (const field of ['permissions', 'network', 'configKeys', 'coreTables', 'dependencies', 'dialects'] as const) {
+    const val = manifest[field];
+    if (Array.isArray(val) && val.length > MAX_MANIFEST_ARRAY_ITEMS) {
+      throw new PluginManifestError(
+        rawId,
+        `manifest.${field} exceeds maximum count (${MAX_MANIFEST_ARRAY_ITEMS})`,
+      );
+    }
   }
   if (typeof manifest.id !== 'string' || !PLUGIN_ID_RE.test(manifest.id)) {
     throw new PluginManifestError(

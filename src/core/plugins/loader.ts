@@ -178,15 +178,11 @@ function wrapPluginRouter(args: {
 
     await next();
 
-    // Prevent plugins from loosening core CSP or adding permissive wildcard CORS headers
+    // Prevent plugins from setting CSP or permissive CORS headers
     c.res.headers.delete('Access-Control-Allow-Origin');
     c.res.headers.delete('Access-Control-Allow-Credentials');
-    if (c.res.headers.has('Content-Security-Policy')) {
-      const val = c.res.headers.get('Content-Security-Policy') ?? '';
-      if (/unsafe-inline|unsafe-eval|\*/i.test(val)) {
-        c.res.headers.delete('Content-Security-Policy');
-      }
-    }
+    c.res.headers.delete('Content-Security-Policy');
+    c.res.headers.delete('Content-Security-Policy-Report-Only');
   });
 
   if (!isPublicRoute) {
