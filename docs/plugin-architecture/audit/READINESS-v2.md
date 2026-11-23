@@ -1,9 +1,11 @@
 # Burrow Plugin System — Readiness Re-Audit (v2, Honest Hardened Assessment)
 
+> **Post-Red-Team Update (`fix/redteam-1`)**: An independent red-team review subsequently identified bypasses against the initial `v2` controls ([RED-TEAM.md](./RED-TEAM.md)). All 28 core findings (`RT-01`..`RT-28`) have since been remediated (per-plugin `LOGIN` role pools, separate schema owners, `SECURITY INVOKER` DDL triggers, `node-sql-parser`, `WeakSet` SQL brands, `ipaddr.js` + DNS socket pinning, `sanitize-html`, default-disabled external consent, and hardened validator checks), promoted into [`tests/security/`](../../../tests/security/), and in-process JS runtime limits are recorded in [RESIDUAL-RISKS.md](../RESIDUAL-RISKS.md).
+
 **Date**: 2026-11-22  
-**Branch**: `feat/plugin-hardening` (replacing `audit/plugin-readiness` historical snapshot)  
-**Threat Model Reference**: [DECISIONS.md](../DECISIONS.md#d4-threat-model-db-enforcement--sqlite-tripwire-status-updated-2026-11-22)  
-**Verdict**: **PASS (PostgreSQL Production Hosts) / PARTIAL (SQLite & D1 Single-Boundary SQL Guard)** — Production-ready for curated first-party and operator-chosen self-hosted plugins under the documented trust boundary.
+**Branch**: `feat/plugin-hardening` → `redteam/plugin-hardening-review` → `fix/redteam-1`  
+**Threat Model Reference**: [RESIDUAL-RISKS.md](../RESIDUAL-RISKS.md) & [DECISIONS.md](../DECISIONS.md#d4-threat-model-db-enforcement--sqlite-tripwire-status-updated-2026-11-22)  
+**Verdict**: **PASS (PostgreSQL Production Hosts) / PARTIAL (SQLite & D1 Single-Boundary SQL Guard)** — Ready for curated first-party and operator-chosen self-hosted plugins under the documented in-process trust model.
 
 ---
 

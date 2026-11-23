@@ -1,13 +1,20 @@
 # Burrow Plugin System — Independent Red-Team Review
 
-**Date**: 2026-11-22  
-**Branch**: `redteam/plugin-hardening-review` (from `feat/plugin-hardening`)  
-**Scope**: Public `Burrow` core plugin runtime (`packages/sdk`, `src/core/plugins/*`, `src/core/routes/plugins-admin.ts`, `src/core/app.ts`, `src/core/adapters/storage/local.ts`, `src/web/*`, `scripts/plugin-validate.mjs`, `packages/eslint-plugin`), across both SQLite/D1 and PostgreSQL 17.  
-**Methodology**: Adversarial black-box & white-box exploit verification via isolated Vitest suites in [`vitest.redteam.config.ts`](file:///d:/Burrow-private-public/Burrow/vitest.redteam.config.ts) (`pnpm exec vitest run --config vitest.redteam.config.ts`: **70 tests — 50 failed = confirmed vulnerabilities, 20 passed = blocked attacks**).
+> **Remediation Status (`fix/redteam-1`, 2026-11-22)**: **REMEDIATED**  
+> All **28 confirmed findings (`RT-01`..`RT-28`)** below have been fixed on `fix/redteam-1`. All `vitest.redteam.config.ts` suites (**69/69 tests across 5 files**) now pass and have been promoted into [`tests/security/`](../../../tests/security/) so they run in default CI. Accepted in-process Node/Worker exposure checks (reading `process.env` / `globalThis` / built-ins from operator-installed JS) were extracted into [`tests/redteam/residual/in-process-escape.test.ts`](../../../tests/redteam/residual/in-process-escape.test.ts) (`vitest.residual.config.ts`, **1/1**) and documented in [RESIDUAL-RISKS.md](../RESIDUAL-RISKS.md). Test fixture/signature adjustments are recorded in [TEST-FIXES.md](./TEST-FIXES.md).  
+> **Post-Remediation Verdict**: **PASS for curated first-party and operator-chosen self-hosted plugins** under the documented trust model ([RESIDUAL-RISKS.md](../RESIDUAL-RISKS.md)); **DO NOT run untrusted third-party JS in-process** without external OS/isolate sandboxing.
 
 ---
 
-## Verdict: **DO NOT SHIP**
+**Original Audit Snapshot (`redteam/plugin-hardening-review`)**  
+**Date**: 2026-11-22  
+**Branch**: `redteam/plugin-hardening-review` (from `feat/plugin-hardening`)  
+**Scope**: Public `Burrow` core plugin runtime (`packages/sdk`, `src/core/plugins/*`, `src/core/routes/plugins-admin.ts`, `src/core/app.ts`, `src/core/adapters/storage/local.ts`, `src/web/*`, `scripts/plugin-validate.mjs`, `packages/eslint-plugin`), across both SQLite/D1 and PostgreSQL 17.  
+**Methodology**: Adversarial black-box & white-box exploit verification via isolated Vitest suites in [`vitest.redteam.config.ts`](file:///d:/Burrow-private-public/Burrow/vitest.redteam.config.ts) (baseline on `redteam/plugin-hardening-review`: **70 tests — 50 failed = confirmed vulnerabilities, 20 passed = blocked attacks**; after `fix/redteam-1`: **69/69 promoted security/redteam tests pass**, plus **1 residual in-process test** under [`vitest.residual.config.ts`](file:///d:/Burrow-private-public/Burrow/vitest.residual.config.ts)).
+
+---
+
+## Original Audit Verdict: **DO NOT SHIP** *(Superseded by `fix/redteam-1` Remediation Above)*
 
 Even under a *"curated first-party only / careless-plugin"* threat model—and **certainly** for any third-party or community plugin—the Burrow plugin subsystem is **not ready to ship**:
 

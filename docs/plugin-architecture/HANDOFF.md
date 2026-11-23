@@ -25,8 +25,8 @@ Burrow exposes a safe-by-default, capability-scoped plugin architecture across s
 
 ## 2. Database & Isolation Model
 - **Public Burrow migration `0006_add_card_type.sql`** (synced across `migrations/`, `migrations/postgres/`, and `src/worker/d1-migrations.ts`): additive non-null `cards.card_type TEXT NOT NULL DEFAULT 'task'`.
-- **PostgreSQL Database-Level Isolation (`PASS`)**: Every plugin receives its own `plugin_<id>` schema and `NOLOGIN NOSUPERUSER` role `plugin_<id>_role`, with `REVOKE ALL` across core/sibling schemas, selective FK `REFERENCES(id)` + explicit `manifest.coreTables` `SELECT` grants (excluding `invites.token_hash`), transactional `SET LOCAL ROLE` + pinned `search_path`, DDL event triggers blocking functions/triggers/cross-schema DDL, and migrations executed under `plugin_<id>_role` (never superuser).
-- **SQLite / Cloudflare D1 Guard (`PARTIAL` — Best-Effort Tripwire)**: SQLite and D1 have no database roles, schemas, or `GRANT`/`REVOKE`; `assertPluginSqlAllowed()` operates purely as a best-effort static/lexer tripwire for operator-trusted plugins, not a security isolation boundary.
+- **PostgreSQL Database-Level Isolation (`PASS`)**: Every plugin runs on its own `LOGIN` `NOINHERIT` connection pool role (`plugin_<id>_role`) against a `plugin_<id>` schema owned by a separate non-login `plugin_<id>_owner` role (migrations run under a short-lived `plugin_<id>_migrator` role), with `REVOKE ALL` across core/sibling schemas and `PUBLIC` advisory locks, server-locked timeouts & `search_path`, selective FK `ON DELETE CASCADE` + explicit `manifest.coreTables` `SELECT` grants (excluding `invites.token_hash`), and `SECURITY INVOKER` DDL event triggers blocking functions/triggers/extensions and cross-schema DDL.
+- **SQLite / Cloudflare D1 Guard (`PARTIAL` — Best-Effort Tripwire)**: SQLite and D1 have no database roles, schemas, or `GRANT`/`REVOKE`; `assertPluginSqlAllowed()` (`node-sql-parser` + linear lexer) operates purely as a best-effort tripwire for operator-trusted plugins, not a security isolation boundary. See [RESIDUAL-RISKS.md](./RESIDUAL-RISKS.md).
 
 ---
 
