@@ -207,7 +207,7 @@ describe('Category 1 — SQLite/D1 Lexer & PluginDb Attacks', () => {
 
     it('blocks load_extension in assertPluginSqlAllowed before driver execution', () => {
       expect(() =>
-        assertPluginSqlAllowed("SELECT load_extension('/tmp/evil.so')", 'alpha', {
+        assertPluginSqlAllowed('alpha', "SELECT load_extension('/tmp/evil.so')", 'plugin_alpha_', {
           isRuntime: true,
         }),
       ).toThrow(PluginSqlAccessError);
