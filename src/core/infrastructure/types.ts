@@ -8,6 +8,8 @@ import type { ContentReferenceKind, ReferencePreview } from '../../shared/refere
 import type { BurrowRuntime } from '../../shared/uploadPolicy';
 import type { FeatureFlagMap } from '../../shared/featureFlags';
 
+import type { AuthPublicConfigPatch } from '@burrow/sdk';
+
 /**
  * Minimal auth provider interface for the core app factory.
  * Implementations (e.g. BetterAuth) live in the platform layer.
@@ -19,6 +21,8 @@ export interface AuthProvider {
   ): Promise<{ userId: string; email?: string; name?: string; image?: string | null } | null>;
   /** Hono handler for auth endpoints (sign-in, sign-up, etc.). */
   handler(req: Request): Promise<Response>;
+  /** Optional auth config extension merged into GET /api/auth/config. */
+  getPublicConfig?(): AuthPublicConfigPatch | Promise<AuthPublicConfigPatch>;
 }
 
 /**
@@ -56,6 +60,7 @@ export interface Infrastructure {
   runtime?: BurrowRuntime;
   appUrl?: string;
   env?: Record<string, any>;
+  db?: unknown;
 }
 
 /** Explicit project boundary for repository traversal and resource relationships. */
@@ -434,7 +439,7 @@ export interface INotepadRepository {
   ): Promise<{ id: string; title: string; icon: string | null }[]>;
 }
 
-/** Actor and tenant scope required by every note/tree/content write command. */
+/** Actor and workspace scope required by every note/tree/content write command. */
 export interface NotepadMutationScope {
   workspaceId: string;
   projectId: string;
@@ -442,7 +447,7 @@ export interface NotepadMutationScope {
   minimumRole: 'editor' | 'owner';
 }
 
-/** Explicit tenant and actor scope for project tag mutations. */
+/** Explicit workspace and actor scope for project tag mutations. */
 export type TagMutationScope = NotepadMutationScope;
 
 export interface ITagRepository {
@@ -540,6 +545,13 @@ export interface IInviteRepository {
     workspaceId: string;
     role: 'owner' | 'editor' | 'viewer';
   } | null>;
+  rotatePendingToken(
+    id: string,
+    workspaceId: string,
+    tokenHash: string,
+    expiresAt: number,
+    now: number,
+  ): Promise<Invite | null>;
   delete(id: string, workspaceId: string): Promise<void>;
 }
 
@@ -661,6 +673,7 @@ export interface BoardWithDetails extends Board {
         notepadId: string;
         title: string;
         position: string;
+        cardType?: string;
         priority: CardPriority | null;
         dueDate: number | null;
         createdAt: number;
@@ -693,6 +706,7 @@ export interface Card {
   boardId: string;
   columnId: string;
   notepadId: string;
+  cardType?: string;
   position: string;
   priority: CardPriority | null;
   dueDate: number | null;
@@ -727,6 +741,7 @@ export interface CardPlan {
   actorId: string;
   cardId: string;
   notepadId: string;
+  cardType?: string;
   title: string;
   content: string;
   plainText: string;
@@ -743,6 +758,7 @@ export interface CardPlan {
 export interface UpdateCardData {
   columnId?: string;
   position?: string;
+  cardType?: string;
   priority?: CardPriority | null;
   dueDate?: number | null;
 }

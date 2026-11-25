@@ -33,6 +33,7 @@ import { positionBetween } from './utils/ordering';
 import { extractFromContent } from '../../shared/extract';
 import { getDescendantIds, getDepth, getSubtreeHeight, wouldCauseCycle } from '../shared/tree';
 import type { ILockAdapter } from '../adapters/lock';
+import type { PluginEventBus } from '../plugins/event-bus';
 
 export { MAX_NOTEPAD_DEPTH, MAX_CONTENT_BYTES, LOCK_TTL_MS } from '../shared/limits';
 
@@ -123,6 +124,7 @@ export class NotepadService {
     },
     private readonly locks: ILockAdapter,
     private readonly storage?: IStorageAdapter,
+    private readonly events?: PluginEventBus,
   ) {}
 
   /** Only disclose lock-holder identity after verifying membership in the resource's workspace. */
@@ -484,6 +486,14 @@ export class NotepadService {
         lock: args.clientId
           ? { clientId: args.clientId, userId: args.actorId, expiresAt: now + LOCK_TTL_MS }
           : undefined,
+      });
+      await this.events?.emitAfter('notepad.saved', {
+        workspaceId: args.workspaceId,
+        projectId: row.projectId,
+        notepadId: args.notepadId,
+        version,
+        actorId: args.actorId,
+        content: args.content,
       });
       return { version };
     } catch (err) {

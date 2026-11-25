@@ -43,12 +43,17 @@ Because Cloudflare Workers cannot execute `git` or rebuild themselves inside the
 4. In Cloudflare Dashboard → your Worker → **Settings → Variables and Secrets**, add `SELF_UPDATE_WEBHOOK_URL` with that trigger URL.
 5. Click **Upgrade Now** in Burrow whenever an update banner appears — GitLab CI syncs upstream Burrow and Cloudflare Workers Builds automatically redeploys.
 
-### GitHub + Cloudflare Workers Builds
+### GitHub + Cloudflare Workers Builds (Included `.github/workflows/sync-upstream.yml`)
 
-1. Add a workflow `.github/workflows/sync-upstream.yml` to your cloned repository listening to `repository_dispatch` (`types: [burrow-update]`) that runs `node scripts/sync-upstream.mjs` and pushes to your default branch.
-2. In Cloudflare Worker Secrets, set:
+Burrow ships `.github/workflows/sync-upstream.yml` pre-configured for `repository_dispatch` (`types: [burrow-update]`) and `workflow_dispatch`:
+
+1. Create **one** Fine-Grained GitHub PAT scoped strictly to your cloned repository with **Contents: Read and write** permission.
+2. In your cloned GitHub repo → **Settings → Secrets and variables → Actions**, add `BURROW_SYNC_TOKEN` with that PAT (so merged pushes trigger **Cloudflare Workers Builds**).
+3. In Cloudflare Dashboard → your Worker → **Settings → Variables and Secrets**, set:
    - `SELF_UPDATE_WEBHOOK_URL=https://api.github.com/repos/<OWNER>/<REPO>/dispatches`
-   - `SELF_UPDATE_WEBHOOK_TOKEN=<fine-grained PAT with contents: write>`
+   - `SELF_UPDATE_WEBHOOK_TOKEN=<that same PAT>`
+
+*(Optional zero-PAT path: omit `BURROW_SYNC_TOKEN` and instead save a Cloudflare **Deploy Hook** URL as `CLOUDFLARE_DEPLOY_HOOK_URL` in GitHub Actions Secrets so `sync-upstream.yml` triggers a rebuild via `workflow_dispatch` or `repository_dispatch`.)*
 
 ### Manual Sync (Local CLI)
 

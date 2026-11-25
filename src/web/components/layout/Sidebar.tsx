@@ -10,6 +10,7 @@ import {
   Library,
   Kanban,
   LogOut,
+  Plug,
   Plus,
   Search,
   Settings,
@@ -31,6 +32,7 @@ import { Avatar } from '../ui/Avatar';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { PromptDialog } from '../ui/PromptDialog';
 import {
+  invalidateProjectNotepads,
   useBoards,
   useCreateBoard,
   useDeleteBoard,
@@ -48,11 +50,15 @@ import { useResizableWidth } from '../../lib/useResizableWidth';
 import { useTranslation } from '../../lib/i18n';
 import { NotepadTree } from '../notepads/NotepadTree';
 import { NotificationsBell } from './NotificationsBell';
+import { useWebPlugins } from '../../plugins/registry';
 import {
   boardTarget,
+  isProjectSettingsPath,
+  isWorkspaceSettingsPath,
   notepadTarget,
   projectTarget,
   projectLibraryTarget,
+  projectSettingsTarget,
   trashTarget,
   workspaceMembersTarget,
   workspaceProfileTarget,
@@ -66,7 +72,15 @@ interface SidebarProps {
   onCloseMobile?: () => void;
 }
 
-type RailTab = 'overview' | 'notepads' | 'boards' | 'tasks' | 'members' | 'trash' | 'search';
+type RailTab =
+  | 'overview'
+  | 'notepads'
+  | 'boards'
+  | 'tasks'
+  | 'members'
+  | 'trash'
+  | 'search'
+  | `plugin:${string}`;
 
 const THEME_OPTIONS: BurrowTheme[] = ['modern', 'basalt', 'light'];
 
@@ -76,6 +90,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const pathname = location.pathname;
   const { t } = useTranslation();
   const { isModern, theme, setTheme } = useTheme();
+  const { sidebarPanels } = useWebPlugins();
   const { data: account } = useAccount();
   const params = useParams({ strict: false }) as {
     workspaceId?: string;
@@ -87,6 +102,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   const currentProjectId = params.projectId;
   const workspaceRole = account?.workspaces.find((workspace) => workspace.id === workspaceId)?.role;
   const libraryActive = pathname.endsWith('/library');
+  const projectSettingsActive = isProjectSettingsPath(pathname);
   const projectLibraryLink = workspaceId && currentProjectId && (
     <Link
       {...projectLibraryTarget(workspaceId, currentProjectId)}
@@ -99,6 +115,20 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
     >
       <Library className="h-4 w-4 shrink-0" />
       <span>{t('sidebar.projectLibrary')}</span>
+    </Link>
+  );
+  const projectSettingsLink = workspaceId && currentProjectId && (
+    <Link
+      {...projectSettingsTarget(workspaceId, currentProjectId)}
+      onClick={() => {
+        setActiveRailTab('overview');
+        onCloseMobile?.();
+      }}
+      aria-current={projectSettingsActive ? 'page' : undefined}
+      className={`flex items-center gap-2.5 px-2.5 py-2 text-sm theme-radius-md ${projectSettingsActive ? 'bg-hi text-hi-ink font-semibold' : 'text-muted hover:bg-hi hover:text-text'}`}
+    >
+      <Settings className="h-4 w-4 shrink-0" />
+      <span>{t('sidebar.projectSettings')}</span>
     </Link>
   );
   const currentBoardId = params.boardId;
@@ -141,7 +171,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   // Active rail tab selection state
   const getInitialRailTab = (): RailTab => {
     if (pathname.endsWith('/tasks')) return 'tasks';
-    if (pathname.includes('/settings')) return 'members';
+    if (isWorkspaceSettingsPath(pathname)) return 'members';
     if (currentProjectId && pathname.startsWith(`/w/${workspaceId}/p/${currentProjectId}/trash`))
       return 'trash';
     if (currentBoardId) return 'boards';
@@ -157,7 +187,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   useEffect(() => {
     if (pathname.endsWith('/tasks')) {
       setActiveRailTab('tasks');
-    } else if (pathname.includes('/settings')) {
+    } else if (isWorkspaceSettingsPath(pathname)) {
       setActiveRailTab('members');
     } else if (
       currentProjectId &&
@@ -168,7 +198,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       setActiveRailTab('boards');
     } else if (currentNotepadId) {
       setActiveRailTab('notepads');
-    } else if (isOverviewActive) {
+    } else if (isOverviewActive || isProjectSettingsPath(pathname)) {
       setActiveRailTab('overview');
     }
   }, [pathname, workspaceId, currentProjectId, currentBoardId, currentNotepadId, isOverviewActive]);
@@ -240,7 +270,14 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
   };
 
   const createRootNotepad = useMutation({
-    mutationFn: async ({ workspaceId, projectId }: { workspaceId: string; projectId: string }) => {
+    mutationFn: async ({
+      workspaceId,
+      projectId,
+    }: {
+      accountId?: string;
+      workspaceId: string;
+      projectId: string;
+    }) => {
       const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,7 +287,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
       return res.json();
     },
     onSuccess: (data: { id: string }, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] });
+      invalidateProjectNotepads(queryClient, vars.accountId, vars.workspaceId, vars.projectId);
       if (data.id) {
         navigate({
           ...notepadTarget(vars.workspaceId, vars.projectId, data.id),
@@ -264,7 +301,11 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
 
   const createRootNotepadNow = () => {
     if (!workspaceId || !currentProjectId) return;
-    createRootNotepad.mutate({ workspaceId, projectId: currentProjectId });
+    createRootNotepad.mutate({
+      accountId: account?.user.id,
+      workspaceId,
+      projectId: currentProjectId,
+    });
   };
 
   const openPalette = (query?: string) => {
@@ -524,6 +565,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
             <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
             <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
             {projectLibraryLink}
+            {projectSettingsLink}
           </div>
 
           {/* Scrollable sections */}
@@ -923,6 +965,31 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               </button>
             )}
 
+            {/* Plugin Sidebar Panels */}
+            {workspaceId &&
+              sidebarPanels.map((panel) => {
+                const tabKey: RailTab = `plugin:${panel.id}`;
+                const PanelIcon = (panel.icon ?? Plug) as import('react').ComponentType<{
+                  className?: string;
+                }>;
+                return (
+                  <button
+                    key={panel.id}
+                    type="button"
+                    onClick={() => setActiveRailTab(tabKey)}
+                    className={`w-10 h-10 flex items-center justify-center transition cursor-pointer ${
+                      activeRailTab === tabKey
+                        ? 'bg-accent text-accent-ink'
+                        : 'text-ink-muted hover:text-text hover:bg-hi'
+                    }`}
+                    title={panel.label}
+                    aria-label={panel.label}
+                  >
+                    <PanelIcon className="w-[18px] h-[18px]" />
+                  </button>
+                );
+              })}
+
             {/* Update available indicator */}
             {systemVersion?.updateAvailable && systemVersion?.allowSelfUpdate && workspaceId && (
               <Link
@@ -1008,6 +1075,7 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
               <div className="font-eyebrow mb-1">{t('sidebar.project')}</div>
               <ProjectSwitcher key={workspaceId} currentProjectId={currentProjectId} />
               {projectLibraryLink}
+              {projectSettingsLink}
             </div>
 
             {/* ------------------------------------------------------------- */}
@@ -1555,13 +1623,13 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                         ? workspaceSettingsTarget(workspaceId)
                         : { to: '/' as const })}
                       className={`flex items-center gap-2.5 h-[34px] px-3 text-[13px] transition ${
-                        pathname.endsWith('/settings')
+                        isWorkspaceSettingsPath(pathname) && !pathname.endsWith('/members')
                           ? 'bg-hi text-hi-ink font-bold'
                           : 'text-ink-muted font-medium hover:bg-hi hover:text-side-text'
                       }`}
                     >
                       <Settings className="w-4 h-4 shrink-0" />
-                      <span>{t('sidebar.projectSettings')}</span>
+                      <span>{t('sidebar.workspaceSettings')}</span>
                     </Link>
                   </div>
 
@@ -1688,6 +1756,25 @@ export function Sidebar({ onCloseMobile }: SidebarProps) {
                 )}
               </div>
             )}
+
+            {workspaceId &&
+              sidebarPanels.map((panel) => {
+                if (activeRailTab !== `plugin:${panel.id}`) return null;
+                const PanelBody = panel.render as import('react').ComponentType<{
+                  workspaceId: string;
+                  projectId?: string;
+                  onCloseMobile?: () => void;
+                }>;
+                return (
+                  <div key={panel.id} className="p-3">
+                    <PanelBody
+                      workspaceId={workspaceId}
+                      projectId={currentProjectId}
+                      onCloseMobile={onCloseMobile}
+                    />
+                  </div>
+                );
+              })}
           </div>
         </aside>
       )}

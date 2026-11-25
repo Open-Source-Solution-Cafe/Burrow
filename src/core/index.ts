@@ -104,4 +104,52 @@ export {
 } from './middleware/session';
 
 // Re-export app factory
-export { createCoreApp } from './app';
+export { createCoreApp, type CreateCoreAppOptions } from './app';
+
+// Re-export plugin primitives
+export { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
+export { MentionSourceRegistry, PLUGIN_MENTION_KIND_RE } from './plugins/mention-registry';
+export {
+  validatePluginManifest,
+  assertPluginDialectSupported,
+  pluginTablePrefix,
+  PluginManifestError,
+  PLUGIN_ID_RE,
+  VALID_PLUGIN_PERMISSIONS,
+  ALLOWLISTABLE_CORE_TABLES,
+} from './plugins/manifest';
+export {
+  pluginPostgresSchemaName,
+  pluginPostgresRoleName,
+  provisionPluginPostgresIsolation,
+  withPluginPostgresRole,
+} from './plugins/postgres-isolation';
+export {
+  createPluginDb,
+  assertPluginSqlAllowed,
+  splitPluginSqlStatements,
+  translateSqlToPostgres,
+  detectPluginDialect,
+  runWithPluginHttpMethod,
+  PluginSqlAccessError,
+} from './plugins/plugin-db';
+export { runPluginMigrations } from './plugins/migrations';
+export { loadServerPlugins, sortPluginsByDependencies } from './plugins/loader';
+export { PluginRuntimeRegistry, type PluginAdminView } from './plugins/runtime-state';
+export {
+  createPluginFetch,
+  isBlockedIpAddress,
+  isBlockedHostname,
+  PluginNetworkAccessError,
+} from './plugins/safe-fetch';
+export {
+  createPluginStorage,
+  sanitizePluginStorageKey,
+  PluginStorageError,
+} from './plugins/plugin-storage';
+export {
+  createPluginLogger,
+  redactSecrets,
+  buildScopedPluginConfig,
+  collectSecretValues,
+} from './plugins/logger';

@@ -319,6 +319,7 @@ export const cards = pgTable(
       .unique()
       .references(() => notepads.id, { onDelete: 'cascade' }),
     kind: notepadKindEnum('kind').notNull().default('card'),
+    cardType: text('card_type').notNull().default('task'),
     position: text('position').notNull(),
     priority: cardPriorityEnum('priority'),
     dueDate: bigint('due_date', { mode: 'number' }),

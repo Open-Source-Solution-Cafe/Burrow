@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
 import { HTTPException } from 'hono/http-exception';
 import {
   maxUploadBytesForRuntime,
@@ -41,12 +42,15 @@ import { createWorkspaceViewRoutes } from './routes/workspace-views';
 import { createProjectFileRoutes } from './routes/project-files';
 import { createSystemRoutes } from './routes/system';
 import { createFeatureFlagRoutes } from './routes/feature-flags';
-import { createWorkspaceExportRoutes } from './routes/workspace-export';
-import {
-  createShareManagementRoutes,
-  createPublicShareViewerRoutes,
-} from './routes/public-shares';
+import { createPluginAdminRoutes } from './routes/plugins-admin';
+import { createPublicSharingPlugin } from '../../packages/plugins/public-sharing/src/index';
+import { createWorkspaceExportPlugin } from '../../packages/plugins/workspace-export/src/index';
 import { type AccessPolicy, SelfHostedPolicy } from './policy';
+import type { BurrowServerPlugin } from '@burrow/sdk';
+import { PluginEventBus, runWithEventExecutionContext } from './plugins/event-bus';
+import { MentionSourceRegistry } from './plugins/mention-registry';
+import { loadServerPlugins } from './plugins/loader';
+import { PluginRuntimeRegistry } from './plugins/runtime-state';
 
 function parseSafeHttpUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -70,24 +74,164 @@ export interface Env {
   };
 }
 
+export interface CreateCoreAppOptions {
+  policy?: AccessPolicy;
+  plugins?: readonly BurrowServerPlugin[];
+  events?: PluginEventBus;
+  mentionRegistry?: MentionSourceRegistry;
+  runtimeRegistry?: PluginRuntimeRegistry;
+  pluginRuntimeRegistry?: PluginRuntimeRegistry;
+  pluginRouteTimeoutMs?: number;
+  rawDb?: unknown;
+  /** Plugin IDs composed by the host distribution that may mount custom base paths and wrap core adapters. */
+  firstPartyPluginIds?: readonly string[];
+  /** When true, external plugins start disabled until explicitly consented by an instance owner. */
+  requirePluginConsent?: boolean;
+  /** Plugin IDs pre-consented at boot when `requirePluginConsent` is enabled. */
+  consentedPluginIds?: readonly string[];
+}
+
 /**
  * Create the core Hono app with all routes registered.
  * This factory can be called from both Worker and Node entrypoints.
  */
 export function createCoreApp(
   infra: Infrastructure,
-  options: { policy?: AccessPolicy } = {},
+  options: CreateCoreAppOptions = {},
 ) {
-  const policy = options.policy ?? new SelfHostedPolicy();
+  const events = options.events ?? new PluginEventBus();
+  const mentionRegistry = options.mentionRegistry ?? new MentionSourceRegistry();
+  const explicitWorkspaceMiddleware = createExplicitWorkspaceMiddleware(infra.repositories.members);
+  let effectiveAuth = infra.auth;
+  const pluginAuthProxy: Infrastructure['auth'] = {
+    getSession: (headers) => effectiveAuth.getSession(headers),
+    handler: (req) => effectiveAuth.handler(req),
+    getPublicConfig: () => effectiveAuth.getPublicConfig?.() ?? {},
+  };
+
+  const requireIdentityMiddleware = createMiddleware<Env>(async (c, next) => {
+    if (!c.get('identity')) {
+      const identity = await pluginAuthProxy.getSession(c.req.raw.headers);
+      if (identity) c.set('identity', identity);
+    }
+    if (!c.get('identity')) {
+      return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+    }
+    await next();
+  });
+
+  const pluginsDisabledRaw =
+    infra.env?.PLUGINS_DISABLED ??
+    (typeof process !== 'undefined' ? process.env?.PLUGINS_DISABLED : undefined);
+  const envDisabledRaw =
+    infra.env?.DISABLED_PLUGINS ??
+    (typeof process !== 'undefined' ? process.env?.DISABLED_PLUGINS : undefined);
+  const runtimeRegistry =
+    options.pluginRuntimeRegistry ??
+    options.runtimeRegistry ??
+    new PluginRuntimeRegistry({
+      pluginsDisabledEnv: pluginsDisabledRaw,
+      disabledPluginsEnv: envDisabledRaw,
+      instanceManaged: options.policy?.allowSelfUpdate?.() === false,
+    });
+
+  const firstPartySet = new Set(options.firstPartyPluginIds ?? []);
+  const externalPlugins = (options.plugins ?? []).filter((p) => !firstPartySet.has(p.manifest.id));
+  const trustedPlugins = (options.plugins ?? []).filter((p) => firstPartySet.has(p.manifest.id));
+  const sharedAdapterOwners = new Map<string, string>();
+  const consentedExternalIds = options.consentedPluginIds
+    ? new Set(options.consentedPluginIds)
+    : undefined;
+
+  const trustedLoaded = trustedPlugins.length
+    ? loadServerPlugins({
+        plugins: trustedPlugins,
+        infra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: true,
+        consented: true,
+        adapterOwners: sharedAdapterOwners,
+        timeoutMs: options.pluginRouteTimeoutMs,
+        middleware: {
+          requireIdentity: requireIdentityMiddleware,
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
+
+  const loadedPlugins = externalPlugins.length
+    ? loadServerPlugins({
+        plugins: externalPlugins,
+        infra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: false,
+        consented: !options.requirePluginConsent,
+        consentedPluginIds: consentedExternalIds,
+        adapterOwners: sharedAdapterOwners,
+        timeoutMs: options.pluginRouteTimeoutMs,
+        middleware: {
+          requireIdentity: requireIdentityMiddleware,
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
+
+  const mergedAdapters = {
+    ...trustedLoaded.adapterOverrides,
+    ...loadedPlugins.adapterOverrides,
+  };
+  const policy = options.policy ?? mergedAdapters.policy ?? new SelfHostedPolicy();
+  effectiveAuth = mergedAdapters.auth ?? infra.auth;
+  const auth = effectiveAuth;
+  const storage = mergedAdapters.storage ?? infra.storage;
+  const emailProvider = mergedAdapters.mailer ?? infra.email;
   const {
     repositories,
-    storage,
     search,
     locks,
-    auth,
-    email: emailProvider,
     bootstrapToken,
   } = infra;
+  const effectiveInfra: Infrastructure = {
+    ...infra,
+    auth,
+    storage,
+    email: emailProvider,
+  };
+
+  const registeredIds = new Set((options.plugins ?? []).map((p) => p.manifest.id));
+  const builtinPlugins: BurrowServerPlugin[] = [];
+  if (!registeredIds.has('public-sharing')) {
+    builtinPlugins.push(createPublicSharingPlugin({ policy }));
+  }
+  if (!registeredIds.has('workspace-export')) {
+    builtinPlugins.push(createWorkspaceExportPlugin({ policy, events }));
+  }
+  const builtinLoaded = builtinPlugins.length
+    ? loadServerPlugins({
+        plugins: builtinPlugins,
+        infra: effectiveInfra,
+        events,
+        mentionRegistry,
+        rawDb: options.rawDb,
+        runtimeRegistry,
+        firstPartyCore: true,
+        consented: true,
+        adapterOwners: sharedAdapterOwners,
+        middleware: {
+          requireIdentity: requireIdentityMiddleware,
+          requireWorkspace: explicitWorkspaceMiddleware,
+          requireRole,
+        },
+      })
+    : { pluginRoutes: [], adapterOverrides: {} };
   const trimmedBootstrapToken = bootstrapToken?.trim() ?? '';
   const hasBootstrapToken = trimmedBootstrapToken.length > 0;
   const projects = new ProjectService(
@@ -113,19 +257,23 @@ export function createCoreApp(
     },
     locks,
     storage,
+    events,
   );
   const boards = new BoardService({
     boards: repositories.boards,
     cards: repositories.cards,
     projects: repositories.projects,
   });
-  const cards = new CardService({
-    cards: repositories.cards,
-    notepads: repositories.notepads,
-    tags: repositories.tags,
-    boards: repositories.boards,
-    notifications: repositories.notifications,
-  });
+  const cards = new CardService(
+    {
+      cards: repositories.cards,
+      notepads: repositories.notepads,
+      tags: repositories.tags,
+      boards: repositories.boards,
+      notifications: repositories.notifications,
+    },
+    events,
+  );
   const members = new MemberService({ members: repositories.members });
   const comments = new CommentService({
     cards: repositories.cards,
@@ -156,6 +304,7 @@ export function createCoreApp(
     rateLimitStore: infra.rateLimitStore,
     env: infra.env,
     requirePersistentRateLimitStore,
+    events,
   });
   const projectResourceRoutes = createProjectResourceRoutes({
     repositories,
@@ -165,12 +314,14 @@ export function createCoreApp(
     comments,
     tags,
     search,
+    mentionRegistry,
   });
   const workspaceViewRoutes = createWorkspaceViewRoutes({
     repositories,
     cards,
     notifications,
     search,
+    mentionRegistry,
   });
   const runtime = resolveDeploymentRuntime({
     runtime: infra.runtime,
@@ -200,23 +351,6 @@ export function createCoreApp(
     policy,
     env: infra.env,
   });
-  const workspaceExportRoutes = createWorkspaceExportRoutes({
-    repositories,
-    storage,
-    policy,
-    env: infra.env,
-  });
-  const shareManagementRoutes = createShareManagementRoutes({
-    repositories,
-    policy,
-    env: infra.env,
-  });
-  const publicShareViewerRoutes = createPublicShareViewerRoutes({
-    repositories,
-    storage,
-    policy,
-    env: infra.env,
-  });
 
   const signUpSchema = z.object({
     email: z.string().email().max(254),
@@ -230,70 +364,114 @@ export function createCoreApp(
   const deleteProjectQuerySchema = z.object({ confirm: z.string().min(1) });
 
   // Build the app
-  return (
-    new Hono<Env>()
-      .use('*', securityHeaders)
-      .use('/api/*', (c, next) => {
-        if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
-          return bodyLimit(maxUploadBytes + 64 * 1024)(c, next);
+  const baseApp = new Hono<Env>()
+    .use('*', async (c, next) => {
+      let waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+      try {
+        const execCtx = c.executionCtx;
+        if (execCtx && typeof execCtx.waitUntil === 'function') {
+          waitUntil = (promise) => execCtx.waitUntil(promise);
         }
-        return bodyLimit()(c, next);
-      })
-      .use('/api/*', csrfProtection)
-      .use('/api/*', createIdentityMiddleware(auth))
-      .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
-      .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
-      .get('/api/auth/config', (c) => {
-        const env = (infra.env ?? (typeof process !== 'undefined' ? process.env : {})) ?? {};
-        const magicLinkEnabled = Boolean(
-          (infra.email && infra.email.provider !== 'console') || env.RESEND_API_KEY,
-        );
-        c.header('Cache-Control', 'no-store');
-        return c.json({
-          signupMode: policy.signupMode(),
-          bootstrapTokenRequired: hasBootstrapToken,
-          emailPasswordEnabled: true,
-          magicLinkEnabled,
-          oauthProviders: [
-            ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
-            ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
-          ],
-          privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
-          termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
-        });
-      })
+      } catch {
+        // Non-Worker runtimes / unit tests using app.request() have no ExecutionContext.
+      }
+      return runWithEventExecutionContext({ waitUntil }, () => next());
+    })
+    .use('*', securityHeaders)
+    .use('/api/*', (c, next) => {
+      if (c.req.method === 'POST' && c.req.path.endsWith('/uploads')) {
+        return bodyLimit(maxUploadBytes + 64 * 1024)(c, next);
+      }
+      return bodyLimit()(c, next);
+    })
+    .use('/api/*', csrfProtection)
+    .use('/api/*', createIdentityMiddleware(auth))
+    .get('/api/health', (c) => c.json({ ok: true, now: Date.now() }))
+    .get('/api/ready', (c) => c.json({ ready: true, now: Date.now() }))
+    .get('/api/auth/config', async (c) => {
+      const env = (effectiveInfra.env ?? (typeof process !== 'undefined' ? process.env : {})) ?? {};
+      const defaultMagicLinkEnabled = Boolean(
+        (effectiveInfra.email && effectiveInfra.email.provider !== 'console') || env.RESEND_API_KEY,
+      );
+      const defaultOAuthProviders: Array<{
+        id: string;
+        name: string;
+        kind: 'social' | 'oidc' | 'saml';
+        authUrl?: string;
+      }> = [
+        ...(env.GOOGLE_CLIENT_ID ? [{ id: 'google', name: 'Google', kind: 'social' as const }] : []),
+        ...(env.GITHUB_CLIENT_ID ? [{ id: 'github', name: 'GitHub', kind: 'social' as const }] : []),
+      ];
+      const authPatch = (await auth.getPublicConfig?.()) ?? {};
+      const oauthProviders = authPatch.oauthProviders
+        ? [...defaultOAuthProviders, ...authPatch.oauthProviders.filter((p) => !defaultOAuthProviders.some((d) => d.id === p.id))]
+        : defaultOAuthProviders;
+      c.header('Cache-Control', 'no-store');
+      return c.json({
+        signupMode: authPatch.signupMode ?? policy.signupMode(),
+        bootstrapTokenRequired: hasBootstrapToken,
+        emailPasswordEnabled: authPatch.emailPasswordEnabled ?? true,
+        magicLinkEnabled: authPatch.magicLinkEnabled ?? defaultMagicLinkEnabled,
+        oauthProviders,
+        privacyPolicyUrl: parseSafeHttpUrl(env.PRIVACY_POLICY_URL),
+        termsOfServiceUrl: parseSafeHttpUrl(env.TERMS_OF_SERVICE_URL),
+        ...(env.DEMO_MODE === 'true' &&
+        typeof env.DEMO_EMAIL === 'string' &&
+        typeof env.DEMO_PASSWORD === 'string' &&
+        env.DEMO_EMAIL.trim() &&
+        env.DEMO_PASSWORD.trim()
+          ? {
+              demoAccount: {
+                email: env.DEMO_EMAIL.trim(),
+                password: env.DEMO_PASSWORD.trim(),
+              },
+            }
+          : {}),
+      });
+    })
 
-      .get('/api/account', async (c) => {
-        const identity = c.get('identity');
-        if (!identity) {
-          return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
-        }
-        let workspaces = await repositories.workspaces.listByUser(identity.userId);
-        if (workspaces.length === 0 && policy.signupMode() === 'open') {
-          await policy.authorize({ action: 'workspace.create', userId: identity.userId });
-          await repositories.workspaces.create(
-            createWorkspacePlan({
-              userId: identity.userId,
-              name: 'My Workspace',
-              workspaceId: nanoid(),
-              projectId: nanoid(),
-              notepadId: nanoid(),
-              now: Date.now(),
-            }),
-          );
-          workspaces = await repositories.workspaces.listByUser(identity.userId);
-        }
-        c.header('Cache-Control', 'private, no-store');
-        return c.json({
-          user: {
-            id: identity.userId,
-            name: identity.name ?? '',
-            email: identity.email ?? '',
-            image: identity.image ?? null,
-          },
-          workspaces,
+    .get('/api/account', async (c) => {
+      const identity = c.get('identity');
+      if (!identity) {
+        return c.json({ error: { code: 'unauthorized', message: 'Authentication required' } }, 401);
+      }
+      let workspaces = await repositories.workspaces.listByUser(identity.userId);
+      if (workspaces.length === 0 && policy.signupMode() === 'open') {
+        const wsId = nanoid();
+        await policy.authorize({ action: 'workspace.create', userId: identity.userId });
+        await events.emitBefore('workspace.created', {
+          workspaceId: wsId,
+          userId: identity.userId,
+          name: 'My Workspace',
         });
-      })
+        const createdWs = await repositories.workspaces.create(
+          createWorkspacePlan({
+            userId: identity.userId,
+            name: 'My Workspace',
+            workspaceId: wsId,
+            projectId: nanoid(),
+            notepadId: nanoid(),
+            now: Date.now(),
+          }),
+        );
+        await events.emitAfter('workspace.created', {
+          workspaceId: createdWs.id,
+          userId: identity.userId,
+          name: createdWs.name,
+        });
+        workspaces = await repositories.workspaces.listByUser(identity.userId);
+      }
+      c.header('Cache-Control', 'private, no-store');
+      return c.json({
+        user: {
+          id: identity.userId,
+          name: identity.name ?? '',
+          email: identity.email ?? '',
+          image: identity.image ?? null,
+        },
+        workspaces,
+      });
+    })
 
       .get(
         '/api/account/export',
@@ -414,7 +592,7 @@ export function createCoreApp(
             }
           }
 
-          return c.json({
+          const exportPayload: Record<string, unknown> = {
             schemaVersion: 'burrow-personal-export-v1',
             exportedAt: Date.now(),
             scope: requestedWorkspaceId
@@ -434,7 +612,13 @@ export function createCoreApp(
             assignedTasks: assignedTasksByWs.flat(),
             comments: scopedComments,
             notifications: notificationsByWs.flat(),
+          };
+          await events.emitBefore('account.export', {
+            userId: identity.userId,
+            workspaceId: requestedWorkspaceId,
+            payload: exportPayload,
           });
+          return c.json(exportPayload);
         },
       )
 
@@ -492,14 +676,11 @@ export function createCoreApp(
 
       .route('/api/workspaces', workspaceRoutes)
       .route('/api/workspaces', featureFlagRoutes)
-      .route('/api/workspaces', workspaceExportRoutes)
       .route('/api/workspaces/:wid/projects', projectRoutes)
       .route('/api/system', systemRoutes)
       .route('/api', workspaceViewRoutes)
       .route('/api', projectResourceRoutes)
       .route('/api', projectFileRoutes)
-      .route('/api', shareManagementRoutes)
-      .route('/api/public/shares', publicShareViewerRoutes)
       .delete('/api/workspaces/:wid/projects/:id', createExplicitWorkspaceMiddleware(repositories.members), requireRole('owner'), zValidator('query', deleteProjectQuerySchema), async (c) => {
         await projects.permanentDeleteProject({
           workspaceId: c.get('workspaceId'),
@@ -628,18 +809,29 @@ export function createCoreApp(
             throw httpError(500, 'signup_incomplete', 'Account creation could not be completed');
           }
 
+          const wsId = nanoid();
           await policy.authorize({ action: 'workspace.create', userId });
+          await events.emitBefore('workspace.created', {
+            workspaceId: wsId,
+            userId,
+            name: 'My Workspace',
+          });
 
-          await repositories.workspaces.create(
+          const createdWs = await repositories.workspaces.create(
             createWorkspacePlan({
               userId,
               name: 'My Workspace',
-              workspaceId: nanoid(),
+              workspaceId: wsId,
               projectId: nanoid(),
               notepadId: nanoid(),
               now: Date.now(),
             }),
           );
+          await events.emitAfter('workspace.created', {
+            workspaceId: createdWs.id,
+            userId,
+            name: createdWs.name,
+          });
 
           return authRes;
         }
@@ -787,89 +979,135 @@ export function createCoreApp(
           }
           return c.json({ workspaceId: workspace.id });
         },
-      )
+      );
 
-      // ---------------------------------------------------------------------------
-      // Auth routes (delegated to auth provider handler)
-      // ---------------------------------------------------------------------------
-      .all('/api/auth/*', async (c) => {
-        const path = c.req.path.replace(/\/+$/, '');
-        if (path === '/api/auth/sign-up/email' || path.startsWith('/api/auth/sign-up')) {
-          throw httpError(403, 'forbidden', 'Direct sign-up disabled; use bootstrap or invite');
-        }
+  const RESERVED_CORE_AUTH_PREFIXES = [
+    '/api/auth/config',
+    '/api/auth/sign-up',
+    '/api/auth/sign-in',
+    '/api/auth/sign-out',
+    '/api/auth/bootstrap',
+    '/api/auth/session',
+    '/api/auth/get-session',
+    '/api/auth/magic-link',
+    '/api/auth/delete-user',
+    '/api/auth/callback',
+  ];
+  const allPluginRoutes = [
+    ...builtinLoaded.pluginRoutes,
+    ...trustedLoaded.pluginRoutes,
+    ...loadedPlugins.pluginRoutes,
+  ];
+  for (const { mountPath, router } of allPluginRoutes) {
+    if (mountPath.startsWith('/api/auth/')) {
+      const normalizedMount = mountPath.replace(/\/+$/, '');
+      if (
+        RESERVED_CORE_AUTH_PREFIXES.some(
+          (reserved) => normalizedMount === reserved || normalizedMount.startsWith(`${reserved}/`),
+        )
+      ) {
+        throw new Error(`Plugin route "${mountPath}" collides with reserved core auth route`);
+      }
+      baseApp.route(mountPath, router);
+    }
+  }
 
-        // Better-auth attempts to parse JSON body if content-type contains application/json,
-        // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
-        const req = c.req.raw;
-        const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
-        const stampedHeaders = new Headers(req.headers);
-        stampedHeaders.delete('x-burrow-client-ip');
-        if (verifiedIp) {
-          stampedHeaders.set('x-burrow-client-ip', verifiedIp);
-        }
-        const contentType = req.headers.get('content-type') || '';
-        const dispatch = (forwarded: Request) =>
-          runWithAuthRequestContext(
-            { verifiedIp, accountKey: null, sessionKey: null },
-            () => auth.handler(forwarded),
-          );
-        let res: Response;
-        try {
-          if (
-            req.method !== 'GET' &&
-            req.method !== 'HEAD' &&
-            contentType.includes('application/json')
-          ) {
-            if (req.headers.get('content-length') === '0') {
-              const fixedReq = new Request(req.url, {
-                method: req.method,
-                headers: stampedHeaders,
-                body: JSON.stringify({}),
-                duplex: 'half',
-              } as RequestInit);
-              res = await dispatch(fixedReq);
-            } else {
-              const cloned = req.clone();
-              const text = await cloned.text();
-              if (!text || text.trim() === '') {
-                const fixedReq = new Request(req.url, {
-                  method: req.method,
-                  headers: stampedHeaders,
-                  body: JSON.stringify({}),
-                  duplex: 'half',
-                } as RequestInit);
-                res = await dispatch(fixedReq);
-              } else {
-                const stampedReq = new Request(req.url, {
-                  method: req.method,
-                  headers: stampedHeaders,
-                  body: text,
-                });
-                res = await dispatch(stampedReq);
-              }
-            }
+  // ---------------------------------------------------------------------------
+  // Auth routes (delegated to auth provider handler)
+  // ---------------------------------------------------------------------------
+  baseApp.all('/api/auth/*', async (c) => {
+    const path = c.req.path.replace(/\/+$/, '');
+    if (path === '/api/auth/sign-up/email' || path.startsWith('/api/auth/sign-up')) {
+      throw httpError(403, 'forbidden', 'Direct sign-up disabled; use bootstrap or invite');
+    }
+
+    const deletingUserId =
+      c.req.method.toUpperCase() === 'POST' && path === '/api/auth/delete-user'
+        ? c.get('identity')?.userId ?? null
+        : null;
+    if (deletingUserId) {
+      await events.emitBefore('user.deleted', { userId: deletingUserId });
+    }
+
+    // Better-auth attempts to parse JSON body if content-type contains application/json,
+    // which throws if the request body is empty. Fall back gracefully to {} if body is empty.
+    const req = c.req.raw;
+    const verifiedIp = resolveVerifiedClientIp(c, { env: infra.env });
+    const stampedHeaders = new Headers(req.headers);
+    stampedHeaders.delete('x-burrow-client-ip');
+    if (verifiedIp) {
+      stampedHeaders.set('x-burrow-client-ip', verifiedIp);
+    }
+    const contentType = req.headers.get('content-type') || '';
+    const dispatch = (forwarded: Request) =>
+      runWithAuthRequestContext(
+        { verifiedIp, accountKey: null, sessionKey: null },
+        () => auth.handler(forwarded),
+      );
+    let res: Response;
+    try {
+      if (
+        req.method !== 'GET' &&
+        req.method !== 'HEAD' &&
+        contentType.includes('application/json')
+      ) {
+        if (req.headers.get('content-length') === '0') {
+          const fixedReq = new Request(req.url, {
+            method: req.method,
+            headers: stampedHeaders,
+            body: JSON.stringify({}),
+            duplex: 'half',
+          } as RequestInit);
+          res = await dispatch(fixedReq);
+        } else {
+          const cloned = req.clone();
+          const text = await cloned.text();
+          if (!text || text.trim() === '') {
+            const fixedReq = new Request(req.url, {
+              method: req.method,
+              headers: stampedHeaders,
+              body: JSON.stringify({}),
+              duplex: 'half',
+            } as RequestInit);
+            res = await dispatch(fixedReq);
           } else {
-            const stampedReq = new Request(req, { headers: stampedHeaders });
+            const stampedReq = new Request(req.url, {
+              method: req.method,
+              headers: stampedHeaders,
+              body: text,
+            });
             res = await dispatch(stampedReq);
           }
-          return res;
-        } catch (err: any) {
-          if (err && (typeof err.statusCode === 'number' || err.status)) {
-            const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
-            const message = err.body?.message || err.message || 'Authentication error';
-            return c.json({ message, error: message }, status as any);
-          }
-          throw err;
         }
-      })
+      } else {
+        const stampedReq = new Request(req, { headers: stampedHeaders });
+        res = await dispatch(stampedReq);
+      }
+      if (deletingUserId && res.ok) {
+        await events.emitAfter('user.deleted', { userId: deletingUserId });
+      }
+      return res;
+    } catch (err: any) {
+      if (err && (typeof err.statusCode === 'number' || err.status)) {
+        const status = typeof err.statusCode === 'number' ? err.statusCode : 400;
+        const message = err.body?.message || err.message || 'Authentication error';
+        return c.json({ message, error: message }, status as any);
+      }
+      throw err;
+    }
+  });
 
-      // ---------------------------------------------------------------------------
-      // Notifications
-      // ---------------------------------------------------------------------------
+  baseApp.route(
+    '/api/plugins',
+    createPluginAdminRoutes({ runtimeRegistry, workspaces: repositories.workspaces }),
+  );
+  for (const { mountPath, router } of allPluginRoutes) {
+    if (!mountPath.startsWith('/api/auth/')) {
+      baseApp.route(mountPath, router);
+    }
+  }
 
-      // ---------------------------------------------------------------------------
-      // Error handling
-      // ---------------------------------------------------------------------------
+  return baseApp
       .onError((err, c) => {
         const exceededLimit = getBodyLimitExceeded(c);
         if (exceededLimit !== null) {
@@ -897,8 +1135,7 @@ export function createCoreApp(
         return c.json({ error: { code: 'internal_error', message: 'Internal server error' } }, 500);
       })
 
-      .notFound((c) => c.json({ error: { code: 'not_found', message: 'Not found' } }, 404))
-  );
+      .notFound((c) => c.json({ error: { code: 'not_found', message: 'Not found' } }, 404));
 }
 
 /** RPC types come from the application both runtimes actually serve. */

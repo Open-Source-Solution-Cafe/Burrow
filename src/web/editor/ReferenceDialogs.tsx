@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FileText, Layout, Search } from 'lucide-react';
-import { useBoards, useCreateCard } from '../lib/queries';
+import {
+  invalidateProjectNotepads,
+  useAccount,
+  useBoards,
+  useCreateCard,
+} from '../lib/queries';
 import { ModalShell } from '../components/ui/ModalShell';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -26,6 +31,7 @@ export function NotepadPickerModal({
 }: NotepadPickerModalProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const { data: account } = useAccount();
   const [tab, setTab] = useState<'new' | 'existing'>('new');
   const [newTitle, setNewTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,7 +56,7 @@ export function NotepadPickerModal({
         throw new Error(err.error?.message || err.message || 'Failed to create notepad');
       }
       const data = (await res.json()) as { id: string };
-      queryClient.invalidateQueries({ queryKey: ['notepads', workspaceId, projectId] });
+      invalidateProjectNotepads(queryClient, account?.user.id, workspaceId, projectId);
       onSelectNotepad(data.id);
       onClose();
     } catch (err: any) {

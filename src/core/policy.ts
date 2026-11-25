@@ -20,7 +20,7 @@ export type PolicyContext =
   | { action: 'file.upload'; userId: string; workspaceId: string; bytes: number };
 
 /**
- * Access policy contract governing account signup, quota enforcement, and permission checks.
+ * Access policy contract governing account signup, resource limits, and permission checks.
  */
 export interface AccessPolicy {
   /**
@@ -34,23 +34,23 @@ export interface AccessPolicy {
    * Authorize a proposed domain action within the given policy context.
    *
    * @param ctx Discriminative policy context identifying the actor, action, and target parameters.
-   * @throws {HttpError} Throws `httpError(402, ...)` or `httpError(403, ...)` to refuse the action.
+   * @throws {HttpError} Throws an `HttpError` (for example `403`) to refuse the action.
    *                     Resolves peacefully to allow the action.
    */
   authorize(ctx: PolicyContext): Promise<void>;
 
   /**
-   * Optional mapper for database-enforced quota errors (e.g. trigger violations or constraint failures)
-   * into clean, typed HttpError instances.
+   * Optional mapper for database-enforced constraint or policy errors into clean, typed
+   * `HttpError` instances.
    *
    * @param error Any thrown error during route or transaction execution.
-   * @returns An `HttpError` if the error maps to a known quota/policy violation, or `null` otherwise.
+   * @returns An `HttpError` if the error maps to a known policy violation, or `null` otherwise.
    */
   mapError?(error: unknown): HttpError | null;
 
   /**
-   * Whether the instance permits in-place self-updates triggered by workspace owners.
-   * Defaults to true in self-hosted deployments.
+   * Whether the instance permits in-place in-app update triggers by workspace owners.
+   * Defaults to true in standalone self-hosted deployments.
    */
   allowSelfUpdate?(): boolean;
 
@@ -66,9 +66,9 @@ export interface AccessPolicy {
  *
  * Implements standard Burrow open-source behavior:
  * - Requires bootstrap token for the initial account, invites thereafter (`bootstrap-or-invite`).
- * - Permits all domain actions without quota constraints.
+ * - Permits all domain actions without artificial resource limits.
  * - No custom database error mappings.
- * - Enables self-updates.
+ * - Enables in-app self-update triggers.
  */
 export class SelfHostedPolicy implements AccessPolicy {
   signupMode(): SignupMode {

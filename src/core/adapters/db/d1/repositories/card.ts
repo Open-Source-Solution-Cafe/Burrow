@@ -112,6 +112,7 @@ export function createCardRepository(db: DB): ICardRepository {
           boardId: t.cards.boardId,
           columnId: t.cards.columnId,
           notepadId: t.cards.notepadId,
+          cardType: t.cards.cardType,
           position: t.cards.position,
           priority: t.cards.priority,
           dueDate: t.cards.dueDate,
@@ -139,6 +140,7 @@ export function createCardRepository(db: DB): ICardRepository {
           boardId: t.cards.boardId,
           columnId: t.cards.columnId,
           notepadId: t.cards.notepadId,
+          cardType: t.cards.cardType,
           position: t.cards.position,
           priority: t.cards.priority,
           dueDate: t.cards.dueDate,
@@ -502,6 +504,7 @@ export function createCardRepository(db: DB): ICardRepository {
           boardId: t.cards.boardId,
           columnId: t.cards.columnId,
           notepadId: t.cards.notepadId,
+          cardType: t.cards.cardType,
           position: t.cards.position,
           priority: t.cards.priority,
           dueDate: t.cards.dueDate,
@@ -774,6 +777,7 @@ interface CardRow {
   boardId: string;
   columnId: string;
   notepadId: string;
+  cardType?: string;
   position: string;
   priority: CardPriority | null;
   dueDate: number | null;
@@ -792,6 +796,7 @@ function mapCard(row: CardRow): Card {
     boardId: row.boardId,
     columnId: row.columnId,
     notepadId: row.notepadId,
+    cardType: row.cardType ?? 'task',
     position: row.position,
     priority: row.priority,
     dueDate: row.dueDate ?? null,

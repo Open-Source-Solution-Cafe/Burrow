@@ -46,6 +46,40 @@ function projectJson(method: string, body?: unknown): RequestInit {
   };
 }
 
+export type ProjectResourceKind =
+  | 'notepads'
+  | 'recent-notepads'
+  | 'boards'
+  | 'tags'
+  | 'trash';
+
+/** Builds an account-, workspace-, and project-scoped TanStack Query cache key. */
+export function projectResourceKey(
+  resource: ProjectResourceKind,
+  accountId: string | undefined,
+  workspaceId: string | undefined,
+  projectId: string | undefined,
+) {
+  return [resource, accountId, workspaceId, projectId] as const;
+}
+
+/** Invalidates both notepad tree and recent-notepad caches for a single account/workspace/project. */
+export function invalidateProjectNotepads(
+  queryClient: {
+    invalidateQueries: (filters: { queryKey: readonly unknown[] }) => Promise<void> | void;
+  },
+  accountId: string | undefined,
+  workspaceId: string,
+  projectId: string,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: projectResourceKey('notepads', accountId, workspaceId, projectId),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: projectResourceKey('recent-notepads', accountId, workspaceId, projectId),
+  });
+}
+
 const resourceAccountId = Symbol('resourceAccountId');
 type AccountBoundInput<T> = T & { [resourceAccountId]: string | null };
 
@@ -582,6 +616,39 @@ export function useCreateInvite(workspaceId?: string) {
   });
 }
 
+export function useReissueInviteLink(workspaceId?: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      if (!workspaceId) throw new Error('Workspace is required');
+      const res = await fetch(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/invites/${encodeURIComponent(id)}/link`,
+        {
+          method: 'POST',
+        },
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(err.error?.message || 'Failed to generate invite link');
+      }
+      return res.json() as Promise<{
+        id: string;
+        email: string;
+        role: string;
+        token: string;
+        expiresAt: number;
+        url: string;
+      }>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invites'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to generate invite link');
+    },
+  });
+}
+
 export function useRevokeInvite(workspaceId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -650,7 +717,7 @@ export function useBoards(workspaceId: string | undefined, projectId: string | u
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['boards', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('boards', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<Board[]>(workspaceId, projectId, 'boards');
@@ -951,6 +1018,7 @@ export function useCreateCard() {
       boardId: _boardId,
       columnId,
       title,
+      cardType,
       priority,
       dueDate,
       assigneeIds,
@@ -962,6 +1030,7 @@ export function useCreateCard() {
       boardId: string;
       columnId: string;
       title: string;
+      cardType?: string;
       priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
       dueDate?: number | null;
       assigneeIds?: string[];
@@ -974,6 +1043,7 @@ export function useCreateCard() {
         `columns/${columnId}/cards`,
         projectJson('POST', {
           title,
+          cardType,
           priority: priority ?? undefined,
           dueDate: dueDate ?? undefined,
           assigneeIds,
@@ -1022,6 +1092,7 @@ export function useUpdateCard() {
       cardId: string;
       boardId: string;
       title?: string;
+      cardType?: string;
       priority?: 'low' | 'medium' | 'high' | 'urgent' | null;
       dueDate?: number | null;
       assigneeIds?: string[];
@@ -1493,7 +1564,7 @@ export function useTrash(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['trash', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('trash', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return { notepads: [], boards: [] };
       return projectRequest<{ notepads: TrashedNotepad[]; boards: TrashedBoard[] }>(
@@ -1612,7 +1683,7 @@ export function useRecentNotepads(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['recent-notepads', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('recent-notepads', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<Array<{
@@ -1643,7 +1714,7 @@ export function useNotepads(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery<NotepadNode[]>({
-    queryKey: ['notepads', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('notepads', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<NotepadNode[]>(workspaceId, projectId, 'notepads');
@@ -1733,7 +1804,7 @@ export function useProjectTags(workspaceId?: string, projectId?: string) {
   const { data: account } = useAccount();
   const accountId = account?.user.id;
   return useQuery({
-    queryKey: ['tags', accountId, workspaceId, projectId],
+    queryKey: projectResourceKey('tags', accountId, workspaceId, projectId),
     queryFn: async () => {
       if (!workspaceId || !projectId) return [];
       return projectRequest<TagItem[]>(workspaceId, projectId, 'tags');
@@ -1847,5 +1918,77 @@ export function useSearch(
       !accountError &&
       Boolean(accountId && workspaceId && query.trim().length > 0) &&
       (scope === 'all' || Boolean(projectId)),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Plugins Admin
+// ---------------------------------------------------------------------------
+
+export interface InstalledPluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string | null;
+  permissions: string[];
+  network: string[];
+  configKeys: string[];
+  coreTables?: string[];
+  dialects: string[];
+  dependencies: string[];
+  enabled: boolean;
+  killSwitched: boolean;
+  instanceManaged: boolean;
+  capabilities: string[];
+  consentSummary: string;
+}
+
+export function useInstalledPlugins() {
+  const { data: account } = useAccount();
+  return useQuery({
+    queryKey: ['plugins', account?.user.id],
+    queryFn: async () => {
+      const res = await fetch('/api/plugins', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load installed plugins');
+      return (await res.json()) as { plugins: InstalledPluginInfo[] };
+    },
+    enabled: Boolean(account?.user.id),
+  });
+}
+
+export function useTogglePlugin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      pluginId,
+      enabled,
+      consentAccepted,
+    }: {
+      pluginId: string;
+      enabled: boolean;
+      consentAccepted?: boolean;
+    }) => {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(pluginId)}/toggle`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled, consentAccepted }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        plugin?: InstalledPluginInfo;
+        error?: { message?: string };
+      };
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to toggle plugin');
+      }
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['plugins'] });
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || 'Failed to toggle plugin');
+    },
   });
 }

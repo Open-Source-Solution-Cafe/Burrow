@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { ContentReferenceKind, ReferencePreview } from '../../shared/references';
+import type { ReferenceKind, ReferencePreview } from '../../shared/references';
 import { useAccount } from '../lib/queries';
 import { projectApiPath } from '../lib/workspaceRoutes';
 
@@ -10,7 +10,7 @@ const ReferenceScope = createContext<Pick<ReferencePreview, 'workspaceId' | 'pro
 export const ReferenceScopeProvider = ReferenceScope.Provider;
 
 /** Bind reads to the verified source document, including card/task overlays. */
-export function useProjectReference(kind: ContentReferenceKind, id: string) {
+export function useProjectReference(kind: ReferenceKind, id: string) {
   const scope = useContext(ReferenceScope);
   const { data: account } = useAccount();
   const result = useQuery({

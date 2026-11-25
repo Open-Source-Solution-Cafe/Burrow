@@ -3,6 +3,7 @@ import { APP_VERSION } from '../version';
 import type { AccessPolicy } from '../policy';
 import type { IWorkspaceRepository } from '../infrastructure/types';
 import type { Env } from '../app';
+import { isBlockedHostname } from '../plugins/safe-fetch';
 import {
   maxUploadBytesForRuntime,
   resolveDeploymentRuntime,
@@ -47,6 +48,48 @@ export function isNewerVersion(current: string, latest: string): boolean {
   if (lMaj !== cMaj) return lMaj > cMaj;
   if (lMin !== cMin) return lMin > cMin;
   return lPatch > cPatch;
+}
+
+export function validateSelfUpdateWebhookUrl(
+  rawUrl: string,
+  allowLoopbackHttp = false,
+): { ok: true; url: URL } | { ok: false; reason: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return { ok: false, reason: 'SELF_UPDATE_WEBHOOK_URL must be a valid URL.' };
+  }
+
+  if (parsed.username || parsed.password) {
+    return {
+      ok: false,
+      reason: 'SELF_UPDATE_WEBHOOK_URL must not contain embedded credentials.',
+    };
+  }
+
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1';
+  if (allowLoopbackHttp && parsed.protocol === 'http:' && isLoopback) {
+    return { ok: true, url: parsed };
+  }
+
+  if (parsed.protocol !== 'https:') {
+    return { ok: false, reason: 'SELF_UPDATE_WEBHOOK_URL must use https:.' };
+  }
+
+  if (parsed.port && parsed.port !== '443') {
+    return { ok: false, reason: 'SELF_UPDATE_WEBHOOK_URL must use default HTTPS port 443.' };
+  }
+
+  if (isBlockedHostname(hostname)) {
+    return {
+      ok: false,
+      reason: 'SELF_UPDATE_WEBHOOK_URL must not target loopback, private, or internal hosts.',
+    };
+  }
+
+  return { ok: true, url: parsed };
 }
 
 export function detectWebhookProvider(webhookUrl?: string): SelfUpdateWebhookProvider | null {
@@ -391,12 +434,28 @@ export function createSystemRoutes(options: SystemRoutesOptions) {
 
     const webhookUrl = readEnv('SELF_UPDATE_WEBHOOK_URL');
     if (webhookUrl) {
+      const allowLoopbackHttp =
+        typeof process !== 'undefined' &&
+        (process.env?.NODE_ENV === 'development' || process.env?.NODE_ENV === 'test');
+      const validation = validateSelfUpdateWebhookUrl(webhookUrl, allowLoopbackHttp);
+      if (!validation.ok) {
+        return c.json(
+          {
+            error: {
+              code: 'invalid_webhook_url',
+              message: validation.reason,
+            },
+          },
+          400,
+        );
+      }
+
       const targetVersion =
         cachedRelease && isNewerVersion(APP_VERSION, cachedRelease.latestVersion)
           ? cachedRelease.latestVersion
           : APP_VERSION;
       const dispatch = buildWebhookDispatchRequest({
-        webhookUrl,
+        webhookUrl: validation.url.toString(),
         webhookToken: readEnv('SELF_UPDATE_WEBHOOK_TOKEN'),
         webhookRef: readEnv('SELF_UPDATE_WEBHOOK_REF'),
         triggeredBy: identity.userId,
@@ -408,6 +467,7 @@ export function createSystemRoutes(options: SystemRoutesOptions) {
           method: 'POST',
           headers: dispatch.headers,
           body: dispatch.body,
+          redirect: 'error',
           signal: AbortSignal.timeout(10000),
         });
         const webhookOk =

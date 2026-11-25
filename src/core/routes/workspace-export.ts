@@ -22,6 +22,7 @@ import {
   uploadPolicyStorageKey,
 } from '../../shared/uploadPolicy';
 import { resolveWorkspaceFeatureFlags } from './feature-flags';
+import type { PluginEventBus } from '../plugins/event-bus';
 
 const uploadPolicySchema = z.object({
   maxFileSizeBytes: z.number().int().min(1).max(MAX_UPLOAD_BYTES),
@@ -390,8 +391,9 @@ export function createWorkspaceExportRoutes(args: {
   storage: IStorageAdapter;
   policy?: AccessPolicy;
   env?: Record<string, unknown>;
+  events?: PluginEventBus;
 }) {
-  const { repositories, storage, policy, env } = args;
+  const { repositories, storage, policy, env, events } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(repositories.members);
   const route = new Hono<Env>();
 
@@ -560,9 +562,11 @@ export function createWorkspaceExportRoutes(args: {
       if (!repositories.workspaces.deleteGuarded) {
         throw httpError(501, 'not_implemented', 'Workspace deletion not supported');
       }
+      const actorId = c.get('userId');
+      await events?.emitBefore('workspace.deleted', { workspaceId, actorId });
       const deletedKeys = await repositories.workspaces.deleteGuarded(
         workspaceId,
-        c.get('userId'),
+        actorId,
         confirm,
       );
       if (!deletedKeys) {
@@ -592,6 +596,7 @@ export function createWorkspaceExportRoutes(args: {
           }),
         );
       }
+      await events?.emitAfter('workspace.deleted', { workspaceId, actorId });
       return c.json({ ok: true, deletedWorkspaceId: workspaceId });
     },
   );
@@ -629,7 +634,7 @@ export function createWorkspaceExportRoutes(args: {
     },
   );
 
-  // 4. Instance Migration Bundle Import (Self-Hosted -> Remote / Cloud)
+  // 4. Instance Migration Bundle Import (Source Instance -> Target Instance)
   route.post('/import-bundle', zValidator('json', bundleImportSchema), async (c) => {
     const identity = c.get('identity');
     if (!identity) throw httpError(401, 'unauthorized', 'Authentication required');

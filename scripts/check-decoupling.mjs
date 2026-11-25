@@ -30,7 +30,7 @@ export const VOCABULARY_REGEXPS = [
   { term: 'coolify', regex: /(?:\b|_|[a-z])coolify\w*/i },
 ];
 
-export const DEFAULT_TARGET_DIRS = ['src', 'migrations', 'tests', 'scripts', 'docs'];
+export const DEFAULT_TARGET_DIRS = ['src', 'packages', 'migrations', 'tests', 'scripts', 'docs'];
 
 export const BINARY_EXTENSIONS = new Set([
   '.png',

@@ -55,6 +55,8 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 
 import {
   accountProjectsQueryOptions,
+  invalidateProjectNotepads,
+  projectResourceKey,
   useCreateProject,
   useCreateBoard,
   useCreateWorkspace,
@@ -371,5 +373,19 @@ describe('project mutation scope capture', () => {
     expect(state.invalidate).not.toHaveBeenCalledWith({ queryKey: accountBKey });
     expect(state.toastError).toHaveBeenCalledWith('Access revoked');
     fetchMock.mockRestore();
+  });
+
+  it('invalidates account-scoped notepad and recent-notepad caches via invalidateProjectNotepads', () => {
+    invalidateProjectNotepads(state.queryClient, 'account-a', 'workspace-a', 'project-a');
+
+    expect(state.invalidate).toHaveBeenCalledWith({
+      queryKey: projectResourceKey('notepads', 'account-a', 'workspace-a', 'project-a'),
+    });
+    expect(state.invalidate).toHaveBeenCalledWith({
+      queryKey: projectResourceKey('recent-notepads', 'account-a', 'workspace-a', 'project-a'),
+    });
+    expect(state.invalidate).not.toHaveBeenCalledWith({
+      queryKey: ['notepads', 'workspace-a', 'project-a'],
+    });
   });
 });

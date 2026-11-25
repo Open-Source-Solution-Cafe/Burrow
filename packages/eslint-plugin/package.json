@@ -1,0 +1,19 @@
+{
+  "name": "@burrow/eslint-plugin",
+  "version": "0.4.0",
+  "license": "MIT",
+  "description": "Static security ESLint rules for Burrow plugins",
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {}
+}

@@ -1,8 +1,9 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, type ReactNode } from 'react';
 import * as chrono from 'chrono-node';
-import { Calendar, FileText, Flag, Plus, Tag, User, X } from 'lucide-react';
+import { Calendar, FileText, Flag, Plug, Plus, Tag, User, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCreateCard, useCreateTag, useMembers, useProjectTags } from '../../lib/queries';
+import { useWebPlugins } from '../../plugins/registry';
 import { Avatar } from '../ui/Avatar';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -27,6 +28,7 @@ interface QuickAddChips {
 export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClose }: QuickAddCardProps) {
   const { t } = useTranslation();
   const [title, setTitle] = useState('');
+  const [cardType, setCardType] = useState('task');
   const [chips, setChips] = useState<QuickAddChips>({ assignees: [], tags: [] });
   const [menuMode, setMenuMode] = useState<'none' | 'slash' | 'at' | 'hash'>('none');
   const [menuQuery, setMenuQuery] = useState('');
@@ -34,6 +36,8 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
 
   const [dateInputOpen, setDateInputOpen] = useState(false);
   const [dateInputValue, setDateInputValue] = useState('');
+  const [pluginModalRender, setPluginModalRender] = useState<((close: () => void) => ReactNode) | null>(null);
+  const webPlugins = useWebPlugins();
 
   const inputRef = useRef<HTMLInputElement>(null);
   const createCardMutation = useCreateCard();
@@ -193,8 +197,32 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
           inputRef.current?.focus();
         },
       },
+      ...webPlugins.slashCommands
+        .filter((cmd) => cmd.contexts.includes('quickadd'))
+        .map((cmd) => ({
+          id: cmd.id,
+          label: `/${cmd.id}`,
+          desc: cmd.description ?? cmd.label,
+          icon: Plug,
+          action: () => {
+            setTitle(cleanLastTrigger(title));
+            setMenuMode('none');
+            void cmd.execute({
+              context: 'quickadd',
+              workspaceId,
+              projectId,
+              insertText: (txt: string) => {
+                setTitle((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}${txt}`);
+                inputRef.current?.focus();
+              },
+              openModal: (render) => {
+                setPluginModalRender(() => render as (close: () => void) => ReactNode);
+              },
+            });
+          },
+        })),
     ],
-    [title, t],
+    [title, t, webPlugins.slashCommands, workspaceId, projectId],
   );
 
   const filteredSlashCommands = useMemo(() => {
@@ -441,6 +469,7 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         boardId,
         columnId,
         title: cleanTitle,
+        cardType: cardType !== 'task' ? cardType : undefined,
         priority: priority ?? undefined,
         dueDate: dueDate ?? undefined,
         assigneeIds,
@@ -740,11 +769,30 @@ export function QuickAddCard({ workspaceId, boardId, columnId, projectId, onClos
         </div>
       )}
 
+      {pluginModalRender && pluginModalRender(() => setPluginModalRender(null))}
+
       {/* Footer controls: Submit & Hints */}
       <div className="flex items-center justify-between text-[10px] text-[var(--muted)] pt-1 border-t border-[var(--hair)] gap-2">
-        <span className="truncate">
-          ↵ Enter to save &bull; ⇧↵ to add another &bull; ⌫ clears chips
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          {webPlugins.cardTypes.length > 0 && (
+            <select
+              aria-label="Card type"
+              value={cardType}
+              onChange={(e) => setCardType(e.target.value)}
+              className="border border-[var(--line)] bg-[var(--surface2)] px-1.5 py-0.5 text-[11px] font-mono text-[var(--text)]"
+            >
+              <option value="task">Task</option>
+              {webPlugins.cardTypes.map((ct) => (
+                <option key={ct.type} value={ct.type}>
+                  {ct.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <span className="truncate">
+            ↵ Enter to save &bull; ⇧↵ to add another &bull; ⌫ clears chips
+          </span>
+        </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {onClose && (
             <button

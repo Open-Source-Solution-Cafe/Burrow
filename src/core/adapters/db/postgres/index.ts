@@ -37,7 +37,11 @@ export type PostgresDb = PostgresJsDatabase<typeof schema>;
  */
 export async function createPostgresInfrastructure(
   config: ServerConfig,
-  options: { runMigrations?: boolean; migrationsDir?: string } = {},
+  options: {
+    runMigrations?: boolean;
+    migrationsDir?: string;
+    onBeforeDeleteUser?: (userId: string) => Promise<void>;
+  } = {},
 ): Promise<Infrastructure> {
   if (!config.DATABASE_URL?.match(/^postgres(ql)?:\/\//)) {
     throw new Error('PostgreSQL requires a postgres:// or postgresql:// DATABASE_URL');
@@ -123,6 +127,9 @@ export async function createPostgresInfrastructure(
       onBeforeDeleteUser: async (userId: string) => {
         try {
           await memberService.assertCanDeleteUser(userId, repositories.workspaces);
+          if (options.onBeforeDeleteUser) {
+            await options.onBeforeDeleteUser(userId);
+          }
         } catch (err) {
           throw new APIError('BAD_REQUEST', {
             message: err instanceof Error ? err.message : 'cannot_delete_sole_owner',
@@ -143,6 +150,7 @@ export async function createPostgresInfrastructure(
     rateLimitStore,
     runtime: 'docker-postgres',
     appUrl: config.BETTER_AUTH_URL,
+    db: client,
     env: {
       ...config,
       NODE_ENV: process.env.NODE_ENV,

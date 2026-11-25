@@ -1,5 +1,5 @@
-import { mkdir, readdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { lstat, mkdir, readdir, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { IStorageAdapter, StorageObject } from './types';
 import { validateStorageKey, validateStoragePrefix } from './validation';
 
@@ -40,8 +40,57 @@ export class LocalStorageAdapter implements IStorageAdapter {
     return { fullPath, normalized };
   }
 
+  private async assertNoSymlinkEscape(fullPath: string, key: string): Promise<void> {
+    const rootAbs = resolve(this.root);
+    try {
+      const rootStat = await lstat(rootAbs);
+      if (rootStat.isSymbolicLink()) {
+        throw new Error(`Invalid storage root (symlink): ${key}`);
+      }
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') return;
+      throw err;
+    }
+
+    const segments = relative(rootAbs, fullPath).split(sep).filter(Boolean);
+    let cur = rootAbs;
+    let deepestExisting = rootAbs;
+    for (const seg of segments) {
+      cur = join(cur, seg);
+      try {
+        const st = await lstat(cur);
+        if (st.isSymbolicLink()) {
+          throw new Error(`Invalid storage key (symlink traversal): ${key}`);
+        }
+        deepestExisting = cur;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+          break;
+        }
+        throw err;
+      }
+    }
+
+    const realRoot = await realpath(rootAbs).catch(() => null);
+    if (realRoot) {
+      const realDeepest = await realpath(deepestExisting);
+      const relReal = relative(realRoot, realDeepest);
+      if (
+        relReal === '..' ||
+        relReal.startsWith(`..${sep}`) ||
+        relReal.split(sep).includes('..') ||
+        (relReal !== '' && isAbsolute(relReal))
+      ) {
+        throw new Error(`Invalid storage key (symlink traversal outside root): ${key}`);
+      }
+    }
+  }
+
   async put(key: string, data: ArrayBuffer | Uint8Array, contentType?: string): Promise<void> {
     const { fullPath, normalized } = this.resolveKey(key);
+    await this.assertNoSymlinkEscape(fullPath, key);
     if (contentType) {
       this.contentTypes.set(normalized, contentType);
     } else {
@@ -53,6 +102,7 @@ export class LocalStorageAdapter implements IStorageAdapter {
 
   async get(key: string): Promise<StorageObject | null> {
     const { fullPath, normalized } = this.resolveKey(key);
+    await this.assertNoSymlinkEscape(fullPath, key);
     let st;
     try {
       st = await stat(fullPath);
@@ -67,7 +117,10 @@ export class LocalStorageAdapter implements IStorageAdapter {
       if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return null;
       throw err;
     }
-    const contentType = this.contentTypes.get(normalized) ?? inferContentType(normalized);
+    const fallbackType = normalized.startsWith('plugins/') && normalized.toLowerCase().endsWith('.svg')
+      ? 'application/octet-stream'
+      : inferContentType(normalized);
+    const contentType = this.contentTypes.get(normalized) ?? fallbackType;
     return {
       body: new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
       contentLength: st.size,
@@ -78,6 +131,7 @@ export class LocalStorageAdapter implements IStorageAdapter {
 
   async delete(key: string): Promise<void> {
     const { fullPath, normalized } = this.resolveKey(key);
+    await this.assertNoSymlinkEscape(fullPath, key);
     this.contentTypes.delete(normalized);
     try {
       await unlink(fullPath);
@@ -122,6 +176,7 @@ export class LocalStorageAdapter implements IStorageAdapter {
     }
     const out: string[] = [];
     for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
       const rel = base ? `${base}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
         out.push(...(await this.walk(dir, rel)));
@@ -140,6 +195,7 @@ export class LocalStorageAdapter implements IStorageAdapter {
       return;
     }
     for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) {
         const sub = join(dir, entry.name);
         await this.pruneEmptyDirs(sub);

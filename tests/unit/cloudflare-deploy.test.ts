@@ -34,7 +34,7 @@ const {
   verifyDeployment,
 } = deployLib as any;
 
-const { isWorkersCiBuild, resolveWorkersCiConfigArgs } = deployScript as any;
+const { ensureSdkBuilt, isWorkersCiBuild, resolveWorkersCiConfigArgs } = deployScript as any;
 const { mergePreservedPackageName, mergePreservedWranglerConfig } = syncUpstreamScript as any;
 
 const {
@@ -1291,6 +1291,43 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
       const mergedPkg = JSON.parse(mergePreservedPackageName(upstreamPkg, 'burrowgitdeploy'));
       expect(mergedPkg.name).toBe('burrowgitdeploy');
       expect(mergedPkg.version).toBe('0.4.0');
+    });
+
+    it('builds @burrow/sdk when packages/sdk/dist/index.js is missing on a fresh clone', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'burrow-sdk-build-'));
+      try {
+        fs.mkdirSync(path.join(tmpDir, 'packages', 'sdk'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'packages', 'sdk', 'tsconfig.build.json'), '{}');
+        const calls: Array<{ cmd: string; args: string[] }> = [];
+        const built = ensureSdkBuilt({
+          rootDir: tmpDir,
+          runFn: (cmd: string, args: string[]) => {
+            calls.push({ cmd, args });
+            return { status: 0, stdout: '', stderr: '' };
+          },
+        });
+        expect(built).toBe(true);
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.args[0]).toBe('-p');
+        expect(calls[0]?.args[1]).toContain('tsconfig.build.json');
+
+        fs.mkdirSync(path.join(tmpDir, 'packages', 'sdk', 'dist'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, 'packages', 'sdk', 'dist', 'index.js'), 'export {};\n');
+        expect(ensureSdkBuilt({ rootDir: tmpDir })).toBe(false);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('keeps scripts/sync-upstream.mjs zero-dependency (node:* built-ins only)', () => {
+      const syncSource = fs.readFileSync(path.join(root, 'scripts', 'sync-upstream.mjs'), 'utf8');
+      const imports = [...syncSource.matchAll(/^\s*import\s+.*?\s+from\s+['"]([^'"]+)['"]/gm)].map(
+        (m) => m[1],
+      );
+      expect(imports.length).toBeGreaterThan(0);
+      for (const spec of imports) {
+        expect(spec).toMatch(/^node:/);
+      }
     });
   });
 });

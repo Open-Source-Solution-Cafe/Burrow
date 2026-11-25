@@ -583,6 +583,84 @@ describe('Phase 1: Auth, Workspace, Members, Invites & Security', () => {
     expect(restored.status).toBe(200);
   });
 
+  it('regenerates a pending invite link cleanly while invalidating the previous token', async () => {
+    const createRes = await app.request(
+      `http://localhost${workspacePath('/invites')}`,
+      {
+        method: 'POST',
+        headers: { Cookie: ownerCookie, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'reissue-test@example.com', role: 'editor' }),
+      },
+      env,
+    );
+    expect(createRes.status).toBe(200);
+    const created = (await createRes.json()) as { id: string; token: string; url: string };
+
+    // Viewer cannot regenerate invite links.
+    const forbiddenRes = await app.request(
+      `http://localhost${workspacePath(`/invites/${created.id}/link`)}`,
+      {
+        method: 'POST',
+        headers: { Cookie: viewerCookie },
+      },
+      env,
+    );
+    expect(forbiddenRes.status).toBe(403);
+
+    // Owner regenerates link (e.g., after reloading page without email configured).
+    const reissueRes = await app.request(
+      `http://localhost${workspacePath(`/invites/${created.id}/link`)}`,
+      {
+        method: 'POST',
+        headers: { Cookie: ownerCookie },
+      },
+      env,
+    );
+    expect(reissueRes.status).toBe(200);
+    const reissued = (await reissueRes.json()) as {
+      id: string;
+      email: string;
+      role: string;
+      token: string;
+      url: string;
+    };
+    expect(reissued.id).toBe(created.id);
+    expect(reissued.email).toBe('reissue-test@example.com');
+    expect(reissued.role).toBe('editor');
+    expect(reissued.token).not.toBe(created.token);
+    expect(reissued.url).toBe(`${new URL(created.url).origin}/invite/${reissued.token}`);
+
+    // Old token no longer works; new token resolves invite info.
+    const oldInfo = await app.request(
+      `http://localhost/api/invites/info/${created.token}`,
+      {},
+      env,
+    );
+    expect(oldInfo.status).toBe(404);
+
+    const newInfo = await app.request(
+      `http://localhost/api/invites/info/${reissued.token}`,
+      {},
+      env,
+    );
+    expect(newInfo.status).toBe(200);
+
+    // Revoke and confirm 404 on missing invite link regeneration.
+    const delRes = await app.request(
+      `http://localhost${workspacePath(`/invites/${created.id}`)}`,
+      { method: 'DELETE', headers: { Cookie: ownerCookie } },
+      env,
+    );
+    expect(delRes.status).toBe(200);
+
+    const missingRes = await app.request(
+      `http://localhost${workspacePath(`/invites/${created.id}/link`)}`,
+      { method: 'POST', headers: { Cookie: ownerCookie } },
+      env,
+    );
+    expect(missingRes.status).toBe(404);
+  });
+
   it('signs out an authenticated user and invalidates the account session', async () => {
     const accountBefore = await app.request(
       'http://localhost/api/account',

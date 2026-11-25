@@ -48,6 +48,7 @@ function createApp(role: 'owner' | 'viewer' = 'owner', initialCreated = false) {
     findByTokenHash: vi.fn().mockResolvedValue(null),
     create: vi.fn(),
     acceptForUser: vi.fn(),
+    rotatePendingToken: vi.fn(),
     delete: vi.fn(),
   };
   const email = { send: vi.fn().mockResolvedValue(undefined) };

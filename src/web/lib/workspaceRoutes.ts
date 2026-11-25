@@ -65,6 +65,56 @@ export function workspaceSettingsTarget(workspaceId: WorkspaceId) {
   };
 }
 
+export function projectSettingsTarget(workspaceId: WorkspaceId, projectId: ProjectId) {
+  return {
+    to: '/w/$workspaceId/p/$projectId/settings' as const,
+    params: { workspaceId, projectId },
+  };
+}
+
+export function isProjectSettingsPath(pathname: string): boolean {
+  return /^\/w\/[^/]+\/p\/[^/]+\/settings\/?$/.test(pathname);
+}
+
+export function isWorkspaceSettingsPath(pathname: string): boolean {
+  return /^\/w\/[^/]+\/settings(\/members)?\/?$/.test(pathname);
+}
+
+export function resolveProjectSwitchTarget(
+  pathname: string,
+  workspaceId: WorkspaceId,
+  projectId: ProjectId,
+) {
+  return isProjectSettingsPath(pathname)
+    ? projectSettingsTarget(workspaceId, projectId)
+    : projectTarget(workspaceId, projectId);
+}
+
+const PROJECT_SETTINGS_REDIRECT_HASHES: Readonly<Record<string, string | undefined>> = {
+  project: undefined,
+  projects: undefined,
+  'project-settings': undefined,
+  uploads: 'uploads',
+  'file-uploads': 'uploads',
+  tags: 'tags',
+  'tag-management': 'tags',
+  'danger-zone': 'danger-zone',
+};
+
+export function resolveLegacyProjectSettingsHash(hash?: string): {
+  isProjectHash: boolean;
+  targetHash?: string;
+} {
+  const normalized = (hash ?? '').replace(/^#/, '').toLowerCase();
+  if (!(normalized in PROJECT_SETTINGS_REDIRECT_HASHES)) {
+    return { isProjectHash: false };
+  }
+  return {
+    isProjectHash: true,
+    targetHash: PROJECT_SETTINGS_REDIRECT_HASHES[normalized],
+  };
+}
+
 export function workspaceProfileTarget(workspaceId: WorkspaceId) {
   return {
     to: '/w/$workspaceId/profile' as const,

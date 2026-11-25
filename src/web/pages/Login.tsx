@@ -14,7 +14,8 @@ import { APP_VERSION } from '../../core/version';
 interface OAuthProviderConfig {
   id: string;
   name: string;
-  kind: 'social';
+  kind: 'social' | 'oidc' | 'saml';
+  authUrl?: string;
 }
 
 interface AuthConfig {
@@ -25,6 +26,7 @@ interface AuthConfig {
   oauthProviders: OAuthProviderConfig[];
   privacyPolicyUrl?: string | null;
   termsOfServiceUrl?: string | null;
+  demoAccount?: { email: string; password: string } | null;
 }
 
 async function hasAccountSession(signal?: AbortSignal): Promise<boolean> {
@@ -61,26 +63,13 @@ export function Login() {
   const queryEmail = searchParams?.get('email') || '';
   const queryMode = searchParams?.get('mode');
 
-  const isDemoHost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'burrow.osscafe.com' ||
-      window.location.hostname === 'osscafe.com' ||
-      window.location.search.includes('demo=true'));
-
   const [isSignUp, setIsSignUp] = useState(() =>
     queryMode ? queryMode === 'signup' : Boolean(queryInviteToken),
   );
   const [useMagicLink, setUseMagicLink] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const [email, setEmail] = useState(() => {
-    if (queryEmail) return queryEmail;
-    if (isDemoHost && !queryInviteToken) return 'demo@osscafe.com';
-    return '';
-  });
-  const [password, setPassword] = useState(() => {
-    if (isDemoHost && !queryInviteToken) return 'demopassword123';
-    return '';
-  });
+  const [email, setEmail] = useState(() => queryEmail || '');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [bootstrapToken, setBootstrapToken] = useState('');
   const [inviteToken, setInviteToken] = useState(() => queryInviteToken);
@@ -90,6 +79,7 @@ export function Login() {
     emailPasswordEnabled: true,
     magicLinkEnabled: false,
     oauthProviders: [],
+    demoAccount: null,
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,12 +99,17 @@ export function Login() {
             oauthProviders: Array.isArray(data.oauthProviders) ? data.oauthProviders : [],
             privacyPolicyUrl: data.privacyPolicyUrl ?? null,
             termsOfServiceUrl: data.termsOfServiceUrl ?? null,
+            demoAccount: data.demoAccount ?? null,
           });
+          if (data.demoAccount && !queryInviteToken && !queryEmail) {
+            setEmail((prev) => prev || data.demoAccount!.email);
+            setPassword((prev) => prev || data.demoAccount!.password);
+          }
         }
       })
       .catch(() => {});
     return () => controller.abort();
-  }, []);
+  }, [queryEmail, queryInviteToken]);
 
   // Redirect to app if already authenticated
   useEffect(() => {
@@ -256,14 +251,18 @@ export function Login() {
     }
   };
 
-  const handleOAuthSignIn = async (providerId: string) => {
+  const handleOAuthSignIn = async (provider: OAuthProviderConfig) => {
     setError(null);
     setLoading(true);
     try {
+      if (provider.authUrl) {
+        window.location.href = provider.authUrl;
+        return;
+      }
       const res = await fetch('/api/auth/sign-in/social', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: providerId, callbackURL: '/' }),
+        body: JSON.stringify({ provider: provider.id, callbackURL: '/' }),
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { message?: string };
@@ -347,7 +346,7 @@ export function Login() {
           </p>
         </div>
 
-        {isDemoHost && !withoutWorkspace && (
+        {authConfig.demoAccount && !withoutWorkspace && (
           <div className="p-3 text-xs bg-[var(--surface2)] text-[var(--text)] border border-[var(--line)] border-l-4 border-l-[var(--accent)] space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-[var(--text)] flex items-center gap-1.5">
@@ -356,8 +355,8 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => {
-                  setEmail('demo@osscafe.com');
-                  setPassword('demopassword123');
+                  setEmail(authConfig.demoAccount!.email);
+                  setPassword(authConfig.demoAccount!.password);
                   setIsSignUp(false);
                   setUseMagicLink(false);
                   setError(null);
@@ -370,11 +369,11 @@ export function Login() {
             <div className="space-y-0.5 text-[var(--muted)] font-mono text-[11px]">
               <div>
                 <span className="text-[var(--text)] font-sans">{t('login.email')}:</span>{' '}
-                demo@osscafe.com
+                {authConfig.demoAccount.email}
               </div>
               <div>
                 <span className="text-[var(--text)] font-sans">{t('login.password')}:</span>{' '}
-                demopassword123
+                {authConfig.demoAccount.password}
               </div>
             </div>
             <p className="text-[10px] text-[var(--muted)]">{t('login.demoNotice')}</p>
@@ -499,7 +498,8 @@ export function Login() {
               </div>
             )}
 
-            {useMagicLink && !isSignUp ? (
+            {authConfig.emailPasswordEnabled !== false &&
+              (useMagicLink && !isSignUp ? (
               <form onSubmit={handleMagicLinkSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs font-medium text-[var(--text)] mb-1">
@@ -633,20 +633,22 @@ export function Login() {
                   {loading ? t('common.pleaseWait') : isSignUp ? t('login.signUp') : t('login.signIn')}
                 </Button>
               </form>
-            )}
+            ))}
 
             {authConfig.oauthProviders && authConfig.oauthProviders.length > 0 && (
               <div className="space-y-3 pt-2">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-[var(--line)]" />
+                {authConfig.emailPasswordEnabled !== false && (
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-[var(--line)]" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-[var(--surface)] px-2 text-[var(--muted)]">
+                        {t('login.orContinueWith')}
+                      </span>
+                    </div>
                   </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-[var(--surface)] px-2 text-[var(--muted)]">
-                      {t('login.orContinueWith')}
-                    </span>
-                  </div>
-                </div>
+                )}
                 <div className="space-y-2">
                   {authConfig.oauthProviders.map((provider) => (
                     <Button
@@ -654,7 +656,7 @@ export function Login() {
                       type="button"
                       variant="secondary"
                       disabled={loading}
-                      onClick={() => void handleOAuthSignIn(provider.id)}
+                      onClick={() => void handleOAuthSignIn(provider)}
                       className="w-full min-h-[44px] flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <span>{t('login.continueWith', { provider: provider.name })}</span>

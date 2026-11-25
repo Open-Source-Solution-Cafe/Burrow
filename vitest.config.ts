@@ -18,6 +18,15 @@ const TEST_MIGRATIONS = await readD1Migrations('./migrations');
 const sqliteOnly = process.env.BURROW_TEST_SQLITE_ONLY === '1';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@burrow/sdk': path.resolve(import.meta.dirname, 'packages/sdk/src/index.ts'),
+      '@burrow/core': path.resolve(import.meta.dirname, 'packages/core/src/index.ts'),
+      '@burrow/web': path.resolve(import.meta.dirname, 'packages/web/src/index.ts'),
+      '@burrow/worker': path.resolve(import.meta.dirname, 'packages/worker/src/index.ts'),
+      '@burrow/plugins': path.resolve(import.meta.dirname, 'packages/plugins/src/index.ts'),
+    },
+  },
   test: {
     testTimeout: 20_000,
     hookTimeout: 20_000,
@@ -63,18 +72,21 @@ export default defineConfig({
           hookTimeout: 25_000,
           include: [
             'tests/unit/**/*.test.ts',
+            'tests/audit/**/*.test.ts',
+            'tests/security/**/*.test.ts',
             'tests/adapters/storage-local.test.ts',
             'src/web/**/*.test.ts',
             'src/core/**/*.test.ts',
             'src/shared/**/*.test.ts',
           ],
+          exclude: ['tests/security/**/*-node.test.ts'],
           environment: 'node',
         },
       },
       {
         test: {
           name: 'database',
-          include: ['tests/adapters/*-node.test.ts'],
+          include: ['tests/adapters/*-node.test.ts', 'tests/security/*-node.test.ts'],
           environment: 'node',
           globalSetup: sqliteOnly ? [] : ['./tests/adapters/node-setup.ts'],
           ...(sqliteOnly ? { testNamePattern: 'sqlite' } : {}),

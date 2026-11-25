@@ -6,6 +6,9 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createCoreApp } from '../core/app';
+import { PluginEventBus } from '../core/plugins/event-bus';
+import { runPluginMigrations } from '../core/plugins/migrations';
+import type { BurrowServerPlugin } from '@burrow/sdk';
 import { loadConfig } from './config';
 import { openNodeDb } from './db';
 import { loadEnv } from './env';
@@ -33,14 +36,18 @@ function isPostgresUrl(url?: string): boolean {
   return typeof url === 'string' && url.startsWith('postgres');
 }
 
+const serverPlugins: readonly BurrowServerPlugin[] = [];
+
 // Migrate-only CLI entry point (runs migrations and exits without starting the HTTP server)
 if (process.argv.includes('--migrate')) {
   try {
     if (isPostgresUrl(config.DATABASE_URL)) {
       const { createPostgresInfrastructure } = await import('../core/adapters/db/postgres');
-      await createPostgresInfrastructure(config, { runMigrations: true });
+      const pgInfra = await createPostgresInfrastructure(config, { runMigrations: true });
+      await runPluginMigrations(pgInfra.db, serverPlugins);
     } else {
       const { sqlite } = openNodeDb(config.SQLITE_PATH, `${process.cwd()}/migrations`);
+      await runPluginMigrations(sqlite, serverPlugins);
       sqlite.close();
     }
     console.warn('Migrations applied successfully');
@@ -51,11 +58,16 @@ if (process.argv.includes('--migrate')) {
   }
 }
 
-async function buildInfrastructure(config: ServerConfig) {
+async function buildInfrastructure(config: ServerConfig, events: PluginEventBus) {
   if (isPostgresUrl(config.DATABASE_URL)) {
     const { createPostgresInfrastructure } = await import('../core/adapters/db/postgres');
     const runMigrations = process.env.DATABASE_MIGRATE !== 'false';
-    return createPostgresInfrastructure(config, { runMigrations });
+    return createPostgresInfrastructure(config, {
+      runMigrations,
+      onBeforeDeleteUser: async (userId: string) => {
+        await events.emitBefore('user.deleted', { userId });
+      },
+    });
   }
   const { db } = openNodeDb(config.SQLITE_PATH, `${process.cwd()}/migrations`);
   const { createD1Infrastructure } = await import('../core/adapters/db/d1');
@@ -89,12 +101,23 @@ async function buildInfrastructure(config: ServerConfig) {
     TRUSTED_PROXIES: config.TRUSTED_PROXIES,
     NODE_ENV: process.env.NODE_ENV,
   } as any;
-  return createD1Infrastructure(d1Db as any, env, { runtime: 'node-sqlite' });
+  return createD1Infrastructure(d1Db as any, env, {
+    runtime: 'node-sqlite',
+    onBeforeDeleteUser: async (userId: string) => {
+      await events.emitBefore('user.deleted', { userId });
+    },
+  });
 }
 
-const infrastructurePromise = buildInfrastructure(config);
+const serverEvents = new PluginEventBus();
+const infrastructure = await buildInfrastructure(config, serverEvents);
+await runPluginMigrations(infrastructure.db, serverPlugins);
 
-const app = createCoreApp(await infrastructurePromise);
+const app = createCoreApp(infrastructure, {
+  plugins: serverPlugins,
+  events: serverEvents,
+  rawDb: infrastructure.db,
+});
 
 // Serve static frontend assets if dist/web exists (production SPA mode)
 const webDistPath = path.resolve(process.cwd(), 'dist/web');

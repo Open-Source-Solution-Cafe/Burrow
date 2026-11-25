@@ -1,5 +1,7 @@
 import { D1_MIGRATIONS } from './d1-migrations';
 import type { Env } from './env';
+import type { BurrowServerPlugin } from '@burrow/sdk';
+import { runPluginMigrations } from '../core/plugins/migrations';
 
 export type ResolvedWorkerBindings = Env['Bindings'] & {
   BETTER_AUTH_SECRET: string;
@@ -8,6 +10,7 @@ export type ResolvedWorkerBindings = Env['Bindings'] & {
 };
 
 const migratedDbs = new WeakMap<object, Promise<void>>();
+const migratedPluginSets = new WeakMap<object, Map<string, Promise<void>>>();
 const secretCache = new WeakMap<object, Promise<string>>();
 
 /** Split a SQLite/D1 migration file into executable statements. */
@@ -106,6 +109,7 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
   let publicShareCols = tables.has('public_shares')
     ? await listTableColumns(db, 'public_shares')
     : new Set<string>();
+  let cardCols = tables.has('cards') ? await listTableColumns(db, 'cards') : new Set<string>();
 
   for (const migration of D1_MIGRATIONS) {
     if (applied.has(migration.name)) continue;
@@ -127,6 +131,8 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
       migration.name === '0005_add_public_share_enabled.sql' &&
       publicShareCols.has('enabled')
     ) {
+      alreadyPresent = true;
+    } else if (migration.name === '0006_add_card_type.sql' && cardCols.has('card_type')) {
       alreadyPresent = true;
     }
 
@@ -150,6 +156,7 @@ async function ensureD1SchemaMigrated(db: D1Database): Promise<void> {
     if (migration.name === '0000_baseline.sql') {
       tables.add('workspaces');
       workspaceCols = await listTableColumns(db, 'workspaces');
+      cardCols = await listTableColumns(db, 'cards');
     } else if (migration.name === '0004_add_public_shares.sql') {
       tables.add('public_shares');
       publicShareCols = await listTableColumns(db, 'public_shares');
@@ -195,6 +202,7 @@ async function getOrCreatePersistedAuthSecret(db: D1Database): Promise<string> {
 export async function ensureWorkerRuntimeEnv(
   env: Env['Bindings'],
   request: Request,
+  plugins: ReadonlyArray<BurrowServerPlugin> = [],
 ): Promise<ResolvedWorkerBindings> {
   const dbKey = env.DB as unknown as object;
 
@@ -207,6 +215,31 @@ export async function ensureWorkerRuntimeEnv(
     migratedDbs.set(dbKey, migrationPromise);
   }
   await migrationPromise;
+
+  if (plugins.some((p) => (p.migrations?.length ?? 0) > 0)) {
+    const pluginKey = plugins
+      .map((p) => `${p.manifest.id}@${p.manifest.version}:${(p.migrations ?? []).map((m) => m.name).join(',')}`)
+      .join('|');
+    let perDbMap = migratedPluginSets.get(dbKey);
+    if (!perDbMap) {
+      perDbMap = new Map();
+      migratedPluginSets.set(dbKey, perDbMap);
+    }
+    let pluginMigrationPromise = perDbMap.get(pluginKey);
+    if (!pluginMigrationPromise) {
+      pluginMigrationPromise = runPluginMigrations(env.DB, plugins, {
+        pluginsDisabledEnv: env.PLUGINS_DISABLED,
+        disabledPluginsEnv: env.DISABLED_PLUGINS,
+      })
+        .then(() => undefined)
+        .catch((err) => {
+          perDbMap!.delete(pluginKey);
+          throw err;
+        });
+      perDbMap.set(pluginKey, pluginMigrationPromise);
+    }
+    await pluginMigrationPromise;
+  }
 
   const configuredSecret = env.BETTER_AUTH_SECRET?.trim() ?? '';
   let resolvedSecret = configuredSecret;

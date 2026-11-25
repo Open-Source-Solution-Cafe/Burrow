@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate, useParams } from '@tanstack/react-router';
+import { useLocation, useNavigate, useParams } from '@tanstack/react-router';
 import { Check, ChevronDown, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAccount, useProjects, useCreateProject } from '../../lib/queries';
-import { projectTarget } from '../../lib/workspaceRoutes';
+import { resolveProjectSwitchTarget } from '../../lib/workspaceRoutes';
 import { useTheme } from '../../lib/theme';
 import { useTranslation } from '../../lib/i18n';
 import { ModalShell } from '../ui/ModalShell';
@@ -17,6 +17,7 @@ interface ProjectSwitcherProps {
 export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string };
   const { isModern } = useTheme();
   const { data: account } = useAccount();
@@ -67,7 +68,7 @@ export function ProjectSwitcher({ currentProjectId }: ProjectSwitcherProps) {
     if (!workspaceId || !hasMembership) return;
     localStorage.setItem(`burrow-last-project:${workspaceId}`, projectId);
     setIsOpen(false);
-    navigate(projectTarget(workspaceId, projectId));
+    navigate(resolveProjectSwitchTarget(pathname, workspaceId, projectId));
   };
 
   const handleCreate = async (e: React.FormEvent) => {

@@ -6,6 +6,7 @@ import {
   detectWebhookProvider,
   isNewerVersion,
   resetReleaseCacheForTests,
+  validateSelfUpdateWebhookUrl,
 } from './system';
 
 describe('System Version & Update Routes (Milestone 1)', () => {
@@ -205,5 +206,63 @@ describe('System Version & Update Routes (Milestone 1)', () => {
     const failBody = (await failRes.json()) as any;
     expect(failBody.error.code).toBe('webhook_failed');
     expect(failBody.error.message).toContain('HTTP 401');
+  });
+
+  it('rejects insecure or private/internal webhook URLs and disables HTTP redirects on POST /api/system/update', async () => {
+    expect(validateSelfUpdateWebhookUrl('http://api.github.com/repos/o/r/dispatches', false).ok).toBe(
+      false,
+    );
+    expect(validateSelfUpdateWebhookUrl('https://127.0.0.1/hook', true).ok).toBe(false);
+    expect(validateSelfUpdateWebhookUrl('https://169.254.169.254/latest/meta-data', true).ok).toBe(
+      false,
+    );
+    expect(validateSelfUpdateWebhookUrl('https://user:pass@api.github.com/repos/o/r/dispatches', true).ok).toBe(
+      false,
+    );
+    expect(validateSelfUpdateWebhookUrl('http://127.0.0.1:8080/hook', true).ok).toBe(true);
+    expect(validateSelfUpdateWebhookUrl('http://127.0.0.1:8080/hook', false).ok).toBe(false);
+
+    const fetchSpy = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    globalThis.fetch = fetchSpy;
+
+    const blockedApp = new Hono<any>()
+      .use('*', async (c, next) => {
+        c.set('identity', { userId: 'owner-1' });
+        await next();
+      })
+      .route(
+        '/api/system',
+        createSystemRoutes({
+          workspaces: { isInstanceOwner: async () => true } as any,
+          env: { SELF_UPDATE_WEBHOOK_URL: 'https://169.254.169.254/latest' },
+          runtime: 'worker',
+        }),
+      );
+
+    const blockedRes = await blockedApp.request('/api/system/update', { method: 'POST' });
+    expect(blockedRes.status).toBe(400);
+    const blockedBody = (await blockedRes.json()) as any;
+    expect(blockedBody.error.code).toBe('invalid_webhook_url');
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    const validApp = new Hono<any>()
+      .use('*', async (c, next) => {
+        c.set('identity', { userId: 'owner-1' });
+        await next();
+      })
+      .route(
+        '/api/system',
+        createSystemRoutes({
+          workspaces: { isInstanceOwner: async () => true } as any,
+          env: { SELF_UPDATE_WEBHOOK_URL: 'https://api.github.com/repos/owner/repo/dispatches' },
+          runtime: 'worker',
+        }),
+      );
+
+    const okRes = await validApp.request('/api/system/update', { method: 'POST' });
+    expect(okRes.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [, fetchInit] = (fetchSpy as any).mock.calls[0];
+    expect(fetchInit.redirect).toBe('error');
   });
 });

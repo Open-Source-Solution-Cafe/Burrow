@@ -58,7 +58,7 @@ interface EnvBindings {
 export function createD1Infrastructure(
   db: DB,
   env: EnvBindings,
-  options: { runtime?: BurrowRuntime } = {},
+  options: { runtime?: BurrowRuntime; onBeforeDeleteUser?: (userId: string) => Promise<void> } = {},
 ): Infrastructure {
   // Create adapters (stateless, can be shared)
   const search = new SqliteFtsSearchAdapter(db);
@@ -94,6 +94,9 @@ export function createD1Infrastructure(
       onBeforeDeleteUser: async (userId: string) => {
         try {
           await memberService.assertCanDeleteUser(userId, repositories.workspaces);
+          if (options.onBeforeDeleteUser) {
+            await options.onBeforeDeleteUser(userId);
+          }
         } catch (err) {
           throw new APIError('BAD_REQUEST', {
             message: err instanceof Error ? err.message : 'cannot_delete_sole_owner',
@@ -115,6 +118,7 @@ export function createD1Infrastructure(
     runtime: options.runtime,
     appUrl: env.BETTER_AUTH_URL,
     env,
+    db,
   };
 }
 

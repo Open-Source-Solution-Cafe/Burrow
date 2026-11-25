@@ -13,6 +13,7 @@ import type { RateLimitStore } from '../adapters/rate-limit';
 import { inviteEmail } from '../services/email-templates';
 import { forbidden } from '../services/errors';
 import type { AccessPolicy } from '../policy';
+import type { PluginEventBus } from '../plugins/event-bus';
 
 const createWorkspaceSchema = z.object({
   name: z.string().trim().min(1).max(100),
@@ -38,6 +39,7 @@ export function createWorkspaceRoutes(args: {
   rateLimitStore?: RateLimitStore;
   env?: Record<string, unknown>;
   requirePersistentRateLimitStore?: boolean;
+  events?: PluginEventBus;
 }) {
   const {
     workspaces,
@@ -48,6 +50,7 @@ export function createWorkspaceRoutes(args: {
     rateLimitStore,
     env,
     requirePersistentRateLimitStore,
+    events,
   } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(members);
   const route = new Hono<Env>();
@@ -84,8 +87,18 @@ export function createWorkspaceRoutes(args: {
     }
 
     await policy?.authorize({ action: 'workspace.create', userId: identity.userId });
+    await events?.emitBefore('workspace.created', {
+      workspaceId,
+      userId: identity.userId,
+      name,
+    });
 
     const workspace = await workspaces.create(plan);
+    await events?.emitAfter('workspace.created', {
+      workspaceId: workspace.id,
+      userId: identity.userId,
+      name: workspace.name,
+    });
     return c.json({ workspace, project: plan.project }, 201);
   });
 
@@ -141,30 +154,36 @@ export function createWorkspaceRoutes(args: {
     return c.json(pending.map(({ tokenHash: _tokenHash, ...rest }) => rest));
   });
 
+  const buildInviteUrl = (reqUrl: string, token: string) => {
+    const baseOrigin = args.appUrl ? new URL(args.appUrl).origin : new URL(reqUrl).origin;
+    return `${baseOrigin}/invite/${token}`;
+  };
+
+  const inviteCreateLimiter = rateLimiter({
+    windowMs: 60_000,
+    maxRequests: 20,
+    prefix: 'invites-create',
+    env,
+    store: rateLimitStore,
+    requireStore: requirePersistentRateLimitStore,
+    keyResolver: (c) => {
+      const uid = c.get('userId') || c.get('identity')?.userId;
+      return uid ? `user:${uid}` : null;
+    },
+  });
+
   route.post(
     '/:wid/invites',
     explicitWorkspace,
     requireRole('owner'),
-    rateLimiter({
-      windowMs: 60_000,
-      maxRequests: 20,
-      prefix: 'invites-create',
-      env,
-      store: rateLimitStore,
-      requireStore: requirePersistentRateLimitStore,
-      keyResolver: (c) => {
-        const uid = c.get('userId') || c.get('identity')?.userId;
-        return uid ? `user:${uid}` : null;
-      },
-    }),
+    inviteCreateLimiter,
     zValidator('json', createInviteSchema),
     async (c) => {
     const workspaceId = c.get('workspaceId');
     const userId = c.get('userId');
     const { email, role } = c.req.valid('json');
     const result = await invites.createInvite(workspaceId, userId, email, role);
-    const baseOrigin = args.appUrl ? new URL(args.appUrl).origin : new URL(c.req.url).origin;
-    const inviteUrl = `${baseOrigin}/invite/${result.token}`;
+    const inviteUrl = buildInviteUrl(c.req.url, result.token);
     const sendPromise = (async () => {
       const [workspace, inviter] = await Promise.all([
         workspaces.findById(workspaceId),
@@ -186,6 +205,27 @@ export function createWorkspaceRoutes(args: {
       url: inviteUrl,
     });
   });
+
+  route.post(
+    '/:wid/invites/:id/link',
+    explicitWorkspace,
+    requireRole('owner'),
+    inviteCreateLimiter,
+    async (c) => {
+      const workspaceId = c.get('workspaceId');
+      const userId = c.get('userId');
+      const id = c.req.param('id');
+      const result = await invites.regenerateInviteLink(workspaceId, userId, id);
+      return c.json({
+        id: result.invite.id,
+        email: result.invite.email,
+        role: result.invite.role,
+        token: result.token,
+        expiresAt: result.invite.expiresAt,
+        url: buildInviteUrl(c.req.url, result.token),
+      });
+    },
+  );
 
   route.delete('/:wid/invites/:id', explicitWorkspace, requireRole('owner'), async (c) => {
     const id = c.req.param('id');

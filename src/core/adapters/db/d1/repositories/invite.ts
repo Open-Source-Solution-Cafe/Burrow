@@ -66,6 +66,28 @@ export function createInviteRepository(db: DB): IInviteRepository {
       return member ? { workspaceId, role: member.role } : null;
     },
 
+    async rotatePendingToken(
+      id: string,
+      workspaceId: string,
+      tokenHash: string,
+      expiresAt: number,
+      now: number,
+    ): Promise<Invite | null> {
+      const [updated] = await db
+        .update(t.invites)
+        .set({ tokenHash, expiresAt })
+        .where(
+          and(
+            eq(t.invites.id, id),
+            eq(t.invites.workspaceId, workspaceId),
+            isNull(t.invites.acceptedAt),
+            gt(t.invites.expiresAt, now),
+          ),
+        )
+        .returning();
+      return updated ? mapInvite(updated) : null;
+    },
+
     async delete(id: string, workspaceId: string): Promise<void> {
       await db
         .delete(t.invites)

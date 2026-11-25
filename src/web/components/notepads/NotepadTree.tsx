@@ -18,7 +18,13 @@ import {
   type DragMoveEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { useMoveNotepad, useNotepads } from '../../lib/queries';
+import {
+  invalidateProjectNotepads,
+  projectResourceKey,
+  useAccount,
+  useMoveNotepad,
+  useNotepads,
+} from '../../lib/queries';
 import type { NotepadNode } from '../../lib/queries';
 import { notepadTarget, projectTarget, projectApiPath } from '../../lib/workspaceRoutes';
 import { useTranslation } from '../../lib/i18n';
@@ -219,13 +225,25 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { data: account } = useAccount();
   const params = useParams({ strict: false }) as { notepadId?: string };
   const activeNotepadId = params.notepadId;
 
   const { data: notepads = [] } = useNotepads(workspaceId, projectId);
 
   const createNotepad = useMutation({
-    mutationFn: async ({ workspaceId, projectId, parentId, title }: { workspaceId: string; projectId: string; parentId?: string; title?: string }) => {
+    mutationFn: async ({
+      workspaceId,
+      projectId,
+      parentId,
+      title,
+    }: {
+      accountId?: string;
+      workspaceId: string;
+      projectId: string;
+      parentId?: string;
+      title?: string;
+    }) => {
       const res = await fetch(projectApiPath(workspaceId, projectId, 'notepads'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,14 +252,24 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
       if (!res.ok) throw new Error('Failed to create notepad');
       return res.json();
     },
-    onSuccess: (_, vars) => queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] }),
+    onSuccess: (_, vars) =>
+      invalidateProjectNotepads(queryClient, vars.accountId, vars.workspaceId, vars.projectId),
     onError: (err: any) => {
       toast.error(err?.message || 'Failed to create notepad');
     },
   });
 
   const deleteNotepad = useMutation({
-    mutationFn: async ({ workspaceId, projectId, notepadId }: { workspaceId: string; projectId: string; notepadId: string }) => {
+    mutationFn: async ({
+      workspaceId,
+      projectId,
+      notepadId,
+    }: {
+      accountId?: string;
+      workspaceId: string;
+      projectId: string;
+      notepadId: string;
+    }) => {
       const res = await fetch(projectApiPath(workspaceId, projectId, `notepads/${notepadId}`), { method: 'DELETE' });
       // 404 means already deleted — treat as success, not an error
       if (res.status === 404) return { ok: true, deletedId: notepadId };
@@ -250,7 +278,10 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
     },
     retry: false,
     onSuccess: (_, vars) => {
-      queryClient.invalidateQueries({ queryKey: ['notepads', vars.workspaceId, vars.projectId] });
+      invalidateProjectNotepads(queryClient, vars.accountId, vars.workspaceId, vars.projectId);
+      void queryClient.invalidateQueries({
+        queryKey: projectResourceKey('trash', vars.accountId, vars.workspaceId, vars.projectId),
+      });
       if (vars.notepadId === activeNotepadId) {
         navigate(projectTarget(vars.workspaceId, vars.projectId));
       }
@@ -390,7 +421,13 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
   const toggleExpand = (id: string) => setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const createChild = (parentId: string) => {
-    createNotepad.mutate({ workspaceId, projectId, parentId, title: t('common.untitled') });
+    createNotepad.mutate({
+      accountId: account?.user.id,
+      workspaceId,
+      projectId,
+      parentId,
+      title: t('common.untitled'),
+    });
     setExpanded((prev) => ({ ...prev, [parentId]: true }));
   };
 
@@ -424,7 +461,14 @@ export function NotepadTree({ workspaceId, projectId }: { workspaceId: string; p
                 projection={projection}
                 isDeleting={deleteNotepad.isPending}
                 onCreateChild={createChild}
-                onDelete={(id) => deleteNotepad.mutate({ workspaceId, projectId, notepadId: id })}
+                onDelete={(id) =>
+                  deleteNotepad.mutate({
+                    accountId: account?.user.id,
+                    workspaceId,
+                    projectId,
+                    notepadId: id,
+                  })
+                }
                 onToggle={toggleExpand}
               />
             ))

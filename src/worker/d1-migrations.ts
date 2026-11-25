@@ -19,5 +19,9 @@ export const D1_MIGRATIONS: ReadonlyArray<{ name: string; sql: string }> = [
   {
     "name": "0005_add_public_share_enabled.sql",
     "sql": "ALTER TABLE `public_shares` ADD `enabled` integer DEFAULT true NOT NULL;\n"
+  },
+  {
+    "name": "0006_add_card_type.sql",
+    "sql": "ALTER TABLE cards ADD COLUMN card_type TEXT NOT NULL DEFAULT 'task';"
   }
 ];

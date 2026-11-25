@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   boardTarget,
+  isProjectSettingsPath,
+  isWorkspaceSettingsPath,
   notepadTarget,
   projectApiPath,
   projectPath,
+  projectSettingsTarget,
   projectTarget,
   projectLibraryTarget,
+  resolveLegacyProjectSettingsHash,
+  resolveProjectSwitchTarget,
   trashTarget,
   uniqueWorkspaceForProject,
   workspaceMembersTarget,
@@ -38,6 +43,55 @@ describe('workspace route helpers', () => {
     expect(trashTarget('workspace-a', 'project-a').params).toEqual({
       workspaceId: 'workspace-a',
       projectId: 'project-a',
+    });
+    expect(projectSettingsTarget('workspace-a', 'project-a')).toEqual({
+      to: '/w/$workspaceId/p/$projectId/settings',
+      params: { workspaceId: 'workspace-a', projectId: 'project-a' },
+    });
+  });
+
+  it('keeps project switching on project settings only when already on project settings', () => {
+    expect(isProjectSettingsPath('/w/ws-1/p/p-1/settings')).toBe(true);
+    expect(isProjectSettingsPath('/w/ws-1/p/p-1/settings/')).toBe(true);
+    expect(isProjectSettingsPath('/w/ws-1/settings')).toBe(false);
+    expect(isProjectSettingsPath('/w/ws-1/p/p-1/boards/b-1')).toBe(false);
+
+    expect(isWorkspaceSettingsPath('/w/ws-1/settings')).toBe(true);
+    expect(isWorkspaceSettingsPath('/w/ws-1/settings/members')).toBe(true);
+    expect(isWorkspaceSettingsPath('/w/ws-1/p/p-1/settings')).toBe(false);
+
+    expect(resolveProjectSwitchTarget('/w/ws-1/p/p-1/settings', 'ws-1', 'p-2')).toEqual({
+      to: '/w/$workspaceId/p/$projectId/settings',
+      params: { workspaceId: 'ws-1', projectId: 'p-2' },
+    });
+    expect(resolveProjectSwitchTarget('/w/ws-1/p/p-1', 'ws-1', 'p-2')).toEqual({
+      to: '/w/$workspaceId/p/$projectId',
+      params: { workspaceId: 'ws-1', projectId: 'p-2' },
+    });
+    expect(resolveProjectSwitchTarget('/w/ws-1/settings', 'ws-1', 'p-2')).toEqual({
+      to: '/w/$workspaceId/p/$projectId',
+      params: { workspaceId: 'ws-1', projectId: 'p-2' },
+    });
+  });
+
+  it('classifies legacy project-scoped hashes for redirection', () => {
+    expect(resolveLegacyProjectSettingsHash('#project')).toEqual({
+      isProjectHash: true,
+      targetHash: undefined,
+    });
+    expect(resolveLegacyProjectSettingsHash('#tags')).toEqual({
+      isProjectHash: true,
+      targetHash: 'tags',
+    });
+    expect(resolveLegacyProjectSettingsHash('#file-uploads')).toEqual({
+      isProjectHash: true,
+      targetHash: 'uploads',
+    });
+    expect(resolveLegacyProjectSettingsHash('#features')).toEqual({
+      isProjectHash: false,
+    });
+    expect(resolveLegacyProjectSettingsHash('')).toEqual({
+      isProjectHash: false,
     });
   });
 

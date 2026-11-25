@@ -6,6 +6,8 @@ import type { CardService } from '../services/cards';
 import type { INotificationRepository } from '../infrastructure/types';
 import { createExplicitWorkspaceMiddleware } from '../middleware/session';
 import { httpError } from '../services/errors';
+import { isPluginMentionKind, PLUGIN_MENTION_KIND_RE } from '../../shared/blocks';
+import type { MentionSourceRegistry } from '../plugins/mention-registry';
 
 const tasksSchema = z.object({
   status: z.enum(['all', 'open', 'completed']).optional(),
@@ -17,7 +19,7 @@ const searchSchema = z.object({
   scope: z.enum(['project', 'all']).optional(),
 });
 const suggestSchema = z.object({
-  type: z.enum(['user', 'notepad', 'card', 'tag']),
+  type: z.union([z.enum(['user', 'notepad', 'card', 'tag']), z.string().regex(PLUGIN_MENTION_KIND_RE)]),
   q: z.string().optional().default(''),
   projectId: z.string().optional(),
 });
@@ -31,8 +33,9 @@ export function createWorkspaceViewRoutes(args: {
   cards: CardService;
   notifications: INotificationRepository;
   search: Infrastructure['search'];
+  mentionRegistry?: MentionSourceRegistry;
 }) {
-  const { repositories, cards, notifications, search } = args;
+  const { repositories, cards, notifications, search, mentionRegistry } = args;
   const explicitWorkspace = createExplicitWorkspaceMiddleware(repositories.members);
 
   const myTasks = async (c: import('hono').Context<Env>) => {
@@ -110,6 +113,15 @@ export function createWorkspaceViewRoutes(args: {
       return c.json([]);
     }
     const searchPattern = q.trim();
+    if (isPluginMentionKind(type)) {
+      if (!mentionRegistry) return c.json([]);
+      const rows = await mentionRegistry.suggest(type, searchPattern, {
+        workspaceId: c.get('workspaceId'),
+        projectId: projectId || undefined,
+        userId: c.get('userId'),
+      });
+      return c.json(rows.map((row) => ({ ...row, kind: row.kind ?? type })));
+    }
     if (type === 'user') {
       const rows = await repositories.members.findByPattern(c.get('workspaceId'), searchPattern, 8);
       return c.json(

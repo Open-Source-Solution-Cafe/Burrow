@@ -293,6 +293,7 @@ export const cards = sqliteTable(
       .unique()
       .references(() => notepads.id, { onDelete: 'cascade' }), // notepads.kind = 'card'
     kind: text('kind', { enum: ['notepad', 'card'] }).notNull().default('card'),
+    cardType: text('card_type').notNull().default('task'),
     position: text('position').notNull(),
     priority: text('priority', { enum: ['low', 'medium', 'high', 'urgent'] }),
     dueDate: integer('due_date'),

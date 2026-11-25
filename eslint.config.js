@@ -6,6 +6,7 @@ export default tseslint.config(
   {
     ignores: [
       'dist',
+      'packages/*/dist',
       'node_modules',
       '.tsbuild',
       'playwright-report',
