@@ -8,10 +8,12 @@ const root = path.resolve('.');
 const ciWorkflowPath = path.join(root, '.github/workflows/ci.yml');
 const demoWorkflowPath = path.join(root, '.github/workflows/demo-reset.yml');
 const releaseWorkflowPath = path.join(root, '.github/workflows/release.yml');
+const syncWorkflowPath = path.join(root, '.github/workflows/sync-upstream.yml');
 const isGitHubActions = process.env.GITHUB_ACTIONS === 'true';
 const hasCiWorkflow = fs.existsSync(ciWorkflowPath);
 const hasDemoWorkflow = fs.existsSync(demoWorkflowPath);
 const hasReleaseWorkflow = fs.existsSync(releaseWorkflowPath);
+const hasSyncWorkflow = fs.existsSync(syncWorkflowPath);
 
 describe('GitHub Actions workflows security and coverage', () => {
   it('pins pnpm@10.15.0 in package.json', () => {
@@ -83,6 +85,23 @@ describe('GitHub Actions workflows security and coverage', () => {
       expect(release).toContain('scripts/extract-release-notes.mjs');
       expect(release).not.toContain('CLOUDFLARE_API_TOKEN');
       expect(release).not.toContain('DEMO_CLOUDFLARE');
+    },
+  );
+
+  it.skipIf(!hasSyncWorkflow && !isGitHubActions)(
+    'keeps sync-upstream.yml gated to forks/clones on dispatch events without interpolating secrets in run blocks',
+    () => {
+      const sync = fs.readFileSync(syncWorkflowPath, 'utf8');
+      expect(sync).toContain('repository_dispatch:');
+      expect(sync).toContain('burrow-update');
+      expect(sync).toContain('workflow_dispatch:');
+      expect(sync).toContain("github.repository != 'Open-Source-Solution-Cafe/Burrow'");
+      expect(sync).toContain('node scripts/sync-upstream.mjs');
+      expect(sync).toContain('core.hooksPath=/dev/null');
+      const runBlocks = sync.match(/run:\s*\|[\s\S]*?(?=\n\s*(?:- name:|steps:|jobs:|$))/g) ?? [];
+      for (const block of runBlocks) {
+        expect(block).not.toMatch(/\$\{\{\s*secrets\./);
+      }
     },
   );
 

@@ -1,4 +1,4 @@
-node_modules
+**/node_modules
 .git
 data
 .deploy-log
@@ -6,5 +6,7 @@ data
 tests
 .env
 .env.*
-dist
+**/dist
+.tsbuild
+**/.tsbuild
 *.log

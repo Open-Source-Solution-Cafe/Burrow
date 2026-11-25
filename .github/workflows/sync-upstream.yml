@@ -1,0 +1,89 @@
+name: Sync Upstream Burrow
+
+on:
+  repository_dispatch:
+    types: [burrow-update]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: burrow-sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync-upstream:
+    name: Sync from upstream Burrow
+    if: github.repository != 'Open-Source-Solution-Cafe/Burrow' && github.repository != 'opensourcesolutioncafe/Burrow'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.BURROW_SYNC_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Sync upstream Burrow and push
+        id: sync
+        env:
+          BURROW_UPSTREAM_URL: ${{ vars.BURROW_UPSTREAM_URL || 'https://github.com/Open-Source-Solution-Cafe/Burrow.git' }}
+          BURROW_UPSTREAM_BRANCH: ${{ vars.BURROW_UPSTREAM_BRANCH || 'master' }}
+        run: |
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          git config user.name "Burrow Updater"
+          git config user.email "burrow-updater@users.noreply.github.com"
+          git checkout -B "$BRANCH" "origin/$BRANCH"
+          BEFORE_SHA="$(git rev-parse HEAD)"
+          node scripts/sync-upstream.mjs
+          AFTER_SHA="$(git rev-parse HEAD)"
+          if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+            git -c core.hooksPath=/dev/null push origin "HEAD:${BRANCH}"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger Cloudflare Deploy Hook (optional zero-PAT path)
+        if: env.CF_DEPLOY_HOOK_URL != ''
+        env:
+          CF_DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "$CF_DEPLOY_HOOK_URL" >/dev/null
+
+      - name: Warn if downstream Cloudflare trigger is missing
+        if: steps.sync.outputs.updated == 'true' && env.HAS_SYNC_TOKEN == '' && env.HAS_DEPLOY_HOOK == '' && env.HAS_CF_API_TOKEN == ''
+        env:
+          HAS_SYNC_TOKEN: ${{ secrets.BURROW_SYNC_TOKEN != '' && '1' || '' }}
+          HAS_DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL != '' && '1' || '' }}
+          HAS_CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && '1' || '' }}
+        run: |
+          echo "::warning::Upstream changes were pushed using GITHUB_TOKEN, which suppresses external GitHub App webhooks (such as Cloudflare Workers Builds). Configure BURROW_SYNC_TOKEN (or CLOUDFLARE_DEPLOY_HOOK_URL / CLOUDFLARE_API_TOKEN) so upgrades automatically redeploy."
+
+      - name: Setup pnpm (direct Wrangler deploy fallback)
+        if: env.CF_API_TOKEN != ''
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.15.0'
+
+      - name: Deploy directly with Wrangler (optional fallback)
+        if: env.CF_API_TOKEN != ''
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKERS_CI: '1'
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile
+          pnpm run build
+          pnpm run deploy

@@ -238,6 +238,10 @@ async function main() {
   }
 
   stageHeader(8, 'Deploying application');
+  const sdkTsconfigPath = path.join(root, 'packages', 'sdk', 'tsconfig.build.json');
+  if (fs.existsSync(sdkTsconfigPath)) {
+    run(bin('typescript', 'tsc'), ['-p', sdkTsconfigPath], { dryRun });
+  }
   run(bin('typescript', 'tsc'), ['-b'], { dryRun });
   run(bin('vite'), ['build'], { dryRun });
   const deployArgs = [...configArgs, 'deploy', ...WRANGLER_ARGS];

@@ -16,13 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
-- **Audit Documentation & Test Parity Reconciliation (`READINESS-v2.md`, `HANDOFF.md`, `RED-TEAM.md`, `TEST-FIXES.md`, `tests/redteam/*`, `tests/security/*`)**: Synchronized audit documentation with the dedicated `LOGIN` `plugin_<id>_role` connection pool model, normalized repository-relative links, logged the `in-process-escape.test.ts` residual test extraction and test strengthening updates in `TEST-FIXES.md`, tightened PostgreSQL error-code assertions in `postgres-isolation.test.ts`, and added direct Node socket-pinning test coverage via `SafeFetchOptions.nodeAgent`.
 
 ### Security
-- **Cross-Plugin SQLite/D1 Ownership Hijack & Migration Lexer Hardening (`src/core/plugins/plugin-db.ts`, `migrations.ts`, `loader.ts`)**: Enforced single-owner and registered-prefix collision checks inside `registerPluginOwnedTables()` (registering namespaces only for `db:own` plugins), deferred migration `ownedTables` registration until after validation and execution, scanned FK `REFERENCES <table>` clauses and SQLite `NOT INDEXED` / `INDEXED BY` comma-joins in `extractTableReferencesFromCleaned()`, enforced core-table allowlists during migrations, forwarded `options` into all DDL `assertIdentifierPrefixed()` checks, and forwarded `db.from()` in `loader.ts`.
-- **`LocalStorageAdapter` Symlink & Directory Junction Escape Fix (`src/core/adapters/storage/local.ts`)**: Added segment-by-segment `lstat()` symlink detection and canonical `realpath()` root containment across `get()`, `put()`, `delete()`, `walk()`, and `pruneEmptyDirs()` so symlinks and Windows NTFS directory junctions cannot read or overwrite files outside the storage root.
-- **PostgreSQL `idle_in_transaction_session_timeout` & Cleanup (`src/core/plugins/postgres-isolation.ts`)**: Configured server-enforced `idle_in_transaction_session_timeout` (`15000ms` migrator / `5000ms` runtime) and reset it cleanly on connection release in `withPluginPostgresRole()`.
 
+## [0.6.5] - 2026-11-25
+
+### Added
+- **Pre-Installed GitHub One-Click Upstream Sync Workflow (`.github/workflows/sync-upstream.yml`, `docs/CLOUDFLARE_DEPLOY_BUTTON.md`, `SystemUpdateSection.tsx`)**: Added `.github/workflows/sync-upstream.yml` (triggered on `repository_dispatch` `burrow-update` or `workflow_dispatch` and guarded on downstream clones) so GitHub self-hosters get one-click upstream upgrades out of the box with a single fine-grained PAT (`BURROW_SYNC_TOKEN`) or an optional Cloudflare Deploy Hook (`CLOUDFLARE_DEPLOY_HOOK_URL`).
+
+### Fixed
+- **Fresh-Clone `@burrow/sdk`, Zero-Dependency Upstream Sync & Docker Workspace Builds (`package.json`, `scripts/deploy.mjs`, `scripts/setup.mjs`, `scripts/sync-upstream.mjs`, `.gitlab-ci.yml`, `Dockerfile`)**: Built `@burrow/sdk` automatically during `pnpm run build`, `WORKERS_CI=1` Cloudflare deployments, `pnpm run setup`, and Docker builds; made `scripts/sync-upstream.mjs` zero-dependency (`node:*` built-ins only) and hook-safe (`core.hooksPath=/dev/null`); and updated `Dockerfile` to copy workspace manifests and `@burrow/sdk` runtime outputs.
+
+### Security
+- **Self-Update Webhook URL & Redirect Hardening (`src/core/routes/system.ts`)**: Validated `SELF_UPDATE_WEBHOOK_URL` against HTTPS, embedded-credential, and private/loopback host rules (allowing loopback HTTP only in `development`/`test`) and set `redirect: 'error'` on outbound `POST /api/system/update` dispatches.
 ## [0.6.4] - 2026-11-25
 
 ### Fixed

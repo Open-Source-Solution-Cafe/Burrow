@@ -146,9 +146,22 @@ export function resolveWorkersCiConfigArgs(
   return ['--config', localConfigFilename];
 }
 
+export function ensureSdkBuilt({ rootDir = root, runFn = run, dryRun = false } = {}) {
+  const sdkTsconfig = path.join(rootDir, 'packages', 'sdk', 'tsconfig.build.json');
+  const sdkDistEntry = path.join(rootDir, 'packages', 'sdk', 'dist', 'index.js');
+  if (fs.existsSync(sdkTsconfig) && !fs.existsSync(sdkDistEntry)) {
+    step('Build @burrow/sdk (packages/sdk/dist missing)');
+    runFn(bin('typescript', 'tsc'), ['-p', sdkTsconfig], { dryRun });
+    return true;
+  }
+  return false;
+}
+
 async function runWorkersCiDeploy(baseCfg) {
   step('Cloudflare Workers Builds detected (WORKERS_CI=1)');
   console.log(`  worker: ${baseCfg?.name ?? '(wrangler.jsonc default)'}`);
+
+  ensureSdkBuilt();
 
   if (!fs.existsSync(path.join(root, 'dist', 'web', 'index.html'))) {
     step('Build SPA assets (dist/web missing)');
@@ -254,6 +267,7 @@ async function main() {
   }
 
   step('Build');
+  ensureSdkBuilt();
   run(bin('vite'), ['build']);
 
   step('Record D1 Time Travel bookmark (rollback point)');

@@ -285,14 +285,19 @@ export function SystemUpdateSection({ isOwner }: { isOwner: boolean }) {
                 </li>
                 <li>
                   <strong className="text-[var(--text)]">GitHub + Cloudflare Workers Builds:</strong>{' '}
-                  Set <code className="font-mono text-[var(--text)]">SELF_UPDATE_WEBHOOK_URL</code> to{' '}
+                  Burrow includes{' '}
+                  <code className="font-mono text-[var(--text)]">.github/workflows/sync-upstream.yml</code>.
+                  Create one Fine-Grained PAT (
+                  <code className="font-mono text-[var(--text)]">Contents: Read and write</code> on
+                  your cloned repo), save it in GitHub → Settings → Secrets → Actions as{' '}
+                  <code className="font-mono text-[var(--text)]">BURROW_SYNC_TOKEN</code> (so
+                  merged pushes trigger Cloudflare Workers Builds), and set{' '}
+                  <code className="font-mono text-[var(--text)]">SELF_UPDATE_WEBHOOK_URL</code> to{' '}
                   <code className="font-mono text-[var(--text)]">
                     https://api.github.com/repos/&lt;OWNER&gt;/&lt;REPO&gt;/dispatches
                   </code>{' '}
                   and <code className="font-mono text-[var(--text)]">SELF_UPDATE_WEBHOOK_TOKEN</code> to
-                  a fine-grained PAT with <code className="font-mono text-[var(--text)]">contents: write</code>{' '}
-                  triggering a workflow that runs{' '}
-                  <code className="font-mono text-[var(--text)]">node scripts/sync-upstream.mjs</code>.
+                  that same PAT in Cloudflare Worker Secrets.
                 </li>
                 <li>
                   <strong className="text-[var(--text)]">Docker / Self-Hosted Server:</strong> Point{' '}
