@@ -1,7 +1,7 @@
 {
   "name": "burrow",
   "private": true,
-  "version": "0.6.5",
+  "version": "0.6.6",
   "packageManager": "pnpm@10.15.0",
   "license": "AGPL-3.0-or-later",
   "type": "module",
@@ -27,6 +27,7 @@
     "dev": "node scripts/dev.mjs",
     "dev:worker": "node scripts/dev-worker.mjs",
     "build": "pnpm --dir packages/sdk run build && vite build && esbuild src/server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --packages=external",
+    "build:upstream": "node scripts/sync-upstream.mjs --no-commit && pnpm install --frozen-lockfile && pnpm run build",
     "start": "node dist/server.mjs",
     "setup": "node scripts/setup.mjs",
     "setup:staging": "node scripts/setup.mjs -r --staging",

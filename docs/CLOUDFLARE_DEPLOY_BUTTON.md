@@ -30,7 +30,16 @@ Burrow's Worker entrypoint (`src/worker/index.ts` → `ensureWorkerRuntimeEnv` i
 
 Burrow checks for new upstream releases automatically **every hour** (and immediately when you click **Check for Updates** in **Settings → Features & System → System & Core Updates**). When a newer version is available, workspace owners see a dismissible top banner, sidebar badge, and Settings tab indicator.
 
-Because Cloudflare Workers cannot execute `git` or rebuild themselves inside the edge isolate, one-click upgrades trigger your Git host (GitLab CI or GitHub Actions) to run `node scripts/sync-upstream.mjs` — which safely merges upstream Burrow while preserving your custom `wrangler.jsonc` bindings and `package.json` name — and pushes the commit back so **Cloudflare Workers Builds** rebuilds and redeploys automatically:
+Because Cloudflare Workers cannot execute `git` or rebuild themselves inside the edge isolate, one-click upgrades trigger either a native **Cloudflare Deploy Hook** (zero Git tokens required) or your Git host (GitLab CI / GitHub Actions) to run `node scripts/sync-upstream.mjs` — which safely merges upstream Burrow while preserving your custom `wrangler.jsonc` bindings and `package.json` name:
+
+### Cloudflare Deploy Hook (Zero GitHub/GitLab Tokens — Simplest)
+
+1. In Cloudflare Dashboard → **Workers & Pages** → your Worker → **Settings → Builds**:
+   - Set **Build command** to `pnpm run build:upstream` (runs `node scripts/sync-upstream.mjs --no-commit && pnpm install --frozen-lockfile && pnpm run build`, or leave `pnpm run build` and set `BURROW_AUTO_SYNC_UPSTREAM=true` with deploy command `pnpm run deploy`).
+   - Set **Deploy command** to `pnpm run deploy`.
+2. Under **Deploy Hooks**, click **Create** for your `main` branch and copy the generated hook URL (`https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/<ID>`).
+3. Under **Settings → Variables and Secrets**, set `SELF_UPDATE_WEBHOOK_URL` to that Deploy Hook URL.
+4. Click **Upgrade Now** in Burrow whenever an update banner appears — Cloudflare Workers Builds pulls the latest upstream release, builds, and redeploys automatically with zero GitHub/GitLab PATs.
 
 ### GitLab + Cloudflare Workers Builds (Included `.gitlab-ci.yml`)
 

@@ -243,7 +243,7 @@ export interface SystemVersionInfo {
   checkedAt?: string;
   checkIntervalMinutes?: number;
   webhookConfigured?: boolean;
-  webhookProvider?: 'github' | 'gitlab' | 'webhook' | null;
+  webhookProvider?: 'github' | 'gitlab' | 'cloudflare' | 'webhook' | null;
   runtime?: 'worker' | 'node-sqlite' | 'docker-postgres';
   maxUploadBytes?: number;
 }

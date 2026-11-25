@@ -40,6 +40,7 @@ function upgradeCommandForRuntime(runtime?: SystemVersionInfo['runtime']): {
 function providerDisplayLabel(provider?: SystemVersionInfo['webhookProvider']): string | null {
   if (provider === 'gitlab') return 'GitLab CI';
   if (provider === 'github') return 'GitHub Actions';
+  if (provider === 'cloudflare') return 'Cloudflare Workers Builds';
   if (provider === 'webhook') return 'Webhook';
   return null;
 }
@@ -270,6 +271,18 @@ export function SystemUpdateSection({ isOwner }: { isOwner: boolean }) {
                 <strong className="text-[var(--text)]">Upgrade Now</strong> button:
               </p>
               <ul className="list-disc pl-4 space-y-1.5">
+                <li>
+                  <strong className="text-[var(--text)]">
+                    Cloudflare Deploy Hook (Zero GitHub Tokens):
+                  </strong>{' '}
+                  In Cloudflare → Workers &amp; Pages → your Worker → Settings → Builds, set the
+                  Build command to{' '}
+                  <code className="font-mono text-[var(--text)]">pnpm run build:upstream</code>{' '}
+                  (Deploy command <code className="font-mono text-[var(--text)]">pnpm run deploy</code>
+                  ), create a <strong className="text-[var(--text)]">Deploy Hook</strong>, and set{' '}
+                  <code className="font-mono text-[var(--text)]">SELF_UPDATE_WEBHOOK_URL</code> to
+                  that hook URL in Worker Variables and Secrets.
+                </li>
                 <li>
                   <strong className="text-[var(--text)]">GitLab + Cloudflare Workers Builds:</strong>{' '}
                   Burrow includes <code className="font-mono text-[var(--text)]">.gitlab-ci.yml</code>.

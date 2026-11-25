@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.6.6] - 2026-11-25
+
+### Added
+- **Native Cloudflare Deploy Hook Provider & Zero-Token `build:upstream` Flow (`src/core/routes/system.ts`, `src/web/components/settings/SystemUpdateSection.tsx`, `src/web/lib/queries.ts`, `package.json`, `scripts/deploy.mjs`, `docs/CLOUDFLARE_DEPLOY_BUTTON.md`)**: Added first-class `cloudflare` Deploy Hook detection and dispatch (`api.cloudflare.com/.../deploy_hooks/...` with zero `Authorization` headers), added `pnpm run build:upstream` and `--sync-upstream` / `BURROW_AUTO_SYNC_UPSTREAM=true` support in `scripts/deploy.mjs` (`WORKERS_CI=1`), and documented the zero-token Cloudflare Deploy Hook upgrade path in Settings and docs.
 ## [0.6.5] - 2026-11-25
 
 ### Added

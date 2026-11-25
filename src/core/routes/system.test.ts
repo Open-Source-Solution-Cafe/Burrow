@@ -151,10 +151,24 @@ describe('System Version & Update Routes (Milestone 1)', () => {
     expect(clampedBody.updateAvailable).toBe(false);
   });
 
-  it('detects GitHub, GitLab, and generic webhooks and surfaces non-OK dispatch errors', async () => {
+  it('detects GitHub, GitLab, Cloudflare Deploy Hooks, and generic webhooks and surfaces non-OK dispatch errors', async () => {
     expect(detectWebhookProvider('https://gitlab.com/api/v4/projects/123/trigger/pipeline?token=abc&ref=main')).toBe('gitlab');
     expect(detectWebhookProvider('https://api.github.com/repos/owner/repo/dispatches')).toBe('github');
+    expect(
+      detectWebhookProvider('https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/hook-123'),
+    ).toBe('cloudflare');
     expect(detectWebhookProvider('https://hooks.example.com/redeploy')).toBe('webhook');
+
+    const cfDispatch = buildWebhookDispatchRequest({
+      webhookUrl: 'https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/hook-123',
+      webhookToken: 'ignored-token',
+      triggeredBy: 'user-1',
+      currentVersion: '0.4.0',
+      targetVersion: '0.6.6',
+    });
+    expect(cfDispatch.provider).toBe('cloudflare');
+    expect(cfDispatch.headers).toEqual({});
+    expect(cfDispatch.body).toBeUndefined();
 
     const ghDispatch = buildWebhookDispatchRequest({
       webhookUrl: 'https://api.github.com/repos/owner/repo/dispatches',
@@ -264,5 +278,28 @@ describe('System Version & Update Routes (Milestone 1)', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [, fetchInit] = (fetchSpy as any).mock.calls[0];
     expect(fetchInit.redirect).toBe('error');
+
+    const cfApp = new Hono<any>()
+      .use('*', async (c, next) => {
+        c.set('identity', { userId: 'owner-1' });
+        await next();
+      })
+      .route(
+        '/api/system',
+        createSystemRoutes({
+          workspaces: { isInstanceOwner: async () => true } as any,
+          env: {
+            SELF_UPDATE_WEBHOOK_URL:
+              'https://api.cloudflare.com/client/v4/workers/builds/deploy_hooks/hook-123',
+          },
+          runtime: 'worker',
+        }),
+      );
+
+    const cfRes = await cfApp.request('/api/system/update', { method: 'POST' });
+    expect(cfRes.status).toBe(200);
+    const cfBody = (await cfRes.json()) as any;
+    expect(cfBody.provider).toBe('cloudflare');
+    expect(cfBody.message).toContain('Cloudflare Workers Builds');
   });
 });

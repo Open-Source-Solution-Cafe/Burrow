@@ -1329,5 +1329,10 @@ describe('Cloudflare deployment preflight, recovery, secrets & verification', ()
         expect(spec).toMatch(/^node:/);
       }
     });
+
+    it('accepts --sync-upstream CLI flag cleanly', () => {
+      const parsed = parseCliArgs(['--sync-upstream']);
+      expect(parsed.booleanFlags['--sync-upstream']).toBe(true);
+    });
   });
 });

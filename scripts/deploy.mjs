@@ -25,6 +25,7 @@ import {
   validateWranglerResourceConfig,
   verifyDeployment,
 } from './lib.mjs';
+import { syncUpstreamRepo } from './sync-upstream.mjs';
 
 export function isWorkersCiBuild(env = process.env) {
   const flag = String(env.WORKERS_CI ?? '').trim().toLowerCase();
@@ -161,6 +162,24 @@ async function runWorkersCiDeploy(baseCfg) {
   step('Cloudflare Workers Builds detected (WORKERS_CI=1)');
   console.log(`  worker: ${baseCfg?.name ?? '(wrangler.jsonc default)'}`);
 
+  const autoSync =
+    hasFlag('--sync-upstream') ||
+    String(process.env.BURROW_AUTO_SYNC_UPSTREAM ?? '').trim().toLowerCase() === 'true';
+  if (autoSync) {
+    step('Sync upstream Burrow before deploy (--no-commit)');
+    const syncRes = syncUpstreamRepo({
+      cwd: root,
+      upstreamUrl: process.env.BURROW_UPSTREAM_URL || undefined,
+      upstreamBranch: process.env.BURROW_UPSTREAM_BRANCH || undefined,
+      noCommit: true,
+    });
+    if (syncRes.updated) {
+      step('Install dependencies and rebuild synced upstream release');
+      run('pnpm', ['install', '--frozen-lockfile']);
+      run('pnpm', ['run', 'build']);
+    }
+  }
+
   ensureSdkBuilt();
 
   if (!fs.existsSync(path.join(root, 'dist', 'web', 'index.html'))) {
@@ -169,7 +188,7 @@ async function runWorkersCiDeploy(baseCfg) {
   }
 
   const configArgs = resolveWorkersCiConfigArgs(baseCfg);
-  const extraArgs = process.argv.slice(2);
+  const extraArgs = process.argv.slice(2).filter((arg) => arg !== '--sync-upstream');
   step('Deploy Worker via Wrangler');
   run(bin('wrangler'), [...configArgs, 'deploy', ...extraArgs]);
   console.log('\ndeploy complete');

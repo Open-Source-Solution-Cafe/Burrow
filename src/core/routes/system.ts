@@ -31,7 +31,7 @@ const DEFAULT_CHANGELOG_URL =
   'https://github.com/Open-Source-Solution-Cafe/Burrow/blob/master/CHANGELOG.md';
 const SEMVER_TAG_RE = /^v?(\d+\.\d+\.\d+)$/;
 
-export type SelfUpdateWebhookProvider = 'github' | 'gitlab' | 'webhook';
+export type SelfUpdateWebhookProvider = 'github' | 'gitlab' | 'cloudflare' | 'webhook';
 
 export function resetReleaseCacheForTests() {
   cachedRelease = null;
@@ -105,6 +105,9 @@ export function detectWebhookProvider(webhookUrl?: string): SelfUpdateWebhookPro
     if (pathname.includes('/trigger/pipeline') || host.includes('gitlab')) {
       return 'gitlab';
     }
+    if (host === 'api.cloudflare.com' && pathname.includes('/deploy_hooks/')) {
+      return 'cloudflare';
+    }
     return 'webhook';
   } catch {
     return 'webhook';
@@ -175,6 +178,15 @@ export function buildWebhookDispatchRequest(params: {
       provider,
       headers,
       body: Object.keys(payload).length > 0 ? JSON.stringify(payload) : undefined,
+    };
+  }
+
+  if (provider === 'cloudflare') {
+    return {
+      url: webhookUrl,
+      provider,
+      headers: {},
+      body: undefined,
     };
   }
 
@@ -490,7 +502,9 @@ export function createSystemRoutes(options: SystemRoutesOptions) {
             ? 'GitLab CI'
             : dispatch.provider === 'github'
               ? 'GitHub Actions'
-              : 'webhook';
+              : dispatch.provider === 'cloudflare'
+                ? 'Cloudflare Workers Builds'
+                : 'webhook';
         return c.json({
           ok: true,
           status: 'triggered',

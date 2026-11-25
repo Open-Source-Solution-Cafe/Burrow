@@ -37,6 +37,7 @@ export const KNOWN_CLI_FLAGS = new Set([
   '--force',
   '--rotate-bootstrap-token',
   '--skip-checks',
+  '--sync-upstream',
   '--keep-r2',
   '--skip-r2-check',
   '--clean-r2',
