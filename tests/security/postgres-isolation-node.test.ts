@@ -3,7 +3,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
 import type { BurrowServerPlugin } from '@burrow/sdk';
 import { applyPostgresMigrations } from '../../src/core/adapters/db/postgres';
-import { createPluginDb } from '../../src/core/plugins/plugin-db';
+import { PluginSqlAccessError, createPluginDb } from '../../src/core/plugins/plugin-db';
 import { runPluginMigrations } from '../../src/core/plugins/migrations';
 import {
   provisionPluginPostgresIsolation,
@@ -131,7 +131,9 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
         ],
         setup() {},
       };
-      await expect(runPluginMigrations(sql, [fkLockPluginNoCore])).rejects.toThrow();
+      await expect(runPluginMigrations(sql, [fkLockPluginNoCore])).rejects.toThrow(
+        /relation "workspaces" does not exist|permission denied|42501/i,
+      );
 
       const fkLockPluginWithCore: BurrowServerPlugin = {
         manifest: {
@@ -154,7 +156,7 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
         ],
         setup() {},
       };
-      await expect(runPluginMigrations(sql, [fkLockPluginWithCore])).rejects.toThrow();
+      await expect(runPluginMigrations(sql, [fkLockPluginWithCore])).rejects.toThrow(/ON DELETE CASCADE/i);
 
       const tempWsId = `ws_lock_${randomUUID().slice(0, 8)}`;
       await sql`INSERT INTO workspaces (id, name, created_by, created_at) VALUES (${tempWsId}, 'Disposable', 'u_victim', 2000)`;
@@ -185,22 +187,21 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
         ],
         setup() {},
       };
-      await expect(runPluginMigrations(sql, [oraclePlugin])).rejects.toThrow();
+      await expect(runPluginMigrations(sql, [oraclePlugin])).rejects.toThrow(PluginSqlAccessError);
+      await expect(
+        runPluginMigrations(sql, [oraclePlugin], { skipLexerForTest: true }),
+      ).rejects.toThrow(/relation "user" does not exist|permission denied|42501/i);
 
       await provisionPluginPostgresIsolation(sql, 'fkoracle', { coreTables: [] });
       const db = createPluginDb(sql, 'fkoracle', { coreTables: [], enforceLexer: false });
 
       // Neither migration-time FK nor runtime lookup against public."user" can distinguish existing vs missing IDs
-      const probeExisting = await db
-        .query('SELECT id FROM public."user" WHERE id = $1', ['u_victim'])
-        .then(() => 'existed')
-        .catch(() => 'denied');
-      const probeMissing = await db
-        .query('SELECT id FROM public."user" WHERE id = $1', ['u_does_not_exist'])
-        .then(() => 'existed')
-        .catch(() => 'denied');
-      expect(probeExisting).toBe('denied');
-      expect(probeMissing).toBe('denied');
+      await expect(
+        db.query('SELECT id FROM public."user" WHERE id = $1', ['u_victim']),
+      ).rejects.toThrow(/permission denied|42501/i);
+      await expect(
+        db.query('SELECT id FROM public."user" WHERE id = $1', ['u_does_not_exist']),
+      ).rejects.toThrow(/permission denied|42501/i);
     });
 
     it('prevents plugin queries from holding core advisory locks (burrow:migrations / burrow:plugin_migrations)', async () => {
@@ -212,13 +213,17 @@ describe('Category 1 & 2 — PostgreSQL 17 Role Containment & DB-Level Isolation
       await sql`SELECT pg_advisory_unlock_all()`;
     });
 
-    it('sets PostgreSQL statement_timeout inside withPluginPostgresRole so slow queries do not linger in the DB pool', async () => {
+    it('sets PostgreSQL statement_timeout and idle_in_transaction_session_timeout inside withPluginPostgresRole so slow queries do not linger in the DB pool', async () => {
       await provisionPluginPostgresIsolation(sql, 'timeoutpg', { coreTables: [] });
-      const timeoutSetting = await withPluginPostgresRole(sql, 'timeoutpg', async (roleTx) => {
-        const rows = await roleTx.unsafe("SELECT current_setting('statement_timeout') AS st");
-        return rows[0]?.st;
+      const timeoutSettings = await withPluginPostgresRole(sql, 'timeoutpg', async (roleTx) => {
+        const rows = await roleTx.unsafe(
+          "SELECT current_setting('statement_timeout') AS st, current_setting('idle_in_transaction_session_timeout') AS idle_tx",
+        );
+        return rows[0];
       });
-      expect(timeoutSetting).not.toBe('0');
+      expect(timeoutSettings?.st).not.toBe('0');
+      expect(timeoutSettings?.idle_tx).not.toBe('0');
+      expect(String(timeoutSettings?.idle_tx)).toMatch(/^(5s|5000ms)$/);
     });
 
     it('blocks information_schema.tables and pg_roles reads both in lexer and DB role', async () => {

@@ -379,6 +379,7 @@ BEGIN
   EXECUTE format('ALTER ROLE %I SET search_path = %s', ${quoteLiteral(migratorRole)}, ${quoteLiteral(searchPathSql)});
   EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', ${quoteLiteral(migratorRole)}, '15000ms');
   EXECUTE format('ALTER ROLE %I SET lock_timeout = %L', ${quoteLiteral(migratorRole)}, '5000ms');
+  EXECUTE format('ALTER ROLE %I SET idle_in_transaction_session_timeout = %L', ${quoteLiteral(migratorRole)}, '15000ms');
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), ${quoteLiteral(migratorRole)});
   EXECUTE format('GRANT USAGE, CREATE ON SCHEMA %I TO %I', ${quoteLiteral(schemaName)}, ${quoteLiteral(migratorRole)});
 
@@ -462,6 +463,7 @@ BEGIN
   EXECUTE format('ALTER ROLE %I SET search_path = %s', ${quoteLiteral(roleName)}, ${quoteLiteral(searchPathSql)});
   EXECUTE format('ALTER ROLE %I SET statement_timeout = %L', ${quoteLiteral(roleName)}, '3000ms');
   EXECUTE format('ALTER ROLE %I SET lock_timeout = %L', ${quoteLiteral(roleName)}, '2000ms');
+  EXECUTE format('ALTER ROLE %I SET idle_in_transaction_session_timeout = %L', ${quoteLiteral(roleName)}, '5000ms');
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), ${quoteLiteral(roleName)});
 EXCEPTION
   WHEN insufficient_privilege THEN
@@ -675,7 +677,9 @@ export async function withPluginPostgresRole<T>(
       return await fn(roleTx);
     } finally {
       await conn
-        .unsafe(`RESET statement_timeout; RESET lock_timeout; ${searchPathReset}; DISCARD TEMP`)
+        .unsafe(
+          `RESET statement_timeout; RESET lock_timeout; RESET idle_in_transaction_session_timeout; ${searchPathReset}; DISCARD TEMP`,
+        )
         .catch(() => {});
       conn.release();
     }

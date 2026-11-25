@@ -307,7 +307,10 @@ export function loadServerPlugins(args: {
 
     const granted = new Set<Permission>(frozenManifest.permissions);
     const rawDb = args.rawDb ?? infra.db ?? envObj.DB;
-    const realDb = createPluginDb(rawDb, id, { coreTables: frozenManifest.coreTables ?? [] });
+    const realDb = createPluginDb(rawDb, id, {
+      coreTables: frozenManifest.coreTables ?? [],
+      registerNamespace: granted.has('db:own'),
+    });
     const secretValues = collectSecretValues(envObj, frozenManifest.configKeys);
     const logger = createPluginLogger(id, secretValues);
     const scopedConfig = buildScopedPluginConfig(frozenManifest, envObj, firstPartyCore);
@@ -320,6 +323,13 @@ export function loadServerPlugins(args: {
       dialect: realDb.dialect,
       table: (shortName) => realDb.table(shortName),
       sql: (strings, ...values) => realDb.sql(strings, ...values),
+      from: (shortName) => {
+        assertPermission(id, granted, 'db:own');
+        if (!realDb.from) {
+          throw new Error(`Plugin "${id}" db.from() is not supported by database adapter`);
+        }
+        return realDb.from(shortName);
+      },
       query: (sqlInput, params, opts) => {
         assertPermission(id, granted, 'db:own');
         return realDb.query(sqlInput, params, opts);

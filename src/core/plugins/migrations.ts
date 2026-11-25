@@ -112,6 +112,7 @@ export async function runPluginMigrations(
 
   const activeDialect: PluginDialect = isPostgresClient(client) ? 'postgres' : 'sqlite';
 
+  const dbOwningPrefixes = new Set<string>();
   for (const plugin of activePlugins) {
     validatePluginManifest(plugin.manifest);
     assertPluginDialectSupported(plugin.manifest, activeDialect);
@@ -120,11 +121,26 @@ export async function runPluginMigrations(
         `Plugin "${plugin.manifest.id}" has migrations but lacks required permission "db:own"`,
       );
     }
-    const createdInMigrations = (plugin.migrations ?? []).flatMap((m) =>
-      extractCreatedTablesFromSql(m.sql),
-    );
-    registerPluginOwnedTables(rawDb, plugin.manifest.id, createdInMigrations);
+    if (plugin.manifest.permissions.includes('db:own')) {
+      dbOwningPrefixes.add(pluginTablePrefix(plugin.manifest.id));
+    }
   }
+
+  if (!options.skipLexerForTest) {
+    for (const plugin of activePlugins) {
+      if (plugin.manifest.permissions.includes('db:own')) {
+        registerPluginOwnedTables(rawDb, plugin.manifest.id, []);
+      }
+    }
+  }
+
+  const otherPrefixesFor = (prefix: string): ReadonlySet<string> | undefined => {
+    const others = new Set<string>();
+    for (const p of dbOwningPrefixes) {
+      if (p !== prefix) others.add(p);
+    }
+    return others.size > 0 ? others : undefined;
+  };
 
   const withMigrations = activePlugins.filter((p) => (p.migrations?.length ?? 0) > 0);
 
@@ -173,6 +189,16 @@ export async function runPluginMigrations(
             }
           }
 
+          const otherPluginPrefixes = otherPrefixesFor(prefix);
+          if (!options.skipLexerForTest) {
+            for (const migration of migrations) {
+              if (applied.has(`${pluginId}:${migration.name}`)) {
+                assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+                registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
+              }
+            }
+          }
+
           if (pending.length === 0) {
             await provisionPluginPostgresIsolation(runClient, pluginId, {
               coreTables: plugin.manifest.coreTables,
@@ -181,15 +207,18 @@ export async function runPluginMigrations(
             continue;
           }
 
+          if (!options.skipLexerForTest) {
+            for (const migration of pending) {
+              assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+            }
+          }
+
           // Execute migration DDL under ephemeral plugin_<id>_migrator LOGIN role, then finalize to _owner + _role
           await withPluginPostgresRole(
             runClient,
             pluginId,
             async (roleTx) => {
               for (const migration of pending) {
-                if (!options.skipLexerForTest) {
-                  assertPluginSqlAllowed(pluginId, migration.sql, prefix);
-                }
                 const statements = splitPluginSqlStatements(migration.sql);
                 for (const stmt of statements) {
                   await roleTx.unsafe(normalizePostgresMigrationDdl(stmt));
@@ -201,6 +230,9 @@ export async function runPluginMigrations(
           await finalizePluginSchemaPrivileges(runClient, pluginId);
 
           for (const migration of pending) {
+            if (!options.skipLexerForTest) {
+              registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
+            }
             const key = `${pluginId}:${migration.name}`;
             await runClient.unsafe(
               'INSERT INTO plugin_migrations (plugin_id, name, applied_at) VALUES ($1, $2, $3) ON CONFLICT (plugin_id, name) DO NOTHING',
@@ -250,6 +282,7 @@ export async function runPluginMigrations(
     for (const plugin of withMigrations) {
       const pluginId = plugin.manifest.id;
       const prefix = pluginTablePrefix(pluginId);
+      const otherPluginPrefixes = otherPrefixesFor(prefix);
       const seenNames = new Set<string>();
       const migrations = selectMigrationsForDialect(plugin, 'sqlite');
 
@@ -262,9 +295,17 @@ export async function runPluginMigrations(
         seenNames.add(migration.name);
 
         const key = `${pluginId}:${migration.name}`;
-        if (applied.has(key)) continue;
+        if (applied.has(key)) {
+          if (!options.skipLexerForTest) {
+            assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+            registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
+          }
+          continue;
+        }
 
-        assertPluginSqlAllowed(pluginId, migration.sql, prefix);
+        if (!options.skipLexerForTest) {
+          assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+        }
         const statements = splitPluginSqlStatements(migration.sql);
         const batch: D1PreparedStatement[] = [
           ...statements.map((stmt) => client.prepare(stmt)),
@@ -273,6 +314,9 @@ export async function runPluginMigrations(
             .bind(pluginId, migration.name, Date.now()),
         ];
         await client.batch(batch);
+        if (!options.skipLexerForTest) {
+          registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
+        }
         applied.add(key);
         newlyApplied.push(key);
       }
@@ -292,6 +336,7 @@ export async function runPluginMigrations(
   for (const plugin of withMigrations) {
     const pluginId = plugin.manifest.id;
     const prefix = pluginTablePrefix(pluginId);
+    const otherPluginPrefixes = otherPrefixesFor(prefix);
     const seenNames = new Set<string>();
     const migrations = selectMigrationsForDialect(plugin, 'sqlite');
 
@@ -304,9 +349,17 @@ export async function runPluginMigrations(
       seenNames.add(migration.name);
 
       const key = `${pluginId}:${migration.name}`;
-      if (applied.has(key)) continue;
+      if (applied.has(key)) {
+        if (!options.skipLexerForTest) {
+          assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+          registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
+        }
+        continue;
+      }
 
-      assertPluginSqlAllowed(pluginId, migration.sql, prefix);
+      if (!options.skipLexerForTest) {
+        assertPluginSqlAllowed(pluginId, migration.sql, prefix, { otherPluginPrefixes });
+      }
       const statements = splitPluginSqlStatements(migration.sql);
       const applyTx = () => {
         for (const stmt of statements) {
@@ -320,6 +373,9 @@ export async function runPluginMigrations(
         sqlite.transaction(applyTx)();
       } else {
         applyTx();
+      }
+      if (!options.skipLexerForTest) {
+        registerPluginOwnedTables(rawDb, pluginId, extractCreatedTablesFromSql(migration.sql));
       }
       applied.add(key);
       newlyApplied.push(key);

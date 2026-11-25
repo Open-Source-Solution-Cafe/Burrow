@@ -22,8 +22,10 @@ const sqlAstParser = new nodeSqlParser.Parser();
 /**
  * NOTE ON DIALECT SECURITY BOUNDARIES:
  * - On PostgreSQL, plugin isolation is enforced by the database engine itself via dedicated
- *   `plugin_<id>` schemas, NOLOGIN `plugin_<id>_role` roles, `REVOKE ALL` / explicit `coreTables`
- *   grants, DDL event triggers, and transactional `SET LOCAL ROLE` + pinned `search_path`.
+ *   `plugin_<id>` schemas owned by NOLOGIN `plugin_<id>_owner`, dedicated LOGIN `plugin_<id>_role`
+ *   connection pools (`session_user = plugin_<id>_role`), ephemeral `plugin_<id>_migrator`
+ *   migration roles, `REVOKE ALL` / explicit `coreTables` grants, locked `search_path` /
+ *   timeouts, and `SECURITY INVOKER` DDL event triggers.
  * - On SQLite / Cloudflare D1 (which lack database roles, schemas, and GRANT/REVOKE), the
  *   SQL guard (`assertPluginSqlAllowed`) is a best-effort tripwire for operator-trusted plugins,
  *   NOT a cryptographic or engine-level isolation boundary.
@@ -63,6 +65,7 @@ const MAX_QUERY_TIMEOUT_MS = 30_000;
 const MAX_AST_PARSE_CHARS = 32_768;
 
 const ownedTablesByDb = new WeakMap<object, Map<string, Set<string>>>();
+const tableOwnerByDb = new WeakMap<object, Map<string, string>>();
 const registeredPrefixesByDb = new WeakMap<object, Set<string>>();
 
 function clampQueryTimeoutMs(rawTimeoutMs: number | undefined): number {
@@ -77,18 +80,75 @@ export function registerPluginOwnedTables(
   rawDb: unknown,
   pluginId: string,
   tables: ReadonlyArray<string>,
+  opts: { registerNamespace?: boolean } = {},
 ): void {
   const client = unwrapDbClient(rawDb);
   if (!client || (typeof client !== 'object' && typeof client !== 'function')) return;
   const key = client as object;
+  const prefix = pluginTablePrefix(pluginId);
+
   let prefixes = registeredPrefixesByDb.get(key);
   if (!prefixes) {
     prefixes = new Set<string>();
     registeredPrefixesByDb.set(key, prefixes);
   }
-  prefixes.add(pluginTablePrefix(pluginId));
+
+  let ownerMap = tableOwnerByDb.get(key);
+  if (!ownerMap) {
+    ownerMap = new Map<string, string>();
+    tableOwnerByDb.set(key, ownerMap);
+  }
+
+  if (opts.registerNamespace !== false) {
+    for (const [existingTbl, existingOwner] of ownerMap) {
+      if (existingOwner !== pluginId && existingTbl.startsWith(prefix)) {
+        throw new PluginSqlAccessError(
+          pluginId,
+          `namespace "${prefix}" conflicts with table "${existingTbl}" already owned by plugin "${existingOwner}"`,
+        );
+      }
+    }
+    prefixes.add(prefix);
+  }
 
   if (tables.length === 0) return;
+
+  const normalizedTables: string[] = [];
+  for (const t of tables) {
+    const clean = t.trim().replace(/^[`"[]|[`"\]]$/g, '');
+    const parts = clean.split('.');
+    const tbl = (parts[parts.length - 1] ?? clean).replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
+    if (!tbl) continue;
+
+    if (!tbl.startsWith(prefix)) {
+      throw new PluginSqlAccessError(
+        pluginId,
+        `owned table "${tbl}" must start with "${prefix}"`,
+      );
+    }
+
+    for (const otherPrefix of prefixes) {
+      if (otherPrefix !== prefix && tbl.startsWith(otherPrefix)) {
+        throw new PluginSqlAccessError(
+          pluginId,
+          `cross-plugin table "${tbl}" collides with sibling plugin prefix "${otherPrefix}"`,
+        );
+      }
+    }
+
+    const existingOwner = ownerMap.get(tbl);
+    if (existingOwner && existingOwner !== pluginId) {
+      throw new PluginSqlAccessError(
+        pluginId,
+        `table "${tbl}" is already owned by plugin "${existingOwner}"`,
+      );
+    }
+
+    normalizedTables.push(tbl);
+  }
+
+  if (normalizedTables.length === 0) return;
+
   let perPlugin = ownedTablesByDb.get(key);
   if (!perPlugin) {
     perPlugin = new Map<string, Set<string>>();
@@ -99,11 +159,9 @@ export function registerPluginOwnedTables(
     owned = new Set<string>();
     perPlugin.set(pluginId, owned);
   }
-  for (const t of tables) {
-    const clean = t.trim().replace(/^[`"[]|[`"\]]$/g, '');
-    const parts = clean.split('.');
-    const tbl = (parts[parts.length - 1] ?? clean).replace(/^[`"[]|[`"\]]$/g, '').toLowerCase();
-    if (tbl) owned.add(tbl);
+  for (const tbl of normalizedTables) {
+    owned.add(tbl);
+    ownerMap.set(tbl, pluginId);
   }
 }
 
@@ -720,6 +778,12 @@ function extractTableReferencesFromCleaned(cleanedStmt: string): ParsedTableRef[
     }
 
     const upper = tok.toUpperCase();
+    if (upper === 'REFERENCES') {
+      const parsed = readIdentRef(tokens, i + 1);
+      if (parsed) refs.push(parsed.ref);
+      continue;
+    }
+
     if (upper === 'JOIN') {
       let p = i + 1;
       if (tokens[p]?.toUpperCase() === 'ONLY') p++;
@@ -769,6 +833,26 @@ function extractTableReferencesFromCleaned(cleanedStmt: string): ParsedTableRef[
           p = findMatchingParenToken(tokens, p) + 1;
         }
 
+        const skipSqliteIndexHint = (pos: number): number => {
+          if (
+            tokens[pos]?.toUpperCase() === 'NOT' &&
+            tokens[pos + 1]?.toUpperCase() === 'INDEXED'
+          ) {
+            return pos + 2;
+          }
+          if (
+            tokens[pos]?.toUpperCase() === 'INDEXED' &&
+            tokens[pos + 1]?.toUpperCase() === 'BY' &&
+            tokens[pos + 2]
+          ) {
+            return pos + 3;
+          }
+          return pos;
+        };
+
+        // SQLite index hints can appear without an alias (`FROM tbl NOT INDEXED, other`)
+        p = skipSqliteIndexHint(p);
+
         // Skip optional AS alias or bare alias before comma
         if (tokens[p]?.toUpperCase() === 'AS') {
           p += 2;
@@ -782,6 +866,9 @@ function extractTableReferencesFromCleaned(cleanedStmt: string): ParsedTableRef[
         ) {
           p++;
         }
+
+        // SQLite index hints can also appear after `[AS] alias` (`FROM tbl AS a NOT INDEXED, other`)
+        p = skipSqliteIndexHint(p);
 
         if (tokens[p] === ',') {
           p++;
@@ -917,6 +1004,8 @@ export interface CreatePluginDbOptions {
   ownedTables?: readonly string[];
   /** Optional sibling plugin prefixes to reject cross-plugin prefix overlap in SQLite/D1. */
   otherPluginPrefixes?: readonly string[];
+  /** Whether to claim `plugin_<id>_` namespace ownership on the shared DB client (default `true`). */
+  registerNamespace?: boolean;
 }
 
 export function assertPluginSqlAllowed(
@@ -1075,19 +1164,19 @@ export function assertPluginSqlAllowed(
         );
       }
 
-      if (options.isRuntime) {
-        const isAllowedCore = options.enforceCoreAllowlist
-          ? Boolean(options.allowedCoreTables?.has(table))
-          : SAFE_CORE_READ_TABLES.has(table);
-        if (!isAllowedCore) {
-          throw new PluginSqlAccessError(
-            pluginId,
-            options.enforceCoreAllowlist
-              ? `core table "${table}" must be declared in manifest.coreTables`
-              : `table "${table}" is not accessible to plugins`,
-          );
-        }
+      const isAllowedCore = options.enforceCoreAllowlist
+        ? Boolean(options.allowedCoreTables?.has(table))
+        : SAFE_CORE_READ_TABLES.has(table);
+      if (!isAllowedCore) {
+        throw new PluginSqlAccessError(
+          pluginId,
+          options.enforceCoreAllowlist
+            ? `core table "${table}" must be declared in manifest.coreTables`
+            : `table "${table}" is not accessible to plugins`,
+        );
+      }
 
+      if (options.isRuntime) {
         const isDdlStatement = /^(?:CREATE|ALTER|DROP)\b/i.test(cleaned);
         if (!options.allowUnscopedCoreReads && !isDdlStatement) {
           const whereMatch = /\bWHERE\b([\s\S]*)$/i.exec(cleaned);
@@ -1139,17 +1228,17 @@ export function assertPluginSqlAllowed(
         cleaned,
       );
       if (!m?.[1]) throw new PluginSqlAccessError(pluginId, 'unable to parse CREATE TABLE target');
-      assertIdentifierPrefixed(pluginId, prefix, m[1], 'CREATE TABLE');
+      assertIdentifierPrefixed(pluginId, prefix, m[1], 'CREATE TABLE', options);
       continue;
     }
 
     if (/^ALTER\s+TABLE\b/i.test(cleaned)) {
       const m = /^ALTER\s+TABLE\s+([`"\w.[\]-]+)/i.exec(cleaned);
       if (!m?.[1]) throw new PluginSqlAccessError(pluginId, 'unable to parse ALTER TABLE target');
-      assertIdentifierPrefixed(pluginId, prefix, m[1], 'ALTER TABLE');
+      assertIdentifierPrefixed(pluginId, prefix, m[1], 'ALTER TABLE', options);
       const renameMatch = /\bRENAME\s+TO\s+([`"\w.[\]-]+)/i.exec(cleaned);
       if (renameMatch?.[1]) {
-        assertIdentifierPrefixed(pluginId, prefix, renameMatch[1], 'ALTER TABLE RENAME TO');
+        assertIdentifierPrefixed(pluginId, prefix, renameMatch[1], 'ALTER TABLE RENAME TO', options);
       }
       continue;
     }
@@ -1159,7 +1248,7 @@ export function assertPluginSqlAllowed(
         cleaned,
       );
       if (!m?.[1]) throw new PluginSqlAccessError(pluginId, 'unable to parse DROP target');
-      assertIdentifierPrefixed(pluginId, prefix, m[1], 'DROP');
+      assertIdentifierPrefixed(pluginId, prefix, m[1], 'DROP', options);
       continue;
     }
 
@@ -1170,7 +1259,7 @@ export function assertPluginSqlAllowed(
       if (!m?.[1] || !m?.[2]) {
         throw new PluginSqlAccessError(pluginId, 'unable to parse CREATE INDEX target');
       }
-      assertIdentifierPrefixed(pluginId, prefix, m[2], 'CREATE INDEX ON');
+      assertIdentifierPrefixed(pluginId, prefix, m[2], 'CREATE INDEX ON', options);
       continue;
     }
 
@@ -1181,14 +1270,14 @@ export function assertPluginSqlAllowed(
       if (!m?.[2]) {
         throw new PluginSqlAccessError(pluginId, 'unable to parse CREATE TRIGGER target table');
       }
-      assertIdentifierPrefixed(pluginId, prefix, m[2], 'CREATE TRIGGER ON');
+      assertIdentifierPrefixed(pluginId, prefix, m[2], 'CREATE TRIGGER ON', options);
       continue;
     }
 
     if (/^CREATE\s+VIEW\b/i.test(cleaned)) {
       const m = /^CREATE\s+VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([`"\w.[\]-]+)/i.exec(cleaned);
       if (!m?.[1]) throw new PluginSqlAccessError(pluginId, 'unable to parse CREATE VIEW target');
-      assertIdentifierPrefixed(pluginId, prefix, m[1], 'CREATE VIEW');
+      assertIdentifierPrefixed(pluginId, prefix, m[1], 'CREATE VIEW', options);
       continue;
     }
 
@@ -1413,7 +1502,9 @@ export function createPluginDb(
   const enforceCoreAllowlist = dbOptions.coreTables !== undefined;
   const allowedCoreTables = new Set(dbOptions.coreTables ?? []);
 
-  registerPluginOwnedTables(rawDb, pluginId, dbOptions.ownedTables ?? []);
+  registerPluginOwnedTables(rawDb, pluginId, dbOptions.ownedTables ?? [], {
+    registerNamespace: dbOptions.registerNamespace,
+  });
 
   const ensureClient = () => {
     if (!client || (!isPostgresClient(client) && typeof (client as { prepare?: unknown }).prepare !== 'function')) {

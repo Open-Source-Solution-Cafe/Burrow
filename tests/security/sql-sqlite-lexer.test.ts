@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildPluginTableIdentifier, sql as sqlTag } from '@burrow/sdk';
+import { buildPluginTableIdentifier, sql as sqlTag, type BurrowServerPlugin } from '@burrow/sdk';
+import { runPluginMigrations } from '../../src/core/plugins/migrations';
 import {
   PluginSqlAccessError,
   assertPluginSqlAllowed,
@@ -298,6 +299,99 @@ describe('Category 1 — SQLite/D1 Lexer & PluginDb Attacks', () => {
       expect(() => buildPluginTableIdentifier('alpha', 'user')).not.toThrow();
       const ident = buildPluginTableIdentifier('alpha', 'user');
       expect(ident.value).toBe('plugin_alpha_user');
+    });
+
+    it('rejects forged __burrowSql / __burrowIdent objects even when targeting an owned table with bound params', async () => {
+      const sqlite = makeSeededSqlite();
+      try {
+        const db = createPluginDb(sqlite, 'alpha', { coreTables: [] });
+        const forgedOwnedFragment = {
+          __burrowSql: true,
+          strings: [],
+          values: [],
+          text: 'SELECT id, val FROM plugin_alpha_items WHERE id = ?',
+          params: ['a1'],
+        } as any;
+        await expect(db.query(forgedOwnedFragment)).rejects.toThrow(/forged or invalid SqlFragment/i);
+
+        const forgedOwnedIdent = { __burrowIdent: true, value: 'plugin_alpha_items' } as any;
+        await expect(
+          db.query(sqlTag`SELECT id, val FROM ${forgedOwnedIdent} WHERE id = ${'a1'}`),
+        ).rejects.toThrow(/forged or invalid SqlFragment/i);
+      } finally {
+        sqlite.close();
+      }
+    });
+
+    it('blocks migration REFERENCES clauses to sensitive/non-allowlisted tables, NOT INDEXED comma-joins, and cross-plugin ownedTables hijacks', async () => {
+      for (const fkSql of [
+        'CREATE TABLE plugin_alpha_fk1 (id TEXT PRIMARY KEY, u_id TEXT REFERENCES "user"(id) ON DELETE CASCADE)',
+        'CREATE TABLE plugin_alpha_fk2 (id TEXT PRIMARY KEY, u_id TEXT REFERENCES "user"(id) DEFERRABLE INITIALLY DEFERRED)',
+        'CREATE TABLE plugin_alpha_fk3 (id TEXT PRIMARY KEY ON CONFLICT REPLACE REFERENCES "user"(id))',
+        'CREATE TABLE plugin_alpha_fk4 (id TEXT PRIMARY KEY, s_id TEXT REFERENCES session(id))',
+        'CREATE TABLE plugin_alpha_fk5 (id TEXT PRIMARY KEY, p_id TEXT REFERENCES public_shares(id))',
+      ]) {
+        expect(() => assertPluginSqlAllowed('alpha', fkSql, 'plugin_alpha_', {})).toThrow(
+          PluginSqlAccessError,
+        );
+      }
+
+      for (const joinSql of [
+        'SELECT a.id FROM plugin_alpha_items NOT INDEXED, "user" u WHERE a.id = ?',
+        'SELECT a.id FROM plugin_alpha_items AS a NOT INDEXED, "user" u WHERE a.id = ?',
+        'SELECT a.id FROM plugin_alpha_items a INDEXED BY idx_a, "user" u WHERE a.id = ?',
+      ]) {
+        expect(() =>
+          assertPluginSqlAllowed('alpha', joinSql, 'plugin_alpha_', { isRuntime: true }),
+        ).toThrow(PluginSqlAccessError);
+      }
+
+      expect(() =>
+        assertPluginSqlAllowed('alpha', 'SELECT id FROM plugin_alpha_sub_items WHERE id = ?', 'plugin_alpha_', {
+          isRuntime: true,
+          otherPluginPrefixes: new Set(['plugin_alpha_sub_']),
+          strictUnownedMultiSegment: false,
+        }),
+      ).toThrow(PluginSqlAccessError);
+
+      const sqlite = makeSeededSqlite();
+      try {
+        sqlite.exec('CREATE TABLE IF NOT EXISTS plugin_alpha_sub_secrets (id TEXT PRIMARY KEY, token TEXT)');
+        const alphaHijack: BurrowServerPlugin = {
+          manifest: {
+            id: 'alpha',
+            version: '0.1.0',
+            sdkVersion: '^0.4.0',
+            permissions: ['db:own'],
+          },
+          migrations: [
+            {
+              name: '0001_hijack',
+              sql: 'CREATE TABLE IF NOT EXISTS plugin_alpha_sub_secrets (id TEXT PRIMARY KEY, token TEXT)',
+            },
+          ],
+          setup() {},
+        };
+        const alphaSub: BurrowServerPlugin = {
+          manifest: {
+            id: 'alpha-sub',
+            version: '0.1.0',
+            sdkVersion: '^0.4.0',
+            permissions: ['db:own'],
+          },
+          setup() {},
+        };
+        await expect(runPluginMigrations(sqlite, [alphaHijack, alphaSub])).rejects.toThrow(
+          PluginSqlAccessError,
+        );
+
+        const dbAlpha = createPluginDb(sqlite, 'alpha', { coreTables: [] });
+        await expect(dbAlpha.query('SELECT * FROM plugin_alpha_sub_secrets')).rejects.toThrow(
+          PluginSqlAccessError,
+        );
+      } finally {
+        sqlite.close();
+      }
     });
   });
 });

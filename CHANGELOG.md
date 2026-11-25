@@ -16,9 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+- **Audit Documentation & Test Parity Reconciliation (`READINESS-v2.md`, `HANDOFF.md`, `RED-TEAM.md`, `TEST-FIXES.md`, `tests/redteam/*`, `tests/security/*`)**: Synchronized audit documentation with the dedicated `LOGIN` `plugin_<id>_role` connection pool model, normalized repository-relative links, logged the `in-process-escape.test.ts` residual test extraction and test strengthening updates in `TEST-FIXES.md`, tightened PostgreSQL error-code assertions in `postgres-isolation.test.ts`, and added direct Node socket-pinning test coverage via `SafeFetchOptions.nodeAgent`.
 
 ### Security
+- **Cross-Plugin SQLite/D1 Ownership Hijack & Migration Lexer Hardening (`src/core/plugins/plugin-db.ts`, `migrations.ts`, `loader.ts`)**: Enforced single-owner and registered-prefix collision checks inside `registerPluginOwnedTables()` (registering namespaces only for `db:own` plugins), deferred migration `ownedTables` registration until after validation and execution, scanned FK `REFERENCES <table>` clauses and SQLite `NOT INDEXED` / `INDEXED BY` comma-joins in `extractTableReferencesFromCleaned()`, enforced core-table allowlists during migrations, forwarded `options` into all DDL `assertIdentifierPrefixed()` checks, and forwarded `db.from()` in `loader.ts`.
+- **`LocalStorageAdapter` Symlink & Directory Junction Escape Fix (`src/core/adapters/storage/local.ts`)**: Added segment-by-segment `lstat()` symlink detection and canonical `realpath()` root containment across `get()`, `put()`, `delete()`, `walk()`, and `pruneEmptyDirs()` so symlinks and Windows NTFS directory junctions cannot read or overwrite files outside the storage root.
+- **PostgreSQL `idle_in_transaction_session_timeout` & Cleanup (`src/core/plugins/postgres-isolation.ts`)**: Configured server-enforced `idle_in_transaction_session_timeout` (`15000ms` migrator / `5000ms` runtime) and reset it cleanly on connection release in `withPluginPostgresRole()`.
 
+## [0.6.4] - 2026-11-25
+
+### Fixed
+- **Audit Documentation & Test Parity Reconciliation (`READINESS-v2.md`, `HANDOFF.md`, `RED-TEAM.md`, `TEST-FIXES.md`, `tests/redteam/*`, `tests/security/*`)**: Synchronized audit documentation with the dedicated `LOGIN` `plugin_<id>_role` connection pool model, normalized repository-relative links, logged the `in-process-escape.test.ts` residual test extraction and test strengthening updates in `TEST-FIXES.md`, tightened PostgreSQL error-code assertions in `postgres-isolation.test.ts`, and added direct Node socket-pinning test coverage via `SafeFetchOptions.nodeAgent`.
+
+### Security
+- **Cross-Plugin SQLite/D1 Ownership Hijack & Migration Lexer Hardening (`src/core/plugins/plugin-db.ts`, `migrations.ts`, `loader.ts`)**: Enforced single-owner and registered-prefix collision checks inside `registerPluginOwnedTables()` (registering namespaces only for `db:own` plugins), deferred migration `ownedTables` registration until after validation and execution, scanned FK `REFERENCES <table>` clauses and SQLite `NOT INDEXED` / `INDEXED BY` comma-joins in `extractTableReferencesFromCleaned()`, enforced core-table allowlists during migrations, forwarded `options` into all DDL `assertIdentifierPrefixed()` checks, and forwarded `db.from()` in `loader.ts`.
+- **`LocalStorageAdapter` Symlink & Directory Junction Escape Fix (`src/core/adapters/storage/local.ts`)**: Added segment-by-segment `lstat()` symlink detection and canonical `realpath()` root containment across `get()`, `put()`, `delete()`, `walk()`, and `pruneEmptyDirs()` so symlinks and Windows NTFS directory junctions cannot read or overwrite files outside the storage root.
+- **PostgreSQL `idle_in_transaction_session_timeout` & Cleanup (`src/core/plugins/postgres-isolation.ts`)**: Configured server-enforced `idle_in_transaction_session_timeout` (`15000ms` migrator / `5000ms` runtime) and reset it cleanly on connection release in `withPluginPostgresRole()`.
 ## [0.6.3] - 2026-11-23
 
 ### Fixed
@@ -27,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **SDK & ESLint Licensing Audit (`docs/plugin-architecture/LICENSING.md`)**: Documented the MIT/AGPL boundary for `@burrow/sdk` and `@burrow/eslint-plugin`, verifying zero shared AGPL core code, sole authorship via git history and `CLA.md`, public npm `0.x` scope availability status, and the remaining legal sign-off item for direct core imports.
-- **Role-Pool PostgreSQL Plugin Isolation, Branded Query Builder & Security Test Suites (`postgres-isolation.ts`, `plugin-db.ts`, `packages/sdk`, `tests/security/*`, `docs/plugin-architecture/RESIDUAL-RISKS.md`)**: Added dedicated per-plugin `LOGIN` query roles (`plugin_<id>_role`) via `PluginPostgresPoolManager`, separate non-login schema owners (`plugin_<id>_owner`), short-lived migration roles (`plugin_<id>_migrator`), `db.from()` structured query builder and `WeakSet`-branded `sql` fragments in `@burrow/sdk`, promoted security regression suites in `tests/security/`, isolated in-process residual risk tests (`tests/redteam/residual/`, `vitest.residual.config.ts`), and published `RESIDUAL-RISKS.md`.
+- **Role-Pool PostgreSQL Plugin Isolation, Branded Query Builder & Security Test Suites (`postgres-isolation.ts`, `plugin-db.ts`, `packages/sdk`, `tests/security/*`, `docs/plugin-architecture/RESIDUAL-RISKS.md`)**: Added dedicated per-plugin `LOGIN` query roles (`plugin_<id>_role`) via `withPluginPostgresRole()` / `provisionPluginPostgresIsolation()`, separate non-login schema owners (`plugin_<id>_owner`), short-lived migration roles (`plugin_<id>_migrator`), `db.from()` structured query builder and `WeakSet`-branded `sql` fragments in `@burrow/sdk`, promoted security regression suites in `tests/security/`, isolated in-process residual risk tests (`tests/redteam/residual/`, `vitest.residual.config.ts`), and published `RESIDUAL-RISKS.md`.
 
 ### Changed
 - **Owner Decisions & Merge Runbook (`docs/plugin-architecture/DECISIONS.md`, `docs/plugin-architecture/HANDOFF.md`)**: Recorded confirmed core domain scope (`D5`), clean-room SDK licensing checks (`D3`), per-plugin Hono RPC client guidance, public npm `0.x` release readiness, and the red-team-first `--no-ff` merge and tag sequence.

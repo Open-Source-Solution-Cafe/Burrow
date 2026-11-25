@@ -1,6 +1,6 @@
 # Burrow Plugin Architecture — Implementation Handoff
 
-**Branch**: `feat/plugin-hardening` (lineage: `feat/plugin-architecture` → `feat/plugin-hardening`)  
+**Branch**: `fix/redteam-1` (lineage: `feat/plugin-architecture` → `feat/plugin-hardening` → `redteam/plugin-hardening-review` → `fix/redteam-1`)  
 **Baseline branches preserved untouched**: `Burrow` `master` (`c26d0ae`), downstream repo `main` (`d025c14`)  
 **Historical audit snapshot preserved**: `audit/plugin-readiness` (never rewritten; see [DECISIONS.md](./DECISIONS.md))
 
@@ -11,7 +11,7 @@
 Burrow exposes a safe-by-default, capability-scoped plugin architecture across server (Node PostgreSQL / SQLite & Cloudflare Workers D1) and web (Vite + React + TanStack Router) while keeping public Burrow 100% standalone and free of commercial coupling (`node scripts/check-decoupling.mjs` verified with 0 violations).
 
 ### Workspace & Package Split (`Burrow`)
-- **`packages/sdk` (`@burrow/sdk`)**: Publishable MIT-licensed contract package building ESM + `.d.ts` into `dist/` (`PluginManifest`, `coreTables`, `network`, `configKeys`, `sql` template tag, `db.table()`, `sanitizePluginHtml()`, `sanitizePluginProps()`, `ctx.defineRoute`, `ctx.requireRole`, `ctx.requireWorkspaceAccess`, `ctx.fetch`, `ctx.storage`, `ctx.log`, `ctx.config`, `formatPluginConsentSummary`). Plugins export their own route types + typed web client helpers (`hc<typeof pluginRouter>`) independently of core `AppType`. See [LICENSING.md](./LICENSING.md) for MIT/AGPL boundary checks.
+- **`packages/sdk` (`@burrow/sdk`)**: Publishable MIT-licensed contract package building ESM + `.d.ts` into `dist/` (`PluginManifest`, `coreTables`, `network`, `configKeys`, `WeakSet`-branded `sql` template tag and `db.table()` identifiers, `db.from()` structured query builder, `sanitizePluginHtml()`, `sanitizePluginProps()`, `ctx.defineRoute`, `ctx.requireRole`, `ctx.requireWorkspaceAccess`, `ctx.fetch`, `ctx.storage`, `ctx.log`, `ctx.config`, `formatPluginConsentSummary`). Plugins export their own route types + typed web client helpers (`hc<typeof pluginRouter>`) independently of core `AppType`. See [LICENSING.md](./LICENSING.md) for MIT/AGPL boundary checks.
 - **`packages/eslint-plugin` (`@burrow/eslint-plugin`)**: MIT static analysis rules (`no-unsafe-eval`, `no-unsanitized-html`, `no-raw-fetch`, `no-process-env`, `no-string-sql`, `no-child-process`) executed by `pnpm run plugin:validate`.
 - **`packages/core` (`@burrow/core`)**: Hono app composition (`createCoreApp`), `PluginEventBus`, `MentionSourceRegistry`, `plugin_migrations` runner, `PluginDb`, PostgreSQL database-enforced isolation (`provisionPluginPostgresIsolation`, `withPluginPostgresRole`), SSRF-hardened `safe-fetch`, prefix-scoped `plugin-storage`, secret-redacting `logger`, and `PLUGINS_DISABLED` (`*` or comma list; deprecated alias `DISABLED_PLUGINS`) + `/api/plugins` admin toggle UI.
 - **`packages/web` (`@burrow/web`)**: `mountBurrowWeb({ plugins })`, `createBurrowRouter(plugins)`, `WebPluginRegistryProvider`, prop sanitization across slots, card type selector (`QuickAddCard` / `CardPanel`), and Workspace Settings → Installed Plugins (`PluginsSection`).
@@ -35,17 +35,13 @@ Burrow exposes a safe-by-default, capability-scoped plugin architecture across s
 In `Burrow`:
 ```powershell
 pnpm --dir packages/sdk run build
-node scripts/check-version.mjs
-node scripts/check-sync.mjs
-node scripts/check-decoupling.mjs
-node scripts/check-licenses.mjs
-node scripts/check-basalt.mjs
-pnpm exec tsc -b
-pnpm exec eslint --max-warnings=0 .
-pnpm test
-pnpm run build
+pnpm run check:ci
+pnpm exec vitest run --config vitest.redteam.config.ts
+pnpm exec vitest run --config vitest.residual.config.ts
 pnpm exec wrangler deploy --dry-run
 ```
+
+*(Note: `pnpm run check:ci` runs `check-version`, `check-sync`, `build`, `check-basalt`, `check-decoupling`, `check-licenses`, `tsc -b`, `eslint --max-warnings=0 .`, and the full Unit + SQLite + PostgreSQL 17 + Cloudflare Worker test suite.)*
 
 In downstream workspace consumers:
 ```powershell
@@ -59,15 +55,15 @@ pnpm run build:web
 
 ## 4. Merge & Submodule Pinning Runbook (Critical)
 
-1. **Red-Team Gate First**:
-   - Run the red team against `feat/plugin-hardening`, fix all Critical and High findings, and re-run until clean before merging.
+1. **Red-Team & Security Gate First**:
+   - Run the red-team (`vitest.redteam.config.ts`), residual (`vitest.residual.config.ts`), and full `pnpm run check:ci` suites on `fix/redteam-1`, fix all Critical and High findings, and re-run until clean before opening PRs / merging.
 2. **NEVER Squash-Merge `Burrow`**:
-   - Downstream repositories pin exact `Burrow` commit SHAs in `vendor/burrow`. Squash-merging rewrites history and orphans any `vendor/burrow` gitlink referencing commits on `feat/plugin-hardening`.
-   - Always merge `Burrow`: `git switch master && git merge --no-ff feat/plugin-hardening` (never squash).
+   - Downstream repositories pin exact `Burrow` commit SHAs in `vendor/burrow`. Squash-merging rewrites history and orphans any `vendor/burrow` gitlink referencing commits on `fix/redteam-1`.
+   - Always merge `Burrow`: `git switch master && git merge --no-ff fix/redteam-1` (never squash).
 3. **Re-Pin Downstream Submodule After Merge**:
    - After merging `Burrow` onto `master`, record the merged commit hash (`MERGED_SHA`), update `vendor/burrow` in the downstream repo (`git -C vendor/burrow fetch origin ; git -C vendor/burrow checkout <MERGED_SHA>`), commit the updated gitlink + `pnpm-lock.yaml`, and verify with `node scripts/check-pinned-burrow.mjs`.
 4. **Merge Downstream with `--no-ff` & Tag Both Repos**:
-   - Merge downstream `feat/plugin-hardening` into `main` using `git merge --no-ff` and tag both repositories at their merge commits for clean rollback.
+   - Merge downstream `fix/redteam-1` into `main` using `git merge --no-ff` and tag both repositories at their merge commits for clean rollback.
 
 ---
 

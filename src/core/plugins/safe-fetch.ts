@@ -18,6 +18,8 @@ export interface SafeFetchOptions {
   fetchImpl?: typeof fetch;
   /** Optional DNS lookup resolver (injected in Node environments to block DNS rebinding). */
   resolveHostIps?: (hostname: string) => Promise<string[]>;
+  /** Optional Node http/https Agent (used by Node socket-pinned transport, e.g. deterministic lookup tests). */
+  nodeAgent?: unknown;
 }
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -164,6 +166,7 @@ async function fetchWithPinnedNodeSocket(
     timeoutMs: number;
     maxBytes: number;
     pluginId: string;
+    nodeAgent?: unknown;
   },
 ): Promise<Response> {
   const isHttps = targetUrl.protocol === 'https:';
@@ -195,6 +198,7 @@ async function fetchWithPinnedNodeSocket(
         headers: headerObj,
         timeout: init.timeoutMs,
         ...(isHttps ? { servername: targetUrl.hostname } : {}),
+        ...(init.nodeAgent !== undefined ? { agent: init.nodeAgent as any } : {}),
         lookup: (
           _hostname: string,
           opts: unknown,
@@ -374,6 +378,7 @@ export function createPluginFetch(
             timeoutMs,
             maxBytes,
             pluginId: manifest.id,
+            nodeAgent: options.nodeAgent,
           })
         : await (async () => {
             const resp = await fetchImpl(currentUrl.toString(), {

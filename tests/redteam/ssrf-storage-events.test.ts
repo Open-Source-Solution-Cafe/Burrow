@@ -1,6 +1,8 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { Duplex } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginManifest } from '@burrow/sdk';
 import { LocalStorageAdapter } from '../../src/core/adapters/storage/local';
@@ -97,6 +99,63 @@ describe('Category 5, 8, 9 — SSRF/Egress, Storage & Event Bus', () => {
       );
     });
 
+    it('pins resolved IP into node:http socket lookup via fetchWithPinnedNodeSocket when no fetchImpl is supplied', async () => {
+      const observedLookups: Array<{ host: string; address: string; family?: number }> = [];
+      let dnsCalls = 0;
+
+      const mockAgent = new (class extends http.Agent {
+        createConnection(options: http.ClientRequestArgs & { host?: string }, _cb?: unknown) {
+          const sock: any = new Duplex({
+            read() {},
+            write(_chunk, _enc, done) {
+              done();
+            },
+          });
+          sock.setTimeout = () => sock;
+          sock.setNoDelay = () => sock;
+          sock.setKeepAlive = () => sock;
+          sock.ref = () => sock;
+          sock.unref = () => sock;
+
+          const lookupFn = (options as any).lookup as
+            | ((
+                host: string,
+                opts: unknown,
+                cb: (err: NodeJS.ErrnoException | null, addr: string, family?: number) => void,
+              ) => void)
+            | undefined;
+          lookupFn?.(options.host ?? 'api.allowed.example', {}, (_err, address, family) => {
+            observedLookups.push({
+              host: String(options.host ?? ''),
+              address: String(address),
+              family,
+            });
+            queueMicrotask(() => {
+              sock.push('HTTP/1.1 200 OK\r\nContent-Length: 9\r\nConnection: close\r\n\r\npinned-ok');
+              sock.push(null);
+            });
+          });
+          return sock;
+        }
+      })({ keepAlive: false });
+
+      const safeFetch = createPluginFetch(baseManifest, {
+        nodeAgent: mockAgent,
+        resolveHostIps: async () => {
+          dnsCalls++;
+          return dnsCalls === 1 ? ['93.184.216.34'] : ['127.0.0.1'];
+        },
+      });
+
+      const res = await safeFetch('http://api.allowed.example/pinned');
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('pinned-ok');
+      expect(dnsCalls).toBe(1);
+      expect(observedLookups).toEqual([
+        { host: 'api.allowed.example', address: '93.184.216.34', family: 4 },
+      ]);
+    });
+
     it('strips Authorization/Cookie headers across cross-origin redirects between allowlisted hosts', async () => {
       const forwardedHeaders: Array<Record<string, string>> = [];
       const fetchImpl = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -181,23 +240,31 @@ describe('Category 5, 8, 9 — SSRF/Egress, Storage & Event Bus', () => {
 
     it('rejects symlinks inside LocalStorageAdapter directories so host files cannot be read or overwritten', async () => {
       const dir = makeTempDir();
-      const outsideSecret = path.join(dir, 'outside-secret.txt');
+      const outsideDir = path.join(dir, 'outside');
+      fs.mkdirSync(outsideDir, { recursive: true });
+      const outsideSecret = path.join(outsideDir, 'outside-secret.txt');
       fs.writeFileSync(outsideSecret, 'TOP-SECRET-HOST-FILE');
 
       const root = path.join(dir, 'uploads');
       const pluginDir = path.join(root, 'plugins', 'sym');
       fs.mkdirSync(pluginDir, { recursive: true });
       const linkPath = path.join(pluginDir, 'leak.txt');
+      let targetKey = 'leak.txt';
+      let writeEscapeKey = 'leak.txt';
       try {
         fs.symlinkSync(outsideSecret, linkPath);
       } catch {
-        // On Windows without Developer Mode/admin symlink privileges, skip symlink creation gracefully
-        return;
+        // On Windows without symlink file privilege, fall back to a directory junction (unprivileged NTFS escape)
+        const dirLinkPath = path.join(pluginDir, 'escape_dir');
+        fs.symlinkSync(outsideDir, dirLinkPath, process.platform === 'win32' ? 'junction' : 'dir');
+        targetKey = 'escape_dir/outside-secret.txt';
+        writeEscapeKey = 'escape_dir/overwritten.txt';
       }
 
       const adapter = new LocalStorageAdapter(root);
       const storage = createPluginStorage('sym', adapter);
-      await expect(storage.get('leak.txt')).rejects.toThrow();
+      await expect(storage.get(targetKey)).rejects.toThrow(/symlink|traversal/i);
+      await expect(storage.put(writeEscapeKey, 'pwned', 'text/plain')).rejects.toThrow(/symlink|traversal/i);
     });
 
     it('enforces a total per-plugin storage quota across multiple put() calls', async () => {

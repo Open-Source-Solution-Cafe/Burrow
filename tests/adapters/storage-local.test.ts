@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -116,5 +116,27 @@ describe('LocalStorageAdapter', () => {
     await expect(adapter.put('../evil.txt', data)).rejects.toThrow();
     await expect(adapter.put(`ok/${randomUUID()}/../../evil.txt`, data)).rejects.toThrow();
     await expect(adapter.get('..')).rejects.toThrow();
+  });
+
+  it('blocks reading, writing, and deleting through symlinks or directory junctions', async () => {
+    const outsideDir = await mkdtemp(join(tmpdir(), 'burrow-storage-outside-'));
+    try {
+      const outsideFile = join(outsideDir, 'host-secret.txt');
+      await writeFile(outsideFile, 'HOST-SECRET');
+
+      const scopedDir = join(root, 'plugins', 'sym');
+      await mkdir(scopedDir, { recursive: true });
+      const junctionDir = join(scopedDir, 'escape_dir');
+      await symlink(outsideDir, junctionDir, process.platform === 'win32' ? 'junction' : 'dir');
+
+      await expect(adapter.get('plugins/sym/escape_dir/host-secret.txt')).rejects.toThrow(/symlink/i);
+      await expect(
+        adapter.put('plugins/sym/escape_dir/overwrite.txt', new TextEncoder().encode('pwn')),
+      ).rejects.toThrow(/symlink/i);
+      await expect(adapter.delete('plugins/sym/escape_dir/host-secret.txt')).rejects.toThrow(/symlink/i);
+      expect(await adapter.listObjects()).not.toContain('plugins/sym/escape_dir/host-secret.txt');
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });

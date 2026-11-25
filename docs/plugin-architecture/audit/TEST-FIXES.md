@@ -43,3 +43,21 @@ This document logs every adjustment made to tests in `tests/redteam/` where a te
 - **Original assumption**: Asserted `!csp.includes('data:')` across the full `Content-Security-Policy` header after clearing the plugin's injected CSP.
 - **Change**: Verified `https://evil.example` is absent and asserted the `script-src` directive equals `"script-src 'self'"` and omits `data:` (without failing on core Burrow's intentional `img-src 'self' data:` / `font-src 'self' data:` directives).
 - **Justification**: `loader.ts` now unconditionally deletes any `Content-Security-Policy` header set by external plugins so core `securityHeaders` applies Burrow's standard policy (`script-src 'self'`).
+
+### 7. Residual In-Process Boundary Test Extraction (`tests/redteam/context-routes-authz.test.ts` → `tests/redteam/residual/in-process-escape.test.ts`)
+- **Files**:
+  - `Burrow/tests/redteam/context-routes-authz.test.ts` & `Burrow/tests/security/context-routes-authz.test.ts` (removed `'allows in-process ESM plugin code to read host process.env/globalThis directly (unfixable without V8 Isolate / OS container)'`)
+  - `Burrow/tests/redteam/residual/in-process-escape.test.ts` (new, executed under `vitest.residual.config.ts`)
+- **Original test**: Confirmed `globalThis.fetch` and `process.env` remain reachable from in-process JS modules (totaling 70 tests across `tests/redteam/*.test.ts`).
+- **Change**: Moved the test unmodified in intent into `tests/redteam/residual/in-process-escape.test.ts` so `tests/redteam/` and `tests/security/` contain purely fixable security regressions while `vitest.residual.config.ts` continues tracking the accepted in-process JS trust boundary alongside `docs/plugin-architecture/RESIDUAL-RISKS.md`.
+
+### 8. Strengthened Symlink / Node Socket-Pinning / PostgreSQL Error Assertions (`ssrf-storage-events.test.ts`, `sql-sqlite-lexer.test.ts`, `postgres-isolation.test.ts`)
+- **Files**:
+  - `Burrow/tests/redteam/ssrf-storage-events.test.ts` & `tests/security/ssrf-storage-events.test.ts`
+  - `Burrow/tests/redteam/sql-sqlite-lexer.test.ts` & `tests/security/sql-sqlite-lexer.test.ts`
+  - `Burrow/tests/redteam/postgres-isolation.test.ts` & `tests/security/postgres-isolation-node.test.ts`
+- **Changes**:
+  - Updated the `LocalStorageAdapter` symlink escape test to fall back to NTFS directory junctions on Windows (never silently skipping via early `return`) and assert symlink rejection across both `get()` and `put()`.
+  - Added a direct `fetchWithPinnedNodeSocket` test using `SafeFetchOptions.nodeAgent` (`node:http` socket lookup pinning) without `fetchImpl`.
+  - Tightened bare `.rejects.toThrow()` and `.catch(() => 'denied')` matchers in `postgres-isolation.test.ts` to specific regexes (`/ON DELETE CASCADE/i`, `/permission denied|42501/i`), separated lexer vs `{ skipLexerForTest: true }` DB-level FK probe assertions on `oraclePlugin`, and added `idle_in_transaction_session_timeout` verification.
+  - Added `sql-sqlite-lexer.test.ts` regressions for forged `__burrowSql` / `__burrowIdent` targeting owned tables with bound params, migration `REFERENCES` FKs (`DEFERRABLE`, `ON CONFLICT REPLACE`, `"user"`, `session`, `public_shares`), `NOT INDEXED` / `INDEXED BY` comma-joins, and `runPluginMigrations` cross-plugin `ownedTables` hijack rejection.
